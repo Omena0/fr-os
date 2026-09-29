@@ -1,0 +1,380 @@
+/*
+ * kprintf.c — formatted output built on a pluggable character sink.
+ *
+ * The formatter itself knows nothing about consoles. It emits characters one at
+ * a time through a function pointer, and the callers adapt that to whatever
+ * needs the text: the console, a fixed buffer, the panic dump, or a trace ring.
+ *
+ * Conversion is done into a fixed local buffer and emitted with the padding
+ * logic in one place, rather than each conversion handling its own width. That
+ * keeps the number parser free of presentation concerns and makes it
+ * testable.
+ */
+
+#include <kprintf.h>
+#include <kstring.h>
+
+struct fmt_state {
+	kvprintf_sink_t sink;
+	void *arg;
+	const char *fmt;
+	va_list ap;
+};
+
+/*
+ * Build a formatted representation of `value` in `base` into `buf`, returning
+ * its length. Digits are produced least-significant first and reversed here, so
+ * the conversion loop is a straight division with no lookahead.
+ */
+static size_t utoa(char *buf, size_t size, unsigned long long value,
+		   unsigned base, bool upper)
+{
+	static const char lower_digits[] = "0123456789abcdef";
+	static const char upper_digits[] = "0123456789ABCDEF";
+	const char *digits = upper ? upper_digits : lower_digits;
+	char tmp[24];
+	size_t n = 0;
+	size_t i;
+
+	do {
+		tmp[n++] = digits[value % base];
+		value /= base;
+	} while (value != 0 && n < sizeof(tmp));
+
+	for (i = 0; i < n && i < size; i++)
+		buf[i] = tmp[n - 1 - i];
+	return i;
+}
+
+/*
+ * Signed conversion. The sign is emitted separately so the caller can control
+ * whether it participates in zero padding: "-5" is zero-padded as "-0005", not
+ * "000-5".
+ */
+static size_t itoa(char *buf, size_t size, long long value,
+		   unsigned base, bool upper, bool *negative)
+{
+	unsigned long long mag;
+
+	if (value < 0) {
+		*negative = true;
+		/* Negate in unsigned space so LLONG_MIN does not overflow. */
+		mag = (unsigned long long)(-(value + 1)) + 1;
+	} else {
+		*negative = false;
+		mag = (unsigned long long)value;
+	}
+	return utoa(buf, size, mag, base, upper);
+}
+
+/*
+ * Emit `body` with the requested width, honouring precision (minimum digits,
+ * zero-filled for numbers; maximum characters for strings) and the left-justify
+ * flag.
+ */
+static void emit_padded(struct fmt_state *st, const char *body, size_t len,
+			size_t precision, bool has_precision, int width,
+			bool left_align, bool zero_pad, const char *sign)
+{
+	size_t sign_len = sign ? strlen(sign) : 0;
+	size_t total = len + sign_len;
+	size_t pad;
+
+	if (has_precision && precision > total)
+		total = precision;
+
+	if (width > 0 && (size_t)width > total)
+		pad = (size_t)width - total;
+	else
+		pad = 0;
+
+	if (sign && !left_align && zero_pad) {
+		/* Zero padding goes inside the sign: -00042, not 000-42. */
+		for (size_t i = 0; i < sign_len; i++)
+			st->sink(sign[i], st->arg);
+		for (size_t i = 0; i < pad; i++)
+			st->sink('0', st->arg);
+	} else {
+		if (!left_align)
+			for (size_t i = 0; i < pad; i++)
+				st->sink(' ', st->arg);
+		if (sign)
+			for (size_t i = 0; i < sign_len; i++)
+				st->sink(sign[i], st->arg);
+	}
+
+	for (size_t i = 0; i < len; i++)
+		st->sink(body[i], st->arg);
+
+	if (left_align)
+		for (size_t i = 0; i < pad; i++)
+			st->sink(' ', st->arg);
+}
+
+static void handle_string(struct fmt_state *st, int width, bool left_align,
+			  int precision, bool has_precision)
+{
+	const char *s = va_arg(st->ap, const char *);
+	size_t len;
+
+	if (!s)
+		s = "(null)";
+	len = strlen(s);
+	if (has_precision && precision >= 0 && (size_t)precision < len)
+		len = (size_t)precision;
+	emit_padded(st, s, len, 0, false, width, left_align, false, NULL);
+}
+
+static void handle_unsigned(struct fmt_state *st, unsigned long long value,
+			    unsigned base, bool upper, int width, bool left_align,
+			    bool zero_pad, int precision, bool has_precision)
+{
+	char buf[24];
+	size_t len = utoa(buf, sizeof(buf), value, base, upper);
+
+	emit_padded(st, buf, len, (size_t)precision, has_precision, width,
+		    left_align, zero_pad, NULL);
+}
+
+static void handle_signed(struct fmt_state *st, long long value, unsigned base,
+			  int width, bool left_align, bool zero_pad,
+			  int precision, bool has_precision)
+{
+	char buf[24];
+	bool negative = false;
+	size_t len = itoa(buf, sizeof(buf), value, base, false, &negative);
+
+	emit_padded(st, buf, len, (size_t)precision, has_precision, width,
+		    left_align, zero_pad, negative ? "-" : NULL);
+}
+
+void kvprintf(kvprintf_sink_t sink, void *arg, const char *fmt, va_list ap)
+{
+	struct fmt_state st = { .sink = sink, .arg = arg, .fmt = fmt };
+	const char *p = fmt;
+
+	/*
+	 * The caller's va_list is consumed by an unknown number of arguments, so
+	 * the walk happens on a private copy and the caller's is left untouched.
+	 * That is what lets a caller reuse one va_list across several sinks.
+	 *
+	 * va_copy rather than a plain assignment: va_list is an array type on
+	 * this ABI, so `st.ap = ap` would try to copy an array, which the
+	 * compiler rejects outright. Passing it to va_copy decays both operands
+	 * to the same struct pointer, which is what the copy actually means.
+	 */
+	va_copy(st.ap, ap);
+
+	while (*p) {
+		bool left_align = false, zero_pad = false;
+		bool has_precision = false;
+		int width = 0, precision = 0;
+		int longness = 0;   /* 0 = int, 1 = long, 2 = long long, -1 = short */
+		bool is_signed = true;
+
+		if (*p != '%') {
+			st.sink(*p++, st.arg);
+			continue;
+		}
+		p++;
+
+		/* Flags. A '-' must be checked before '0' because '-' also
+		 * terminates the flag loop. */
+		for (;;) {
+			if (*p == '-') {
+				left_align = true;
+				p++;
+			} else if (*p == '0') {
+				zero_pad = true;
+				p++;
+			} else if (*p == '+' || *p == ' ') {
+				p++;   /* accepted and ignored: no sign decoration */
+			} else if (*p == '#') {
+				p++;   /* accepted and ignored */
+			} else {
+				break;
+			}
+		}
+
+		/* Width. */
+		if (*p == '*') {
+			width = va_arg(st.ap, int);
+			p++;
+			if (width < 0) {
+				left_align = true;
+				width = -width;
+			}
+		} else {
+			while (*p >= '0' && *p <= '9')
+				width = width * 10 + (*p++ - '0');
+		}
+
+		/* Precision. For integers this is a minimum digit count; for
+		 * strings it is a maximum length. */
+		if (*p == '.') {
+			p++;
+			has_precision = true;
+			if (*p == '*') {
+				precision = va_arg(st.ap, int);
+				p++;
+			} else {
+				while (*p >= '0' && *p <= '9')
+					precision = precision * 10 + (*p++ - '0');
+			}
+		}
+
+		/* Length modifier. */
+		for (;;) {
+			if (*p == 'l') {
+				longness++;
+				p++;
+			} else if (*p == 'h') {
+				longness--;
+				p++;
+			} else if (*p == 'z') {
+				longness = 1;
+				p++;
+			} else {
+				break;
+			}
+		}
+
+		switch (*p) {
+		case 'd':
+		case 'i': {
+			long long v;
+
+			if (longness >= 2)
+				v = va_arg(st.ap, long long);
+			else if (longness == 1)
+				v = va_arg(st.ap, long);
+			else
+				v = va_arg(st.ap, int);
+			handle_signed(&st, v, 10, width, left_align, zero_pad,
+				      precision, has_precision);
+			break;
+		}
+		case 'u':
+		case 'x':
+		case 'X':
+		case 'o':
+		case 'b': {
+			unsigned long long v;
+			unsigned base;
+			bool upper = (*p == 'X');
+
+			switch (*p) {
+			case 'u': base = 10; break;
+			case 'o': base = 8; break;
+			case 'b': base = 2; break;
+			default:   base = 16; break;
+			}
+
+			if (longness >= 2)
+				v = va_arg(st.ap, unsigned long long);
+			else if (longness == 1)
+				v = va_arg(st.ap, unsigned long);
+			else
+				v = va_arg(st.ap, unsigned int);
+			handle_unsigned(&st, v, base, upper, width, left_align,
+					zero_pad, precision, has_precision);
+			break;
+		}
+		case 'c': {
+			char ch = (char)va_arg(st.ap, int);
+
+			emit_padded(&st, &ch, 1, 0, false, width, left_align,
+				    false, NULL);
+			break;
+		}
+		case 's':
+			handle_string(&st, width, left_align, precision,
+				      has_precision);
+			break;
+		case 'p': {
+			unsigned long long v = va_arg(st.ap, unsigned long long);
+			char buf[24];
+			size_t len = utoa(buf, sizeof(buf), v, 16, false);
+
+			/* Pointers are always 0x-prefixed and at least 16 hex
+			 * digits, because an abbreviated kernel address is a
+			 * debugging trap. */
+			size_t total = len + 2;
+			size_t pad = total < 18 ? 18 - total : 0;
+
+			st.sink('0', st.arg);
+			st.sink('x', st.arg);
+			for (size_t i = 0; i < pad; i++)
+				st.sink('0', st.arg);
+			for (size_t i = 0; i < len; i++)
+				st.sink(buf[i], st.arg);
+			break;
+		}
+		case '%':
+			st.sink('%', st.arg);
+			break;
+		case '\0':
+			/* Trailing '%': emit it rather than reading past the end. */
+			st.sink('%', st.arg);
+			continue;
+		default:
+			/* Unknown conversion: emit it verbatim so a typo in a
+			 * format string is visible in the output instead of
+			 * silently vanishing. */
+			st.sink('%', st.arg);
+			st.sink(*p, st.arg);
+			break;
+		}
+		if (*p)
+			p++;
+	}
+
+	va_end(st.ap);
+}
+
+/* ------------------------------------------------------------- buffer sink -- */
+
+struct buffer_sink {
+	char *buf;
+	size_t size;
+	size_t written;
+};
+
+static void buffer_putc(char c, void *arg)
+{
+	struct buffer_sink *bs = arg;
+
+	/* Always NUL-terminate. One byte is reserved for the terminator even when
+	 * the buffer is full, so ksnprintf output is always a valid C string. */
+	if (bs->written + 1 < bs->size)
+		bs->buf[bs->written] = c;
+	bs->written++;
+}
+
+void kvsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
+{
+	struct buffer_sink bs = { .buf = buf, .size = size, .written = 0 };
+
+	if (size == 0)
+		return;
+	kvprintf(buffer_putc, &bs, fmt, ap);
+	buf[bs.written < size ? bs.written : size - 1] = '\0';
+}
+
+ksize_t ksnprintf(char *buf, size_t size, const char *fmt, ...)
+{
+	va_list ap;
+	va_start(ap, fmt);
+	kvsnprintf(buf, size, fmt, ap);
+	va_end(ap);
+	return strlen(buf);
+}
+
+ksize_t kformat(char *buf, size_t size, const char *fmt, ...)
+{
+	va_list ap;
+	va_start(ap, fmt);
+	kvsnprintf(buf, size, fmt, ap);
+	va_end(ap);
+	return strlen(buf);
+}

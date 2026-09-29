@@ -1,0 +1,183 @@
+Create a plan for a linux-like OS. Use qemu.
+
+The OS should follow POSIX standards (broad and practical compatibility, including process, file, and IPC semantics).
+
+The system is a fully defined operating system with a complete kernel, userspace environment, and system services.
+
+---
+
+Implement:
+- bootloader
+- kernel
+- basic drivers
+- userspace GUI program
+
+The system must include a complete init system responsible for service lifecycle management and system initialization.
+
+---
+
+Kernel should have the following features:
+
+- Basic kernel features:
+  - Interrupt handling (fully preemptible interrupt architecture with per-CPU routing)
+  - Syscalls (stable, versioned ABI with low-latency dispatch path)
+  - Context switching (full thread state management including CPU registers, SIMD state, and scheduling metadata)
+  - Multiprocessing (fork(), exec(), wait(), clone(), full process isolation and lifecycle management)
+  - IPC (pipes and shared memory; pipes must be implemented as fast, low-copy or zero-copy ring-buffer based channels; shared memory must support explicit mapping and synchronization primitives)
+  - Dynamic module system (kernel modules with versioned symbols, dependency resolution, and runtime loading/unloading)
+  - Privileged mode enforcement (strict user/kernel separation with protected execution domains)
+
+---
+
+CPU scheduling:
+
+- Multi-Level Feedback Queue (MLFQ):
+  - dynamic priority adjustment based on CPU usage
+  - aging system preventing starvation
+  - per-thread CPU accounting
+  - I/O-aware priority boosting for interactive workloads
+
+- Real-time scheduler:
+  - strict priority-based preemptive scheduling above normal workloads
+  - optional deadline-aware scheduling behavior within real-time class
+
+- Interactivity model:
+  - explicit yielding supported (sched_yield)
+  - implicit yielding via blocking syscalls and I/O wait detection
+
+- Multi-core scheduling:
+  - per-core run queues
+  - global load balancing system
+  - CPU affinity support
+  - cache-aware task placement
+  - heterogeneous CPU performance awareness (core weighting model)
+
+- Thread-level scheduling:
+  - unified scheduling model for kernel and user threads
+  - work-stealing or equivalent load distribution mechanism across CPUs
+
+---
+
+Memory management:
+
+- Hierarchical allocator system:
+  - malloc() (userspace allocator backed by kernel-managed virtual memory)
+  - SLAB allocator (kernel object caching system)
+  - virtual memory allocator (address space region management)
+  - physical page allocator (buddy allocator)
+  - raw RAM management layer (frame tracking and allocation metadata)
+
+- Requirements:
+  - O(1) fast path allocation for common cases
+  - fragmentation avoidance via reuse-first allocation strategy
+  - reclaim only when reuse pools are exhausted
+  - strict separation of physical and virtual memory management domains
+  - per-CPU allocator caches for hot paths
+  - NUMA-aware allocation policies (logical or physical abstraction)
+  - huge page support (large page mappings where applicable)
+
+- Memory system services:
+  - memory compaction daemon
+  - page reclamation subsystem
+  - configurable overcommit policy system
+
+---
+
+File system:
+
+- ext4-compatible filesystem implementation (feature-complete subset with journaling and extents)
+- full virtual filesystem (VFS) abstraction layer supporting multiple filesystem types
+- filesystem cache system (page cache + inode cache + dentry cache)
+- mountable hierarchical filesystem rooted at "/"
+- consistent file descriptor abstraction across all filesystems
+
+---
+
+Device management:
+
+- Hybrid driver architecture:
+  - kernel-space minimal core drivers
+  - userspace drivers for most device functionality
+  - shared memory + event-based communication between kernel and userspace drivers
+
+- Supported device classes:
+  - display system (framebuffer or GPU abstraction layer)
+  - input devices (keyboard, mouse, pointer devices)
+  - storage devices (block device abstraction layer)
+
+- Dynamic driver system:
+  - hotplug support
+  - lazy activation (drivers only run when devices are present or required)
+  - driver isolation with failure containment for userspace drivers
+
+---
+
+Security:
+
+- Multi-user system:
+  - user, group, and permission model
+  - process ownership tracking and enforcement
+
+- Sandboxing:
+  - capability-based security model
+  - syscall filtering policy engine (seccomp-like behavior)
+
+- Memory and execution protection:
+  - ASLR (kernel and userspace)
+  - stack canaries
+  - NX (non-executable memory enforcement)
+  - hardened allocator with guard regions
+
+- Isolation mechanisms:
+  - optional namespace isolation (process, mount, and resource separation)
+  - controlled inter-process communication boundaries
+
+---
+
+Networking:
+
+- TCP/IP networking stack:
+  - full IPv4 support
+  - BSD-compatible socket API abstraction
+  - raw socket support
+  - interrupt-driven or polling-based network device handling
+
+- Networking architecture:
+  - socket subsystem integrated with kernel
+  - buffering strategy optimized for low-copy operation where possible
+  - support for user-space networking offload architectures
+
+---
+
+Misc:
+
+- Boot system:
+  - structured kernel logging system with severity levels
+  - early boot diagnostic output via serial interface
+  - kernel panic system with diagnostic dump output
+
+- Kernel libraries:
+  - internal kernel utility library (memory, strings, synchronization primitives)
+  - syscall interface library for userspace interaction
+
+- C standard library support:
+  - POSIX-compatible libc implementation
+  - syscall-backed standard IO, memory allocation, and threading primitives
+
+- Debugging and observability:
+  - filesystem mount access from userspace for debugging purposes
+  - kernel tracing and event logging subsystem
+  - performance counters and profiling interfaces
+
+---
+
+Performance mandate:
+- All subsystems must be designed with explicit fast-path optimization
+- Every subsystem must define:
+  - high-performance execution path
+  - degraded or fallback behavior under contention or failure conditions
+  - concurrency handling strategy under high load
+
+All components must integrate into a coherent operating system with consistent interfaces, stable ABI design, and strict subsystem boundaries.
+
+Write documentation under docs/

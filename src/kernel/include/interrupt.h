@@ -1,0 +1,228 @@
+/*
+ * interrupt.h — the vector table, the entry frame, and the exception policy.
+ *
+ * The design this implements is written down in
+ * docs/src/kernel/interrupt-handling.md; the frame layout below is the part
+ * that assembly depends on, so it is duplicated here in the same order and
+ * asserted against the stubs at compile time.
+ */
+#ifndef INTERRUPT_H
+#define INTERRUPT_H
+
+#include <types.h>
+
+/* ------------------------------------------------------------- vectors ----- */
+
+/* The first 32 are the architectural exceptions; the CPU defines these numbers
+ * and nothing may renumber them. */
+#define VECTOR_DIVIDE_ERROR            0
+#define VECTOR_DEBUG                   1
+#define VECTOR_NMI                     2
+#define VECTOR_BREAKPOINT              3
+#define VECTOR_OVERFLOW                4
+#define VECTOR_BOUND_RANGE             5
+#define VECTOR_INVALID_OPCODE          6
+#define VECTOR_DEVICE_NOT_AVAILABLE    7
+#define VECTOR_DOUBLE_FAULT            8
+#define VECTOR_INVALID_TSS            10
+#define VECTOR_SEGMENT_NOT_PRESENT    11
+#define VECTOR_STACK_FAULT            12
+#define VECTOR_GENERAL_PROTECTION     13
+#define VECTOR_PAGE_FAULT             14
+#define VECTOR_FP_ERROR               16
+#define VECTOR_ALIGNMENT_CHECK        17
+#define VECTOR_MACHINE_CHECK          18
+#define VECTOR_SIMD_FP_ERROR          19
+#define VECTOR_CONTROL_PROTECTION     21
+
+#define VECTOR_EXCEPTIONS_MAX         32
+
+/* The remapped 8259 lines. The BIOS leaves the PICs identity-mapped, which
+ * collides with the CPU's own exception vectors, so these are moved up to 32. */
+#define VECTOR_IRQ_BASE               32
+#define VECTOR_IRQ_TIMER              33
+#define VECTOR_IRQ_KEYBOARD           34
+#define VECTOR_IRQ_CASCADE            35
+#define VECTOR_IRQ_COM2               36
+#define VECTOR_IRQ_COM1               37
+#define VECTOR_IRQ_RTC                38
+#define VECTOR_IRQ_MAX                48
+
+/* The highest vector for which interrupt_entry.S generates a stub. Everything
+ * from here to 255 has a gate but no stub, and a vector that arrives without
+ * one is absorbed by the default handler. */
+#define VECTOR_STUB_MAX               64
+
+/* Local APIC device vectors, and the inter-processor interrupts. See
+ * "IPIs" in docs/src/kernel/interrupt-handling.md. */
+#define VECTOR_APIC_BASE              48
+#define VECTOR_IPI_BASE              240
+#define VECTOR_IPI_TLB_SHOOTDOWN     240
+#define VECTOR_IPI_RESCHEDULE        241
+#define VECTOR_IPI_HALT              242
+#define VECTOR_IPI_MAX               255
+#define VECTOR_SPURIOUS              255
+
+#define IDT_ENTRIES                   256
+
+/* ------------------------------------------------------------- IST --------- */
+
+/* IST indices, matching the CPU's IST1..IST7. Zero means "no dedicated stack",
+ * which is the normal case: the CPU then uses TSS.RSP0 for a privilege change,
+ * or leaves the interrupted stack alone if there is none. */
+#define IST_NONE         0
+#define IST_DOUBLE_FAULT 1
+#define IST_NMI          2
+
+/*
+ * IST stacks are not installed yet — see the comment on gdt_set_ist_stack() in
+ * gdt.c. The 32-bit IST field cannot address a page the high-half kernel can
+ * reach, so it needs a fixed low mapping that the VMM does not expose yet.
+ *
+ * idt.c asks this before putting an IST index in a gate. A gate that claims an
+ * IST slot with a null pointer behind it does not fall back to the normal
+ * stack; it takes a #PF on entry, which is worse than having no IST.
+ */
+void gdt_set_ist_stack(uint8_t ist, void *stack_top);
+bool gdt_have_ist(uint8_t ist);
+
+/* ------------------------------------------------- interrupt frame -------- */
+
+/*
+ * The frame the stubs build, mirrored exactly by interrupt_entry.S.
+ *
+ * Only the argument registers are saved. R12-R15, RBX and RBP are callee-saved,
+ * so the interrupted code already holds them somewhere safe and an interrupt
+ * handler that clobbers them would be a bug in the handler, not a lost value.
+ * RSP and RBP are excluded for the same reason.
+ *
+ * `rip` through `ss` are the CPU's own IRETQ frame. `rsp` and `ss` describe the
+ * interrupted context; they are only meaningful when `cs` shows ring 3, and for
+ * a kernel-origin interrupt the CPU pushes a zero SS.
+ */
+struct interrupt_frame {
+	uint64_t rdi;
+	uint64_t rsi;
+	uint64_t rdx;
+	uint64_t rcx;
+	uint64_t r8;
+	uint64_t r9;
+	uint64_t r10;
+	uint64_t r11;
+	uint64_t vector;
+	uint64_t error_code;
+	uint64_t rip;
+	uint64_t cs;
+	uint64_t rflags;
+	uint64_t rsp;
+	uint64_t ss;
+};
+
+/*
+ * The stubs live in interrupt_entry.S and cannot be given a C struct, so the
+ * layout is written twice — once as push order there, once as fields here.
+ * These asserts pin the C side against the documented numbers, and the
+ * .set FRAME_* block in the assembly is the same list; the build fails if a
+ * field is added or reordered in only one of the two.
+ */
+_Static_assert(offsetof(struct interrupt_frame, vector) == 64,
+	       "interrupt_entry.S pushes the vector at offset 64");
+_Static_assert(offsetof(struct interrupt_frame, error_code) == 72,
+	       "interrupt_entry.S pushes the error code at offset 72");
+_Static_assert(offsetof(struct interrupt_frame, rip) == 80,
+	       "interrupt_entry.S starts the CPU frame at offset 80");
+_Static_assert(offsetof(struct interrupt_frame, cs) == 88, "bad cs offset");
+_Static_assert(offsetof(struct interrupt_frame, rflags) == 96,
+	       "bad rflags offset");
+_Static_assert(offsetof(struct interrupt_frame, rsp) == 104, "bad rsp offset");
+_Static_assert(offsetof(struct interrupt_frame, ss) == 112, "bad ss offset");
+_Static_assert(sizeof(struct interrupt_frame) == 120,
+	       "the stub pops 16 bytes of vector and error code after 8 saved "
+	       "registers; a size change here has to change the stub too");
+
+/* Raised on ring 3 by a POP SS or interrupt, to prevent an attacker from
+ * slipping a second stack frame in between the two CPU pushes. */
+#define ERROR_CODE_INJECTED  (1ULL << 31)
+
+/* Page-fault error-code bits, per the SDM's table "Error code" in §14.5. */
+#define PF_PRESENT        (1ULL << 0)
+#define PF_WRITE          (1ULL << 1)
+#define PF_USER           (1ULL << 2)
+#define PF_RESERVED       (1ULL << 3)
+#define PF_FETCH          (1ULL << 4)
+#define PF_PROTECTION_KEY (1ULL << 5)
+
+static inline bool frame_from_user(const struct interrupt_frame *f)
+{
+	return (f->cs & 3) == 3;
+}
+
+/* ------------------------------------------------------------- API --------- */
+
+typedef void (*irq_handler_t)(struct interrupt_frame *frame);
+
+/*
+ * Install a handler for a vector.
+ *
+ * `ist` is an IST index or IST_NONE. `dpl` is the descriptor's privilege level:
+ * 0 for everything except VECTOR_BREAKPOINT, which is 3 so that user code can
+ * raise int3.
+ *
+ * Installing over an existing handler is a bug rather than a replacement. Two
+ * drivers both believing they own the timer is a race that shows up as a
+ * keyboard interrupt occasionally running the timer handler.
+ */
+void idt_set_handler(uint8_t vector, irq_handler_t handler, uint8_t ist,
+		     uint8_t dpl);
+
+/* Build the IDT, install the IST stacks, and load IDTR. */
+void idt_init(void);
+
+/* Install handlers for vectors 0-31. Must run before idt_init(). */
+void exceptions_init(void);
+
+/*
+ * Shared body of all 64 IRQ stubs. Called from assembly with interrupts already
+ * masked and RSP switched to the kernel stack.
+ */
+void interrupt_dispatch(struct interrupt_frame *frame);
+
+/*
+ * Ask for a reschedule at the next outermost interrupt exit. The timer driver
+ * calls this; the dispatch path consumes it. Kept as a request rather than a
+ * flag the driver pokes directly, so that the per-CPU indexing and the
+ * outermost-level check stay in one place.
+ */
+void idt_request_reschedule(void);
+
+/* The 8259 remap and EOI. Owned by this file because the vector layout above is
+ * what the remap exists to produce. */
+void pic_remap(void);
+void pic_eoi(uint8_t vector);
+
+/* ---------------------------------------------------------- signal hook ---- */
+
+/*
+ * Deliver a signal to the task described by `frame`. See "Exception Handling"
+ * in docs/src/kernel/interrupt-handling.md.
+ *
+ * Weak: the signal subsystem is specified but not yet implemented, and the
+ * kernel has to link without it. Until it exists the exception layer falls back
+ * to terminating the task. When it is implemented this call site picks it up
+ * with no change, which is the whole point of routing through one function.
+ */
+void process_deliver_signal(int signo, struct interrupt_frame *frame)
+	__attribute__((weak));
+
+/*
+ * Terminate the task described by `frame`. Used for exceptions that are fatal to
+ * the process when no signal machinery exists to report them more gracefully.
+ *
+ * Also weak, for the same reason. If neither hook is present the exception layer
+ * panics rather than continuing; see "Exception Handling" in
+ * docs/src/kernel/interrupt-handling.md.
+ */
+void process_terminate_from_fault(struct interrupt_frame *frame)
+	__attribute__((weak));
+
+#endif /* INTERRUPT_H */
