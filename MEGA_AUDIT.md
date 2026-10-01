@@ -1179,22 +1179,6 @@ F. LIBC + USERSPACE
      errno.h's claim ("the kernel's ELF loader sets up the thread pointer at
      clone time") and malloc.c's per-thread cache design are unfounded.
 
-120. [CRITICAL] src/libc/src/stdlib.c:250-263 — `insertion_sort` destroys the
-    >> STATUS: OPEN — still reproduces. src/libc/src/stdlib.c:247-260 still aliases `key`
-       to `base[i]` and only copies it back *after* the shifting loop has already
-       overwritten it. Transcribed verbatim into /tmp/kilo/docchk/is.c and
-       compiled: input `3 2 1` still yields `3 3 3`. The fix needs a temporary
-       buffer *before* the loop.
-
-     element being inserted. `char *key = base + i * size;` aliases base[i], and
-     the first shift does `memcpy(base + j*size, base + (j-1)*size, size)` with
-     j == i, overwriting *key*, which is never saved. Verified with a verbatim
-     transcription: input "3 2 1" -> output "3 3 3". Failure:
-     introsort_loop ends with insertion_sort (:388) and qsort returns immediately
-     for nmemb <= 16 (:394-397), so **every small sort is silently wrong** and
-     any large sort ends with a corrupted tail. Latent only because init.c does
-     not use qsort.
-
 123. [HIGH] src/libc/src/unistd.c:205-213 — sleep() returns uninitialised stack
     >> STATUS: OPEN — unistd.c:203-211 `sleep()` still declares `struct timespec rem;`
        uninitialised and returns `rem.tv_sec` on the success path. (`usleep()` now

@@ -259,6 +259,7 @@ tss_flush:
 	.type	ret_to_user, @function
 ret_to_user:
 	cld
+
 	pushq	$USER_DATA_SELECTOR		/* SS */
 	pushq	$USER_CODE64_SELECTOR		/* CS — index 5, the 64-bit user
 						 * code descriptor, NOT the 32-bit
@@ -268,6 +269,29 @@ ret_to_user:
 	pushq	%rdi				/* RIP */
 	pushq	%rsi				/* RSP */
 	addq	$8, %rsp			/* pad so the user lands 16-aligned */
+	/*
+	 * Zero the caller-saved registers -- here, *after* the frame has been
+	 * built, because RDX, RDI and RSI are its inputs and clearing them first
+	 * would frame iretq with RFLAGS=0, RIP=0 and RSP=0.
+	 *
+	 * A forked child reaches ring 3 through this path, and RAX is the entire
+	 * contract of fork's return value in the child: it must see 0. Nothing here
+	 * used to write RAX, so the child entered ring 3 carrying whatever the
+	 * kernel's call chain left there. `if (fork() == 0)` then took the parent
+	 * branch on the first fork after any call that returned non-zero.
+	 * fork_child_start's comment documented the contract correctly; nothing
+	 * implemented it.
+	 *
+	 * The rest of the caller-saved set is cleared because a process's first
+	 * entry to user code should not be able to observe kernel register
+	 * residue. R11 is left alone deliberately: it carries the interrupt
+	 * frame pointer, and this code has already finished with it.
+	 */
+	xorl	%eax, %eax
+	xorl	%ecx, %ecx
+	xorl	%r8d, %r8d
+	xorl	%r9d, %r9d
+	xorl	%r10d, %r10d
 	popq	%rbp				/* padding, discarded */
 	/*
 	 * Past this point the CPU is about to run on memory the process owns.
