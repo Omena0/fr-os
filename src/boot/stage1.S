@@ -87,18 +87,23 @@ _start:
 	call	serial_puts
 
 	/* Hand over. Stage2 builds its own GDT and stack; nothing here survives
-	 * the far jump except the drive byte, which is left on the stack for it.
+	 * the far jump except the drive number, which is left in the `drive` byte
+	 * for stage2 to pick up.
 	 *
-	 * A far jump does not push anything, so the drive has to be pushed here
-	 * explicitly. Stage2 pops it before it moves SP, so what it reads back is
-	 * this value and not the four bytes of stack that happen to follow it.
-	 * Stage2 also has a `stage1_boot_drive` byte of its own, but the two
-	 * images are linked separately and share no symbol table, so there is no
-	 * way for it to name ours -- the handover has to go through the one piece
-	 * of memory both of them can agree on without agreeing on a name. */
-	movb	drive, %al
-	pushw	%ax
-
+	 * A far jump does not push anything, so a stack handover would need an
+	 * explicit push before it -- and the MBR has no room for that. Four bytes
+	 * of `pushw` push the image past the 512-byte boundary, which does not
+	 * fail the build (the `.space` guard below only catches overflow in the
+	 * other direction) and instead makes the loader stop partway through
+	 * stage2 with a bare "INT 13h read failed".
+	 *
+	 * `drive` is therefore defined in the padding at a fixed offset rather
+	 * than alongside the other loop state, and costs no code at all: the
+	 * `movb %dl, drive` at the top of this file is the store. Stage2 also has
+	 * a `stage1_boot_drive` byte of its own, but the two images are linked
+	 * separately and share no symbol table, so there is no way for it to name
+	 * ours -- the handover has to go through the one piece of memory both can
+	 * agree on without agreeing on a name. See STAGE1_DRIVE_ADDR. */
 	ljmp	$0x0000, $STAGE2_ADDR
 
 	/* Every failure path ends here. There is no way to report back to
@@ -471,10 +476,7 @@ msg_readerr:
 	.asciz	"[boot] INT 13h read failed\r\n"
 
 	.align 2
-drive:
-	.byte	0
-	.align 2
-bx_spt:
+	bx_spt:
 	.word	1			/* sectors per track, for divw */
 bx_heads:
 	.word	1			/* head count, for divw */
@@ -495,8 +497,23 @@ chs_lba:
 
 	.equ com1, 0x3f8
 
+	/* The boot drive handover byte.
+	 *
+	 * Placed at a fixed offset in the padding rather than next to the other
+	 * loop state, because stage2 has to be able to find it by a hardcoded
+	 * address (the two images share no symbol table) and because the MBR has
+	 * no room for a stack push. Landing it exactly on STAGE1_DRIVE_ADDR means
+	 * the `movb %dl, drive` at the top of this file is the whole handover and
+	 * no extra instruction is spent on it.
+	 *
+	 * The padding below is what makes this free: it is bytes the image was
+	 * going to contain anyway, ahead of the signature. */
+	.org	STAGE1_DRIVE_ADDR - 0x7C00
+drive:
+	.byte	0
+
 	/* Pad to offset 510 and stamp the MBR signature. */
 	.globl mbr_tail
 mbr_tail:
-	.space	510 - (mbr_tail - _start)
+	.org	510
 	.byte	0x55, 0xaa

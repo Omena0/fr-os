@@ -20,29 +20,13 @@ stage2_entry:
 	cli
 	cld
 
-	/* The 16-bit C calling convention pushes arguments right to left, so the
-	 * single argument sits at the top of the stack on entry.
-	 *
-	 * The boot drive is kept on the stack rather than written to its global
-	 * here. In .code16 there is no 32-bit absolute addressing, so
-	 * `movb %al, stage1_boot_drive` would assemble as a 16-bit absolute
-	 * write, which the linker can only satisfy if the symbol happens to sit
-	 * below 64 KiB — true today and a silent memory corruption the day it is
-	 * not. Round-tripping through the stack costs two instructions and has no
-	 * such precondition; the store happens in 32-bit mode below. */
-	popw	%ax			/* boot drive from stage1 */
-
 	/* Set up a stack in low memory that stage1's image does not overlap.
 	 *
-	 * This has to come between the pop and the push, not before both. The
-	 * value stage1 pushed is on *its* stack; changing SP first and then
-	 * pushing would leave it behind, and the later `popl` would read four
-	 * bytes of whatever happens to sit at the new top of stack. The drive
-	 * then reads as 0, the kernel is handed a boot device number of zero,
-	 * and nothing downstream can tell that apart from a correct answer. */
+	 * Nothing is on the stack to preserve: the boot drive travels in a fixed
+	 * byte inside stage1's own image rather than as a pushed value, because
+	 * the MBR has no room for the push. See STAGE1_DRIVE_ADDR in
+	 * boot_layout.h. */
 	movw	$STAGE2_STACK_TOP, %sp
-
-	pushw	%ax			/* ... and put it on the new stack */
 
 	/*
 	 * Install a real IDT *before* the mode switch. Two reasons, and the
@@ -111,15 +95,47 @@ protected_mode:
 	movw	%ax, %gs
 	movw	%ax, %ss
 
-	/* Retire the boot drive from the 16-bit stack now that 32-bit addressing
-	 * is available. This has to happen before ESP is repointed. */
-	popl	%eax
-	movb	%al, stage1_boot_drive
+	/* Retire the boot drive. stage1 left it at a fixed offset in its own
+	 * image, which is still intact here: stage1 occupies 0x7C00-0x7DFF and
+	 * stage2 was loaded to 0x8000, so nothing has overwritten it.
+	 *
+	 * The operand has to be a dereference. `movb $addr, %al` moves the
+	 * address itself into AL, and 0x7DFC truncated to a byte is 0xFC -- a
+	 * perfectly plausible-looking drive number that is not the one stage1
+	 * wrote, and not a disk that exists either. */
+	movb	STAGE1_DRIVE_ADDR, %al
+
+	/* Park it in EDX rather than storing it straight away. stage1_boot_drive
+	 * lives in .bss, and the BSS is cleared a few instructions below with a
+	 * `rep stosb` that sources EAX. Storing the drive first meant the clear
+	 * overwrote it with zero every single boot, so the kernel was handed boot
+	 * device 0 -- the floppy controller -- and the first disk read of the
+	 * kernel image failed against a drive that was never there. EDX is
+	 * untouched by the clear (stosb only consumes EAX, ECX and EDI), so it
+	 * carries the value across safely. */
+	movb	%al, %dl
 
 	/* The CPU does not switch stacks on a far jump, so the 16-bit stack
 	 * pointer is still live. Point ESP at a 32-bit stack allocated above the
-	 * stage2 image. */
-	movl	$stack32, %esp
+	 * stage2 image.
+	 *
+	 * At the *top* of it. x86 stacks grow down, so `movl $stack32, %esp` puts
+	 * the stack pointer at the lowest address of the region and every push
+	 * lands outside it, below and then in the middle of .rodata. The damage is
+	 * not a crash, because the addresses below the stack are perfectly good
+	 * memory holding perfectly good code and data: it is silent, and it
+	 * appears as whatever the loader overwrote being wrong.
+	 *
+	 * The hex digit table is what it appeared as. stack32 sits at the very
+	 * bottom of .bss, which puts the first 84 bytes of downward growth exactly
+	 * across the last 84 bytes of .rodata -- and the last string in .rodata is
+	 * serial_puthex's "0123456789abcdef". So serial_puthex printed its own
+	 * lookup table, byte for byte, in place of the digits: 0xA5 where the
+	 * poison-filled E820 entry wanted a '0', and whatever else was on the
+	 * stack where the rest wanted a '9'. Every number the loader printed was
+	 * wrong, the firmware's own return values read as noise, and nothing
+	 * faulted. */
+	movl	$stack32_top, %esp
 
 	/* Stage2 is loaded by sector rather than through an ELF loader, so the
 	 * linker-emitted BSS bounds are the only record of what needs zeroing.
@@ -132,6 +148,10 @@ protected_mode:
 	cld
 	rep stosb
 
+	/* Safe to store now that the BSS has been zeroed. See the note on the
+	 * `movb %al, %dl` above for why this could not come earlier. */
+	movb	%dl, stage1_boot_drive
+
 	call	stage2_start
 
 	/* stage2_start only returns if the loader gave up. */
@@ -141,17 +161,517 @@ stage2_halt:
 1:	hlt
 	jmp	1b
 
+/* --------------------------------------------------------- BIOS trampoline --- */
+/*
+ * Calling the firmware from 32-bit protected mode.
+ *
+ * The only correct way to reach a BIOS service from protected mode is to leave
+ * protected mode, run the interrupt in real mode, and come back. Two other
+ * designs look workable and are not:
+ *
+ *   1. `int $0x15` in protected mode. Rejected outright: whether an interrupt
+ *      consults the IDT or the real-mode IVT is decided by CR0.PE and by nothing
+ *      else, so with PE set every `int` is an IDT reference. The 16-bit stub
+ *      below issues `int`, but it does so from real mode, where the IVT is live.
+ *
+ *   2. Far-call the handler the IVT names, giving it a code descriptor whose
+ *      base is the handler's linear address. This reaches the firmware and even
+ *      runs its first instructions, which is exactly what makes it so
+ *      deceptive: the far call succeeds and the CPU begins executing real BIOS
+ *      code. It then dies on the handler's second instruction. SeaBIOS's entry
+ *      stub is
+ *
+ *          cli
+ *          cld
+ *          pushw %ds
+ *          pushl %eax
+ *          movl $0xde80, %eax
+ *          movw %ax, %ds        <-- #GP, error code 0xDE80
+ *
+ *      and that `mov %ax, %ds` is a real-mode segment load. Under protected
+ *      mode the value in AX is a selector, 0xDE80 is not one, and the CPU
+ *      raises #GP. No amount of fixing the call frame helps: the firmware is
+ *      written to run in real mode, loads real-mode segment values, and assumes
+ *      segment arithmetic means `segment << 4`. There is no GDT arrangement that
+ *      makes that work, because the value loaded is not under our control.
+ *
+ * So the round trip is not a stylistic preference. It is the only shape the
+ * hardware supports, and the fault it replaces is unrecoverable by patching.
+ *
+ * The sequence, and what each step is actually required to do:
+ *
+ *   - Save CR0, EFLAGS, ESP and the segment registers. CR0.PE is about to be
+ *     cleared, and the BIOS is entitled to change every register it is given;
+ *     the only state that must survive is the one it is not going to restore.
+ *   - Clear CR0.PE. Doing this while interrupts are disabled matters: an
+ *     interrupt taken between here and the far jump would be decoded through
+ *     stage2's 32-bit IDT, which is still installed, and reported as a fault in
+ *     stage2 rather than handled.
+ *   - Load the real-mode segment registers. CR0.PE going away does not clear the
+ *     descriptor caches, so DS/ES/FS/GS/SS still name the 32-bit flat selectors
+ *     until they are reloaded. Leaving them would make the 16-bit code index
+ *     through a 4 GiB-limit descriptor and quietly read the wrong memory.
+ *   - Switch to a 16-bit stack below 64 KiB. SS:SP is a real-mode pair, so SP
+ *     has to fit in 16 bits or the firmware's own pushes land off the top of
+ *     memory.
+ *   - Far jump to 16-bit code with a real-mode CS, then `int $n`. Being in real
+ *     mode is what makes the `int` an IVT reference, and the far jump is what
+ *     flushes the stale descriptor state out of CS.
+ *   - The handler's `iret` returns to the label after the `int`. Set CR0.PE
+ *     again and far jump back to 32-bit code, which reloads CS from the GDT and
+ *     drops the real-mode CS cache along with it.
+ *   - Reload the flat segments and restore the saved registers, so the C caller
+ *     sees the same stack pointer and flags it left behind.
+ *
+ * Interrupts stay disabled across the whole trip. The firmware is free to enable
+ * them internally, but the flags it `iret`s back with are the ones we pushed, so
+ * the round trip cannot leave the loader re-entrant on a BIOS call in progress.
+ */
+.code32
+	.globl bios_call
+	.type bios_call, @function
+/*
+ * cdecl wrapper: bios_call(vector, a, b, c, d, si, di, es)
+ *
+ * a..d are EAX, EBX, ECX and EDX in that order. They are named after the
+ * registers rather than after the services' own field names because the
+ * services disagree about which register carries what, and a wrapper that
+ * renumbered them is how the E820 call ended up with its arguments in the
+ * wrong places for months.
+ *
+ * A real function call rather than inline asm at the call site, and that is the
+ * whole point of it. GCC's rule for inline asm is that a register named as an
+ * input is assumed to survive unless it is also an output or a clobber, and
+ * naming it as both is a constraint error -- so call sites that set up the
+ * firmware's registers through input constraints left the compiler believing
+ * those registers were intact across a BIOS call that destroys every one of
+ * them. The corrupted live values showed up as an E820 map full of nonsense.
+ * An ordinary call states the truth: everything caller-saved is destroyed.
+ *
+ * SI and DI are separate parameters because the services disagree about which
+ * one carries a buffer address -- INT 13h/AH=42h wants DS:SI, VBE wants ES:DI.
+ *
+ * ES is a parameter for the same reason seen from the other side: the two
+ * services that take ES:DI would be pinned to buffers under 64 KiB if the
+ * trampoline zeroed it, and the E820 map is at 0x90000.
+ *
+ * The vector is stored rather than passed in a register because the 16-bit stub
+ * reads it from an absolute address after the segment registers have been
+ * reloaded for real mode; a register's meaning changes across the mode switch.
+ *
+ * EBX, ESI and EDI are saved and restored, and this is not politeness. Being an
+ * ordinary extern function, this one obeys cdecl, and cdecl makes those three
+ * callee-saved: GCC is entitled to keep a live value in any of them across the
+ * call, and does. This code uses all three as scratch while setting up the
+ * firmware's arguments up, and never put them back, so every one of those live
+ * values was destroyed by the call.
+ *
+ * The damage did not look like a broken E820 call. The E820 loop keeps the
+ * address of the entry it is asking for in EBX, and reads the entry's length
+ * and type back through it after the call; with EBX holding the firmware's
+ * return value instead, the map's first eight bytes came out right and
+ * everything after them came out of unrelated memory. The base address is
+ * reloaded from a constant, so entry zero read back with a correct base and a
+ * length made of whatever followed it, and the loader printed a memory map
+ * built out of the interrupt vector table.
+ *
+ * EBP and ESP need nothing here: the trampoline already saves and restores
+ * both, and this function does not touch EBP.
+ *
+ * The three are pushed before the first argument is read, not after. They are
+ * the registers the arguments are loaded into, so a save taken once the
+ * loading is done has saved the wrong values: the caller's EBX is already gone,
+ * replaced by the entry index the firmware wanted, and what comes back is that
+ * index rather than what the caller had. The argument offsets below are shifted
+ * by the twelve bytes these three pushes occupy.
+ */
+bios_call:
+	pushl	%ebx
+	pushl	%esi
+	pushl	%edi
+
+	movl	16(%esp), %eax		/* vector */
+	movw	%ax, BIOS_VECTOR_ADDR
+	shll	$2, %eax		/* IVT entries are four bytes */
+	movw	(%eax), %dx		/* handler offset  */
+	movw	2(%eax), %cx		/* handler segment */
+	movw	%dx, BIOS_IVT_PTR
+	movw	%cx, BIOS_IVT_PTR + 2
+	movl	20(%esp), %eax		/* AH/AL */
+	movl	24(%esp), %ebx		/* BH/BL */
+	movl	28(%esp), %ecx		/* CH/CL */
+	movl	32(%esp), %edx		/* DH/DL */
+	movl	36(%esp), %esi		/* SI */
+	movl	40(%esp), %edi		/* DI */
+	movl	44(%esp), %eax		/* ES */
+	movw	%ax, bios_es_seg
+	movl	20(%esp), %eax		/* AH/AL, again: EAX was the scratch */
+
+	call	bios_trampoline		/* returns the firmware's EBX:EAX */
+
+	popl	%edi
+	popl	%esi
+	popl	%ebx
+	ret
+	.size bios_call, . - bios_call
+
+	.globl bios_trampoline
+
+/*
+ * Enter with the vector number already written to BIOS_VECTOR_ADDR. That is how
+ * it reaches the 16-bit side: the stub can only name an absolute address below
+ * 64 KiB, and it has to read the vector after the segment registers have been
+ * reloaded for real mode, so the value cannot travel in a register whose
+ * meaning the mode switch changes.
+ *
+ * Every register other than ESP, EBP and the segment registers is destroyed,
+ * which is the firmware's doing, not this code's. Callers reach this through
+ * bios_call above, which is what tells the compiler so.
+ *
+ * The return is the firmware's EBX:EAX as a 64-bit value, because EAX alone
+ * is not enough for the services that walk a list: they return the same EAX
+ * every time and put the position in EBX.
+ */
+bios_trampoline:
+	cli
+	cld
+
+	movl	%esp, bios_saved_esp
+	movl	%ebp, bios_saved_ebp
+	movl	%eax, bios_saved_eax		/* the firmware's first argument */
+	movw	%ds, bios_saved_ds
+	movw	%es, bios_saved_es
+	movl	%cr0, %eax
+	movl	%eax, bios_saved_cr0
+
+	/* The first step is not the mode change; it is the code segment change.
+	 * The far jump below loads a 16-bit code descriptor from the GDT, so from
+	 * here on the CPU fetches and decodes 16-bit instructions -- while PE is
+	 * still set, so the selector really is a GDT selector and the descriptor
+	 * really is the one the table names.
+	 *
+	 * Clearing CR0.PE first, and far jumping into real mode afterwards, is the
+	 * shape this used to have and it cannot work. PE and the code segment
+	 * register are independent: clearing PE leaves CS's cached descriptor
+	 * exactly as it was, D bit included, and it is that descriptor's D bit the
+	 * CPU decodes the next instruction with. CS is still the 32-bit flat
+	 * selector stage2 entered through, so every instruction after the CR0
+	 * write is decoded as 32-bit code. The stub below, written for 16-bit,
+	 * then decodes into something else entirely: `movw $0xE9, %dx` becomes a
+	 * five-byte `mov $0xE9, %edx` that swallows the two bytes after it, the
+	 * `cmpw` pairs vanish into the middle of an immediate, and the `int` is
+	 * reached or not reached by arithmetic rather than by design. Nothing
+	 * faults -- it is all valid 32-bit code somewhere else in the loader -- so
+	 * the round trip simply never returns, and the loader is left reporting an
+	 * E820 map it never filled in. On QEMU the far jump in that position is
+	 * read as the 32-bit seven-byte form, so the segment it loads is 0x00A1
+	 * and the CPU carries on in real mode at 0xA1:0x80C9. On hardware that
+	 * keeps D set the far jump lands on the right offset and still decodes
+	 * 32-bit, which is no better.
+	 *
+	 * A GDT far jump reloads the descriptor, and that is the only thing that
+	 * does. So the order is: reload CS as 16-bit, then clear PE. */
+	ljmp	$BIOS_RM_CODE_SEL, $bios_real_mode
+
+	.code16
+bios_real_mode:
+	/* Now executing 16-bit instructions. Clear PE. The CR0 moves are written as
+	 * bytes for the same reason as the ones in stage2_entry: GAS assembles
+	 * `movl %cr0, %eax` in .code16 as `0f 20 c0`, with no operand-size prefix,
+	 * and the CPU then decodes that as a *16-bit* operand move. Only AX would
+	 * be loaded, the upper half of EAX would be left holding whatever the
+	 * firmware returned, and the matching `movl %eax, %cr0` would store sixteen
+	 * bits of a control register that needs all of them -- so PE would never
+	 * come back, and the far jump at the end of the trip would be taken with
+	 * PE clear, where selector 0x08 means segment 0x08 rather than GDT index 1
+	 * and the CPU would resume at 0x80:0x80F0 in the middle of stage2's text.
+	 *
+	 * `orl $1, %eax` does get its prefix from GAS, because the immediate form
+	 * needs one; the control-register moves do not, and they are exactly the
+	 * two instructions that clear and set PE. */
+	.byte	0x66, 0x0f, 0x20, 0xc0		/* movl %cr0, %eax           */
+	.byte	0x66, 0x83, 0xe0, 0xfe		/* andl $0xfffffffe, %eax    */
+	.byte	0x66, 0x0f, 0x22, 0xc0		/* movl %eax, %cr0           */
+
+	/* Real mode now, but CS is still 0x18 -- a GDT selector, loaded while PE
+	 * was set, with base 0. The base is what we want; the *value* is not, and
+	 * the instruction that takes it is the interrupt three lines below.
+	 *
+	 * `int $n` pushes FLAGS, CS and IP, and the firmware's `iret` pops them.
+	 * In real mode the popped CS is a segment, not a selector, so it would be
+	 * resumed at 0x180:0x80e1 instead of 0:0x80e1 -- 0x18 pages further on,
+	 * in whatever stage2 happens to have there. Nothing faults; the CPU simply
+	 * executes whatever it finds, which is how a loader can print a memory map
+	 * and then carry on through code it was never meant to run.
+	 *
+	 * Only a far jump can put a real-mode value in CS, and `mov %ax, %cs` does
+	 * not exist. This one is also what keeps 16-bit decoding: a far jump
+	 * reloads the descriptor, and a real-mode segment always decodes with D
+	 * clear. The form is the five-byte one because CS's cached descriptor --
+	 * the 16-bit GDT entry the jump above installed -- has D clear, which is
+	 * what decides whether the offset is 16 or 32 bits wide.
+	 *
+	 * The reloads of the other segments have to come after PE is clear, and for
+	 * the same reason this one does: loading a zero into one of them while PE is
+	 * set loads the *null* descriptor, whose limit is zero, and the first
+	 * 16-bit access through it faults. After the mode change the same store is
+	 * a real-mode segment of base 0 and a 64 KiB limit. */
+	ljmp	$0x0000, $bios_real_mode_flat
+
+bios_real_mode_flat:
+	xorw	%ax, %ax
+	movw	%ax, %ds
+	movw	%ax, %fs
+	movw	%ax, %gs
+	movw	%ax, %ss
+
+	/* ES is the one segment the caller gets to choose, because two of the
+	 * services disagree about where a buffer pointer lives: INT 15h/AH=E820h
+	 * takes ES:DI, and so does VBE, while INT 13h/AH=42h takes DS:SI. With
+	 * ES pinned at zero the first two can only name buffers under 64 KiB, and
+	 * the E820 map is at 0x90000.
+	 *
+	 * A 16-bit `mov` is enough here and deliberate: the value is a real-mode
+	 * segment, 16 bits by construction, and the high half of EAX is the
+	 * firmware's argument rather than part of a segment. */
+	movw	bios_es_seg, %ax
+	movw	%ax, %es
+
+	/* EAX is restored here rather than left in a register across the mode
+	 * switch, and it has to be: reading CR0 on the way out needs a general
+	 * register, and EAX is the one that is about to be handed to the firmware.
+	 * The value that survives is CR0, not the function number, so the handler
+	 * is entered with EAX = 0x10 and finds no function it recognises --
+	 * INT 15h/AH=00h, "get system type", which SeaBIOS answers by opening the
+	 * A20 gate and returning. Nothing faults, nothing is logged, and the caller
+	 * reads back a buffer the firmware never wrote.
+	 *
+	 * That is what the E820 query looked like for a long time: the map came
+	 * back holding the 0xA5 the caller had poisoned it with, once per
+	 * iteration, until the entry cap, and every one of those iterations had
+	 * quietly asked the firmware for the machine type instead.
+	 *
+	 * The register is saved whole rather than as AX, because a 16-bit move
+	 * here would only restore half of it and the upper half is CR0's.
+	 *
+	 * The encoding is spelled out for the reason given on the store side
+	 * below: 0x66 makes the operand 32 bits and 0x67 makes the address 32
+	 * bits, which together are what `movl` means and neither of which .code16
+	 * supplies on its own. */
+	.byte	0x67, 0x66, 0xa1		/* movl bios_saved_eax, %eax    */
+	.long	bios_saved_eax
+
+	/* Switch to a 16-bit stack below 64 KiB. SS:SP is a real-mode pair, so SP
+	 * has to fit in 16 bits or the firmware's own pushes land off the top of
+	 * memory. */
+	movw	$BIOS_RM_STACK_TOP, %sp
+	movw	%sp, %bp
+
+	/* Take the firmware's interrupt for the vector the C caller stored at
+	 * BIOS_VECTOR_ADDR, by far-calling the vector *through the IVT entry* rather
+	 * than with an `int`.
+	 *
+	 * `int $n` is the obvious instruction and it is the wrong one here. QEMU
+	 * does not take the vector from the real-mode interrupt vector table at
+	 * physical zero: with a non-zero IDTR base left over from stage2's own
+	 * protected-mode setup, the handler address it dispatches to comes from
+	 * somewhere else entirely. It was measured, not guessed -- with a breakpoint
+	 * on the `int` and IVT[0x0f] patched to `0000:4321` from the debugger, the
+	 * CPU still left for `0000:8e00`, which is stage2's own exception-reporting
+	 * stub and not a firmware address at all. Nothing was even printed by the
+	 * firmware: stage2's stub picked the call up, and its reporter ran stage2's
+	 * 32-bit code in 16-bit decoding until it wandered into a string-printing
+	 * loop that has no end. The visible symptom was a memory map that started
+	 * printing and then degenerated into megabytes of garbage.
+	 *
+	 * Reading the entry and calling it directly has no such ambiguity. The IVT
+	 * entry *is* the handler address, the address computation is explicit, and
+	 * the handler returns exactly where `int` would have left it.
+	 *
+	 * `pushfw` is part of that. The firmware's entry stub ends with `iret`, not
+	 * `retf`: it saves the caller's IP, CS and flags in its own register block and
+	 * then pops all three off the caller's stack, which is precisely the shape
+	 * `int` leaves behind. A far call only pushes two of the three words, so
+	 * without this the `iret` would take the third from whatever happened to be
+	 * below the frame -- stale stack contents, and a different set of flag bits on
+	 * the way out than on the way in.
+	 *
+	 * The address itself is precomputed on the 32-bit side and left in memory,
+	 * because there is no register here that can be used to compute it. Every one
+	 * of AX, BX, CX, DX, SI and DI is about to be handed to the firmware as an
+	 * input, and 16-bit arithmetic on one of them corrupts the call rather than
+	 * the address: `movw $15, %bx` leaves EBX as 0x534D003C rather than
+	 * 0x534D4150, and INT 15h/AH=E820 rejects anything but the exact 'SMAP'
+	 * signature, so the request is refused and the entry buffer is never written.
+	 * That is what an earlier version of this did, and it is why the E820 map came
+	 * back holding the 0xA5 the caller had pre-filled it with.
+	 *
+	 * BIOS_IVT_PTR holds the handler address, as an offset word followed by a
+	 * segment word -- the shape `call far` expects to find in memory. bios_call
+	 * resolves it from the IVT before the mode switch, using physical zero,
+	 * which the flat 32-bit segments can reach with paging off. The three
+	 * registers it spends doing so are loaded again from the stack immediately
+	 * afterwards, so nothing reaches the firmware disturbed. It is below 64 KiB
+	 * like the vector itself, so the 16-bit side can name it with a plain
+	 * absolute far call, and the link-time assert in stage2.ld covers it. */
+	pushfw
+	lcallw	*BIOS_IVT_PTR
+
+	/* Park the firmware's return values before anything else touches a
+	 * register.
+	 *
+	 * The three instructions after this one read CR0 into EAX, and the
+	 * caller's answer arrives in EAX. The first version of this trampoline
+	 * simply let the CR0 read win, so every BIOS call returned 0x10 -- the
+	 * value of the control register -- whatever the firmware had said. With
+	 * the E820 query that reads as "the call was refused", because the
+	 * signature it checks for is not 0x10, and there is no way to tell from
+	 * out here whether the firmware refused the call or the trampoline ate
+	 * its answer.
+	 *
+	 * Both words are written, not just AX: the services are 16-bit, but the
+	 * value is handed back in a 32-bit register and there is no reason to
+	 * depend on the upper half happening to be zero.
+	 *
+	 * The encodings are spelled out because both the operand size and the
+	 * address size default to 16 bits in .code16, and only the first of them
+	 * is what `movl` asks for. `movl bios_ret_eax, %eax` assembles to 66 A3
+	 * with a *two*-byte address: the operand is 32 bits, the address is not,
+	 * and the linker's remaining two address bytes fall through to be
+	 * executed as the next instruction -- `add %al, (%bx)`, corrupting
+	 * whatever EBX pointed at, once per BIOS call. 0x67 in front selects the
+	 * 32-bit address, which is what the four relocation bytes are for. */
+	.byte	0x67, 0x66, 0xa3		/* movl %eax, bios_ret_eax       */
+	.long	bios_ret_eax
+	.byte	0x67, 0x66, 0x89, 0x1d	/* movl %ebx, bios_ret_ebx       */
+	.long	bios_ret_ebx
+
+	/*
+	 * ECX and EDX are saved for the same reason and by the same encoding.
+	 *
+	 * They are not part of the return value -- EAX and EBX are, packed into the
+	 * 64-bit one -- because no service this loader calls answers in them. One
+	 * does put its answer *in* them: INT 13h/AH=08h reports the drive geometry
+	 * in CL, CH and DH, and there is nowhere else to read it from. Without
+	 * these two stores the only way to get a geometry is to have stage1 write
+	 * one into its nine spare bytes, which does not fit.
+	 */
+	.byte	0x67, 0x66, 0x89, 0x0d	/* movl %ecx, bios_ret_ecx       */
+	.long	bios_ret_ecx
+	.byte	0x67, 0x66, 0x89, 0x15	/* movl %edx, bios_ret_edx       */
+	.long	bios_ret_edx
+
+	/*
+	 * Tripwires, written on the first instructions after the firmware's iret
+	 * has returned. Both words are zeroed by diag_tick() on the C side before
+	 * each call, so a call that never comes back leaves them zero while a
+	 * normal return makes both non-zero.
+	 *
+	 * bios_post_sp is the interesting one. It is compared against
+	 * BIOS_RM_STACK_TOP, which is the whole question: the firmware is handed
+	 * a real-mode SS:SP pair and is entitled to push onto it, but it has to
+	 * give the stack pointer back where it found it, because the 16-bit code
+	 * after this point has no other way to find its own frame. A handler that
+	 * returns with SP somewhere else resumes the loader on a stack the loader
+	 * did not set up, and the symptom is a jump into the middle of stage2's
+	 * text with nothing on the serial port.
+	 *
+	 * A word each rather than a long: stage2's .bss sits within a few bytes of
+	 * the 0x10000 transfer window, and stage2.ld asserts the bound, so this
+	 * has to be added without pushing __bss_end past it. SP is 16 bits in real
+	 * mode in any case, so a word loses nothing.
+	 *
+	 * Encodings spelled out for the same reason as the stores above: in
+	 * .code16 both the operand size and the address size default to 16 bits,
+	 * and 0x67 is what forces the four-byte relocation the linker needs.
+	 */
+	.byte	0x67, 0x89, 0x25		/* movw %sp, bios_post_sp        */
+	.long	bios_post_sp
+	.byte	0x66, 0xb8, 0xa5, 0x5a	/* movw $0x5aa5, %ax             */
+	.byte	0x67, 0x89, 0x05		/* movw %ax, bios_iret_magic     */
+	.long	bios_iret_magic
+
+	/* Back from the handler, still in real mode. Set PE again and far jump
+	 * back to 32-bit code.
+	 *
+	 * PE is restored *before* the far jump, not after, and the order is the
+	 * whole point: the far jump is decoded with D clear (five bytes, a 16-bit
+	 * offset) but its selector is interpreted according to PE. With PE still
+	 * clear, 0x08 is a segment value and the CPU resumes at 0x80:0x80F0. With
+	 * PE set, it is GDT index 1 -- the flat 32-bit code descriptor, base 0 --
+	 * and the offset is where it was written to be. */
+	.byte	0x66, 0x0f, 0x20, 0xc0		/* movl %cr0, %eax           */
+	.byte	0x66, 0x83, 0xc8, 0x01		/* orl $0x1, %eax  (PE = b0) */
+	.byte	0x66, 0x0f, 0x22, 0xc0		/* movl %eax, %cr0           */
+	ljmp	$0x08, $bios_pm_return
+
+	.code32
+bios_pm_return:
+	movw	$0x10, %ax
+	movw	%ax, %ds
+	movw	%ax, %es
+	movw	$0x10, %ax
+	movw	%ax, %fs
+	movw	%ax, %gs
+
+	/* SS is reloaded before ESP is restored, deliberately. Until SS names the
+	 * flat descriptor again it still refers to the real-mode 16-bit cached
+	 * descriptor, and writing the full 32-bit saved stack pointer through it
+	 * would be a privilege-width violation the moment anything pushed. */
+	movw	$0x10, %ax
+	movw	%ax, %ss
+
+	movl	bios_saved_esp, %esp
+	movl	bios_saved_ebp, %ebp
+
+	/* The firmware's answers, read back from where the real-mode side left
+	 * them. AX was used for the segment reloads above, so EAX is reloaded
+	 * whole rather than patched.
+	 *
+	 * EBX goes back in EDX, which is the second half of the 64-bit return,
+	 * because the services that index rather than flag their results do not
+	 * put the index anywhere in EAX -- INT 15h/AH=E820h returns the same
+	 * 'SMAP' value in EAX for every entry and the "was that the last one"
+	 * answer only in EBX. */
+	movl	bios_ret_eax, %eax
+	movl	bios_ret_ebx, %edx
+	ret
+
 /* ---------------------------------------------------------------------------
  * The 32-bit GDT used for the initial protected-mode switch. The long-mode
  * switch installs a different table (with the L bit set on the code segment)
  * from boot_gdt_init() in stage2.c.
+ *
+ * Four entries, all at base 0, and nothing else. The BIOS trampoline has exactly
+ * one of its own: the 16-bit code descriptor at 0x18, which the far jump on the
+ * way out loads so that the CPU decodes 16-bit instructions before PE is cleared.
+ * See the trampoline above.
+ *
+ * There is deliberately no per-vector descriptor for the firmware, because the
+ * earlier design that had one -- far-call the IVT handler through a descriptor
+ * based at the handler's linear address -- cannot work.
  * --------------------------------------------------------------------------- */
+/*
+ * The 64-bit literals below are each descriptor read as a little-endian word,
+ * and the byte order is the whole trap. 0x9A is the access byte -- the one
+ * that says "present, ring 0, code, execute/read" -- and it has to land in
+ * byte 5. Written as 0x9A0F00000000FFFF it lands in byte 7 instead, which
+ * leaves the access byte zero: a descriptor that is not a valid segment at all.
+ * Nothing complains at load time, because LGDT does not validate, and the GDT
+ * is not consulted again until something far jumps. The failure is therefore
+ * deferred to the first far jump, where it arrives as a #GP whose error
+ * code is the offending selector and reads like a trampoline bug rather than a
+ * descriptor bug.
+ */
 	.section .rodata
 	.align 8
+	.globl stage2_gdt
+stage2_gdt:
 gdt:
 	.quad	0			/* 0x00 null */
 	.quad	0x00CF9A000000FFFF	/* 0x08 32-bit code, base 0, limit 4G */
 	.quad	0x00CF93000000FFFF	/* 0x10 32-bit data, base 0, limit 4G */
+	.quad	0x00009A000000FFFF	/* 0x18 16-bit code, base 0, limit 64K */
 	/* gdt_end is what the GDTR limit is measured from, and it is the one
 	 * label that cannot be inferred: the entries are 8 bytes each, but the
 	 * limit field counts bytes and the table has to end on a descriptor
@@ -200,11 +720,18 @@ exc_hex32:
 1:	roll	$4, %ebx
 	movl	%ebx, %edi
 	andl	$0xF, %edi
-	addl	$'0', %edi
 	cmpl	$10, %edi
 	jb	2f
-	addl	$('a' - '0' - 10), %edi	/* nibbles 10-15 print as a-f */
-2:	movl	%ebx, %eax		/* AL must hold the digit, not the shifted value */
+	addl	$('a' - '0' - 10), %edi
+2:	addl	$'0', %edi		/* bias into '0'-'9' last, after the
+					 * compare. Biasing first and then
+					 * testing against 10 can never be
+					 * true, since '0' is 0x30, so every
+					 * digit took the letter branch and the
+					 * report printed as one repeated
+					 * character with the real value
+					 * nowhere in it. */
+	movl	%edi, %eax		/* AL must hold the digit itself */
 	outb	%al, (%dx)
 	loop	1b
 
@@ -214,6 +741,13 @@ exc_hex32:
 
 exc_puts:
 	pushl	%esi
+	/* The caller passes the string in EDI, and exc_hex32 above has already
+	 * used and destroyed EDI, so the pointer has to be picked up here rather
+	 * than left in whatever ESI happened to hold. `lodsb` reads through
+	 * DS:ESI, so an EDI that is never moved into ESI prints nothing at all --
+	 * which is how a fault managed to dump four registers and then stop
+	 * without ever naming itself. */
+	movl	%edi, %esi
 1:	lodsb
 	testb	%al, %al
 	jz	2f
@@ -224,9 +758,30 @@ exc_puts:
 	ret
 
 /*
- * Common entry for every vector. The stack on arrival is, low to high:
- *   vector, error code, EIP, CS, EFLAGS  (and ESP/SS if the fault came from
- * ring 3, which cannot happen before the kernel installs its own tables).
+ * Common entry for every vector.
+ *
+ * The stack on arrival is, from low address to high: error code (only for the
+ * vectors that push one), EIP, CS, EFLAGS. ESP/SS follow if the fault came from
+ * ring 3, which cannot happen before the kernel installs its own tables.
+ *
+ * There is no vector number on the stack, and that is not an oversight in
+ * the gate. A 32-bit interrupt gate pushes EFLAGS, CS and EIP -- and the
+ * error code for the vectors that have one -- but never the vector. Real-mode
+ * `int` puts the vector in the high byte of the pushed CS, which is a trick
+ * that has no meaning in protected mode, where CS is a selector.
+ *
+ * So the reporter cannot print the vector, and the earlier version's claim that
+ * it could was the reason its output was unreadable: it read four words above
+ * the frame and labelled them error code, CR2, vector and EIP, which made them
+ * out to be EIP, CS, EFLAGS and whatever sat above the frame. Every field was
+ * off by one word, so a #GP reported its own EIP as the error code -- 0xD893
+ * instead of the real 0xDE80 -- and the fault looked like it had happened in
+ * stage2 at an address it had never been near.
+ *
+ * One entry stub per vector is what would recover the number, and it is not
+ * worth 256 gates to fix a diagnostic. The CS value is printed instead, and
+ * between it and the EIP it is enough to tell a fault in the loader from a
+ * fault inside the firmware.
  */
 	.globl	exc_stub		/* stage2.ld splits its address for the gate */
 exc_stub:
@@ -237,17 +792,25 @@ exc_stub:
 	pushl	%esi
 	pushl	%edi
 
-	/* vector sits above the six saved registers, the error code, and CR2. */
-	movl	(6 * 4 + 4)(%esp), %eax	/* error code, 0 for vectors without one */
+	/* The six saved registers occupy 24 bytes. Above them the frame starts
+	 * with the error code where the vector has one, and with EIP where it does
+	 * not -- so this is a best-effort read, and the two cases are told apart
+	 * by the vector, which is exactly what is not available. Printing it as
+	 * "err/EIP" rather than "error code" keeps the ambiguity visible instead
+	 * of presenting a guess as a fact. */
+	movl	24(%esp), %eax
 	call	exc_hex32
 
 	movl	%cr2, %eax
 	call	exc_hex32
 
-	movl	(6 * 4 + 8)(%esp), %eax	/* vector number */
+	movl	28(%esp), %eax		/* EIP */
 	call	exc_hex32
 
-	movl	(6 * 4 + 12)(%esp), %eax	/* faulting EIP */
+	movl	32(%esp), %eax		/* CS: 0x08 is stage2, anything else is
+					 * a selector the loader loaded for a
+					 * real-mode segment and should never
+					 * have been able to. */
 	call	exc_hex32
 
 	movl	$exc_msg, %edi
@@ -260,7 +823,7 @@ exc_stub:
 
 	.section .rodata
 exc_msg:
-	.asciz	"\r\n[stage2] exception: error CR2 vector RIP\r\n"
+	.asciz	"\r\n[stage2] exception: err/EIP CR2 EIP CS\r\n"
 
 /*
  * The table itself, emitted after the stub rather than before it.
@@ -305,8 +868,114 @@ idtr:
 
 	.section .bss
 	.align 16
+/*
+ * Trampoline state.
+ *
+ * All in .bss, and below 64 KiB, because the 16-bit side of the BIOS round trip
+ * addresses them by absolute 16-bit displacement and a 16-bit address cannot
+ * reach any higher. stage2.ld asserts the upper bound.
+ *
+ * The vector word is the exception and is not here: it lives at the fixed
+ * BIOS_VECTOR_ADDR, because the `int` instruction encodes its address at
+ * assembly time.
+ *
+ * The saved values live in memory rather than in registers because the round
+ * trip crosses a mode change on the way out and a full BIOS handler on the way
+ * back. A register holding them would be reinterpreted by the time it was
+ * needed, and a handler is free to clobber every register it is handed.
+ */
+	.globl	bios_saved_cr0
+bios_saved_cr0:
+	.long	0
+	.globl	bios_saved_esp
+bios_saved_esp:
+	.long	0
+	.globl	bios_saved_eax
+bios_saved_eax:
+	.long	0
+	.globl	bios_saved_ebp
+bios_saved_ebp:
+	.long	0
+	.globl	bios_saved_ds
+bios_saved_ds:
+	.word	0
+	.globl	bios_saved_es
+bios_saved_es:
+	.word	0
+/*
+ * The real-mode ES the caller asked for, written on the 32-bit side and read
+ * back after the mode switch. In memory rather than in a register for the same
+ * reason as the rest of the trampoline state: the mode switch is what makes the
+ * register unusable, and a handler is free to destroy every register it is
+ * handed.
+ */
+	.globl	bios_es_seg
+bios_es_seg:
+	.word	0
+/*
+ * Where the real-mode side parks the firmware's return values. Two words
+ * rather than one because the two services that matter disagree about where
+ * they answer: EAX is enough for a service that flags success in AH, and not
+ * enough for one that walks a list and reports its position in EBX.
+ */
+	.globl	bios_ret_eax
+bios_ret_eax:
+	.long	0
+	.globl	bios_ret_ebx
+bios_ret_ebx:
+	.long	0
+
+/*
+ * ECX and EDX, saved for the geometry query rather than returned. See the stores
+ * in the real-mode exit path; bios_call leaves EAX and EBX to the caller and
+ * these two for the caller to look up directly.
+ */
+	.globl	bios_ret_ecx
+bios_ret_ecx:
+	.long	0
+	.globl	bios_ret_edx
+bios_ret_edx:
+	.long	0
+
+/*
+ * Tripwires for the round trip. See the stores in the real-mode exit path.
+ * Both are cleared by the C side before each call and set here after the
+ * firmware's iret returns, so a call that does not come back normally is
+ * detectable from the caller rather than only as a hang.
+ */
+	.globl	bios_post_sp
+bios_post_sp:
+	.word	0
+	.globl	bios_iret_magic
+bios_iret_magic:
+	.word	0
+
+/*
+ * The 32-bit loader stack.
+ *
+ * 16 KiB, and bounded by STAGE2_BSS_LIMIT rather than left to grow: the bounce
+ * buffer, disk address packet and VBE scratch block begin at 0x10000, so a
+ * 32 KiB stack here reached 0x13ABE and sat on top of all three. Nothing
+ * noticed, because the loader touches those structures through pointers that
+ * still validate -- the stack simply overwrote them between the BIOS filling
+ * the bounce buffer and stage2 reading it back. stage2.ld asserts the limit.
+ *
+ * stack32_top is the address the stack pointer is loaded with, and it has to
+ * exist as a symbol rather than being written out at the use site: the region
+ * is sized here and used in the entry code, and a literal 0x4000 added to
+ * $stack32 in both places is a size that can be changed in one of them.
+ *
+ * The label is placed *before* the trampoline state above rather than after it
+ * on purpose. Input sections are concatenated in the order the linker script
+ * lists them, and the `.align 16` here is a section attribute rather than a
+ * padding directive, so it does not move an already-placed symbol. stack32 has
+ * to be the *last* thing in .bss so that its downward growth starts at the very
+ * top of the region the linker reserved; anything allocated above it would be
+ * the first thing a push lands on. */
+	.section .bss
 stack32:
-	.space	0x8000			/* 32 KiB of loader stack */
+	.space	0x4000			/* 16 KiB of loader stack */
+	.equ	stack32_top, stack32 + 0x4000
 
 	.globl stage1_boot_drive
 stage1_boot_drive:
