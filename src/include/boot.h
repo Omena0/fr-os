@@ -19,6 +19,21 @@
 #define BOOTINFO_MAGIC   0x4F53424F4F543031ULL  /* "OSBOOT01" */
 #define BOOTINFO_VERSION 1
 
+/*
+ * Where stage2 leaves the handoff record and the memory map, in low physical
+ * memory. Both sides need these and neither can see the other's symbols, so
+ * they are declared once, here.
+ *
+ * They were previously defined separately in src/boot/boot_layout.h and again
+ * as a literal in src/kernel/kmain.S, and the kernel's copy was wrong: it held
+ * E820_ADDR rather than BOOTINFO_ADDR, one 4 KiB page below the record. So
+ * kmain validated the magic against the first bytes of the memory map, always
+ * failed, and panicked -- after RDI had been handed the correct address by
+ * stage2 and then overwritten with the wrong constant on the way in.
+ */
+#define E820_ADDR       0x00090000ULL
+#define BOOTINFO_ADDR   0x00091000ULL
+
 /* Kernel virtual layout, shared with the kernel linker script. */
 #define KERNEL_VIRT_BASE 0xFFFFFFFF80000000ULL
 #define KERNEL_VIRT_END  0xFFFFFFFFC0000000ULL

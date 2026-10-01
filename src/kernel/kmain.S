@@ -29,14 +29,6 @@
 #include <boot.h>
 
 /*
- * Physical and virtual addresses of the bootinfo structure, exported by
- * stage2. Stage2 cannot use linker symbols because it is not the kernel, so
- * both sides agree on fixed constants in src/boot/boot_layout.h and
- * src/include/boot.h instead.
- */
-#define BOOTINFO_PHYS_ADDR 0x00090000ULL
-
-/*
  * The stack top. Placed in the kernel's own BSS by the linker script, so it is
  * always valid regardless of how much BSS stage2 zeroed: stage2 cannot know
  * the kernel's BSS size, and the kernel's .bss is the one region it must not
@@ -87,14 +79,32 @@ kernel_start:
 	 * somewhere that gives no hint about the real cause. Two instructions to
 	 * turn a day of debugging into a message.
 	 */
+	/*
+	 * LMA is bit 10 of EFER, and RDMSR leaves the low half of the MSR in EAX.
+	 *
+	 * This read EFER, shifted RAX left by 8 and then tested bit 8 -- which is
+	 * a two-step way of testing bit 16 of a value whose bit 10 is the one that
+	 * matters. EFER.LMA is set by the hardware the moment paging is enabled in
+	 * long mode, so it is always set here, and this check rejected every
+	 * correct boot. The shift then bit 10 down to bit 2, and `btl $8` on that
+	 * never matches either, so the jump was always taken and the kernel went
+	 * straight to its "not long mode" path: a message to port 0xE9, which
+	 * nothing is listening on, and a halt. Serial stayed completely silent.
+	 */
 	movq	$0xC0000080, %rcx		/* MSR_EFER */
 	rdmsr
-	shlq	$8, %rax			/* LMA is bit 8 */
-	btl	$8, %eax
+	btl	$10, %eax			/* EFER.LMA */
 	jnc	.Lnot_long_mode
 
-	/* Pass bootinfo across to C. RDI is its physical address. */
-	movq	$BOOTINFO_PHYS_ADDR, %rdi
+	/*
+	 * Pass bootinfo across to C. RDI already holds this address, put there by
+	 * stage2's far jump. Reloading it here only gave a second place for the
+	 * two images to disagree about where the record lives, and they did: this
+	 * was E820_ADDR, the 4 KiB page below the record, so kmain read the
+	 * memory map's first bytes as a magic number and panicked every boot.
+	 * BOOTINFO_ADDR is now a shared constant in boot.h.
+	 */
+	movq	$BOOTINFO_ADDR, %rdi
 
 	/* Clear the direction flag: the BIOS can leave it set, and it silently
 	 * turns every string primitive backwards. */

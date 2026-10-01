@@ -76,21 +76,28 @@ $(OBJ)/boot/%.S.o: src/boot/%.S
 	@mkdir -p $(dir $@)
 	$(HOST_GCC) $(BOOT_ASFLAGS) -c $< -o $@
 
+# -MMD -MP makes the compiler emit the header dependency list next to the
+# object and include it below. Without this, editing a header silently leaves
+# every object that includes it stale: boot_layout.h holds the physical memory
+# map, so a change to it moves the E820 buffer, the page tables and the landing
+# zone, and none of the objects that care get rebuilt. That is not a
+# theoretical hazard -- it cost an afternoon of debugging a map that came back
+# full of poison because the binary under test predated the edit.
 $(OBJ)/boot/%.c.o: src/boot/%.c
 	@mkdir -p $(dir $@)
-	$(HOST_CC_32) $(BOOT_CFLAGS) -c $< -o $@
+	$(HOST_CC_32) $(BOOT_CFLAGS) -MMD -MP -MF $@.d -c $< -o $@
 
 $(OBJ)/kernel/%.S.o: src/kernel/%.S
 	@mkdir -p $(dir $@)
-	$(HOST_CC_64) -c -x assembler-with-cpp $(KERNEL_CFLAGS) -I src/kernel/include $< -o $@
+	$(HOST_CC_64) -MMD -MP -MF $@.d -c -x assembler-with-cpp $(KERNEL_CFLAGS) -I src/kernel/include $< -o $@
 
 $(OBJ)/kernel/drivers/%.c.o: src/kernel/drivers/%.c
 	@mkdir -p $(dir $@)
-	$(HOST_CC_64) $(KERNEL_CFLAGS) $< -c -o $@
+	$(HOST_CC_64) $(KERNEL_CFLAGS) -MMD -MP -MF $@.d $< -c -o $@
 
 $(OBJ)/kernel/%.c.o: src/kernel/%.c
 	@mkdir -p $(dir $@)
-	$(HOST_CC_64) $(KERNEL_CFLAGS) $< -c -o $@
+	$(HOST_CC_64) $(KERNEL_CFLAGS) -MMD -MP -MF $@.d $< -c -o $@
 
 $(OBJ)/libc/%.S.o: src/libc/%.S
 	@mkdir -p $(dir $@)
@@ -98,7 +105,7 @@ $(OBJ)/libc/%.S.o: src/libc/%.S
 
 $(OBJ)/libc/%.c.o: src/libc/%.c
 	@mkdir -p $(dir $@)
-	$(HOST_CC_64) $(USER_CFLAGS) $< -c -o $@
+	$(HOST_CC_64) $(USER_CFLAGS) -MMD -MP -MF $@.d $< -c -o $@
 
 # The 32-bit bootloader uses a separate linker and its own script.
 $(BUILD)/stage1.elf: $(STAGE1_OBJ) src/boot/stage1.ld

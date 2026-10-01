@@ -19,15 +19,31 @@ OBJ             := $(BUILD)/obj
 # -mcmodel=kernel gives us RIP-relative addressing for everything above
 # 0xFFFFFFFF80000000, so no GOT indirection and no runtime relocation
 # processing in the entry path.
+# No SSE and no AVX, and nothing that implies either.
+#
+# -mavx2 -mfma -mf16c -mxsave here made every 16-byte block move a
+# VEX-encoded vmovdqu, and a VEX instruction needs the YMM half of the
+# register file enabled through XCR0 before it will execute at all. This
+# kernel never programs XCR0 -- stage2 hands over with whatever the
+# firmware left, which is x87 and SSE only -- so the first vector move in
+# kmain raised #UD, before a single character had been printed.
+#
+# -msse4.2 was just as bad and much less visible: it re-enables SSE2 after
+# the -mno-sse2 above it, because the later flag wins, so the build
+# appeared to forbid vector code and then permitted it anyway.
+#
+# The GPR-only extensions are kept: BMI, ADX, RDRND, CLWB, CLFLUSHOPT and
+# POPCNT all operate on general-purpose registers and need no register
+# state beyond what long mode already gives us.
+
 KERNEL_CFLAGS := \
 	-std=gnu11 -ffreestanding -nostdlib -fno-builtin -fno-stack-protector \
 	-fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables \
 	-fno-strict-aliasing -fno-common -fomit-frame-pointer \
 	-m64 -mcmodel=kernel -mno-red-zone -mno-mmx -mno-sse -mno-sse2 \
 	-mno-80387 -msoft-float \
-	-mavx2 -mbmi -mbmi2 -mfma -madx -mrdrnd -mf16c -mclwb -mclflushopt \
-	-mxsave -mxsaveopt -mxsavec \
-	-msse4.2 -mpopcnt -mclflushopt \
+	-mbmi -mbmi2 -madx -mrdrnd -mclwb -mclflushopt \
+	-mpopcnt \
 	-O2 -g3 -Wall -Wextra -Werror=implicit-function-declaration \
 	-Werror=return-type -Wno-unused-parameter -Wno-address-of-packed-member \
 	-I src/include -I src/kernel/include -I src/kernel

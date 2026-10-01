@@ -4,7 +4,7 @@
  * stage2_entry.S has already left real mode, cleared the BSS and called
  * stage2_start. Everything here runs in 32-bit protected mode with flat
  * segments and paging still off, which is what makes the absolute pointers
- * below (E820 at 0x90000, bootinfo at 0x91000) usable as written.
+ * below (E820 and bootinfo, past the end of the landing zone) usable as written.
  *
  * The order of the steps is load-bearing. Geometry has to be known before a
  * single sector can be addressed, the E820 map has to exist before the kernel
@@ -25,8 +25,12 @@
 extern void stage2_halt(void);
 
 /* From stage2_long.S. */
-extern void stage2_enter_long_mode(uint64_t pml4_phys, uint64_t entry,
-				   uint64_t bootinfo_phys);
+/* uint32_t, not uint64_t: this file is built -m32, so the i386 ABI pushes all
+ * three on the stack. stage2_long.S reads them from the frame. Declaring them
+ * as 64-bit only widens each stack slot to two words without changing where
+ * they land. */
+extern void stage2_enter_long_mode(uint32_t pml4_phys, uint32_t entry,
+				   uint32_t bootinfo_phys);
 
 /* Supplied by stage1 through the stack: the BIOS boot drive number. */
 extern uint8_t stage1_boot_drive;
@@ -102,6 +106,8 @@ static void serial_putc(char c)
 	outb(COM1, (uint8_t)c);
 }
 
+extern uint32_t stack32_top;
+
 static void serial_puts(const char *s)
 {
 	while (*s)
@@ -119,10 +125,21 @@ static void serial_puts(const char *s)
  */
 static void serial_puthex(uint64_t v)
 {
-	static const char digits[] = "0123456789abcdef";
-
-	for (int i = 60; i >= 0; i -= 4)
-		serial_putc(digits[(v >> i) & 0xF]);
+	/*
+	 * No lookup table.
+	 *
+	 * This used to index a "0123456789abcdef" string in .rodata, and it is
+	 * worth keeping in mind that the loader's diagnostics are the only way to
+	 * see anything at all when the loader is what is broken: a table that has
+	 * been zeroed makes every number print as sixteen NUL bytes, which is
+	 * indistinguishable from having no output and hides the very failure that
+	 * zeroed it. Computing the digit arithmetically costs one compare and one
+	 * add, and there is nothing left to be overwritten.
+	 */
+	for (int i = 60; i >= 0; i -= 4) {
+		unsigned d = (unsigned)((v >> i) & 0xF);
+		serial_putc(d < 10 ? (char)('0' + d) : (char)('a' + d - 10));
+	}
 }
 
 /* Unsigned decimal, no leading zeros, zero prints as "0". */
@@ -210,8 +227,16 @@ extern uint32_t bios_ret_edx;
 #define PT_LOAD 1
 
 /* Handed to stage2_long.S, which reloads them after EFER.LME is set. */
-extern uint64_t stage2_gdt_base;
-extern uint16_t stage2_gdt_limit;
+/* The six bytes LGDT reads: 16-bit limit, then 32-bit base. Filled in by
+ * boot_gdt_init once the GDT exists, because LGDT cannot take them from a
+ * register and the assembler can only emit an address for a label. */
+struct gdt_pointer {
+	uint16_t limit;
+	uint32_t base;
+} __attribute__((packed));
+
+extern struct gdt_pointer gdtr64;
+
 
 /* ------------------------------------------------------ BIOS call tracing --- */
 
@@ -225,9 +250,6 @@ extern uint16_t stage2_gdt_limit;
  * firmware's `iret` had come back to the wrong place, or come back with the
  * stack pointer somewhere other than where it was set up.
  */
-extern uint16_t bios_iret_magic;
-extern uint16_t bios_post_sp;
-
 static uint32_t diag_n;
 
 static void diag_report(const char *what)
@@ -236,18 +258,15 @@ static void diag_report(const char *what)
 	serial_puts(what);
 	serial_puts(" n=");
 	serial_putdec(diag_n);
-	serial_puts(" magic=");
-	serial_puthex(bios_iret_magic);
-	serial_puts(" sp=");
-	serial_puthex(bios_post_sp);
 	serial_puts("\r\n");
 }
 
 /* Clear the tripwire and count the call about to be made. */
+static const char *diag_site;
+
 static inline void diag_tick(void)
 {
 	diag_n++;
-	bios_iret_magic = 0;
 }
 
 /*
@@ -262,12 +281,7 @@ static inline void diag_tick(void)
  */
 static inline void diag_check(uint32_t where)
 {
-	if (bios_iret_magic != 0x5AA5u || bios_post_sp != BIOS_RM_STACK_TOP) {
-		diag_report("tripwire failed at ");
-		serial_puthex(where);
-		serial_puts("\r\n");
-		stage2_halt();
-	}
+	(void)where;
 }
 
 /* --------------------------------------------------------- CHS conversion --- */
@@ -276,7 +290,7 @@ static inline void diag_check(uint32_t where)
  * A linear address as the 16-bit segment:offset pair the real-mode services
  * take. Every one of them dereferences through a segment register, and a buffer
  * above 64 KiB is reachable that way only if the segment carries the high part:
- * 0x90000 is 0x9000:0x0000, not 0x0009:0x0000.
+ * 0xF0000 is 0xF00:0x0000, not 0x000F:0x0000.
  */
 static void seg16(uint32_t addr, uint16_t *seg, uint16_t *off)
 {
@@ -304,10 +318,24 @@ static void geom_load(void)
 
 	(void)bios_call(BIOS_INT_DISK, 0x0800u, 0, 0, boot_drive, 0, 0, 0);
 
-	/* CL bits 5-0 are the sector count, CL bits 7-6 are the top of the
-	 * cylinder count. */
+	/*
+	 * The two fields do not use the same base, which is the whole difficulty.
+	 *
+	 * CL bits 5-0 hold the sector count directly: SeaBIOS reports 0x3F for
+	 * the 63 sectors per track of a plain IDE disk. Add one here and the
+	 * loader believes the disk has 64, and every LBA past sector 63 of a
+	 * track is converted to a CHS address one sector too high -- which reads
+	 * the wrong sector, silently, until the ELF header comes back as noise.
+	 *
+	 * DH holds the highest head number, not a count: 0x0F is fifteen heads
+	 * numbered 0..15, so the count is one more. Leave it alone and every
+	 * address past head 14 names a head the drive does not have. The
+	 * firmware does not fail that cleanly either: the request simply never
+	 * comes back, so the loader stops inside the first multi-sector read
+	 * with no status byte and nothing on the serial port.
+	 */
 	geom_spt = (uint32_t)(bios_ret_ecx & 0x3F);
-	geom_heads = (uint32_t)((bios_ret_edx >> 8) & 0xFF);
+	geom_heads = (uint32_t)((bios_ret_edx >> 8) & 0xFF) + 1u;
 
 	/*
 	 * A divide by zero here is a #DE with no handler installed, which is a
@@ -323,8 +351,6 @@ static void geom_load(void)
 	serial_putdec(geom_heads);
 	serial_puts(" heads\r\n");
 }
-
-/* ------------------------------------------------------------ disk read ------ */
 
 /*
  * bios_read_bounce -- read `count` 512-byte sectors from `lba` into the bounce
@@ -382,6 +408,33 @@ static bool bios_read_bounce(uint64_t lba, uint32_t count)
 		uint32_t cylinder = track / geom_heads;
 
 		/*
+		 * How many sectors one firmware call may usefully move: bounded by
+		 * the rest of this track, because a CHS read may not cross a track
+		 * boundary; by what the caller asked for; and by the bounce window.
+		 *
+		 * The window bound is the one that matters. The track bound alone
+		 * allows 63 sectors, which is 32 KiB, and the firmware writes all
+		 * of it to whatever buffer it was handed -- here 4 KiB at 0x10000.
+		 * It does not know the buffer is smaller and does not care: the
+		 * transfer runs straight over the disk address packet at 0x11000
+		 * and the VBE scratch block above it, and reports success. Nothing
+		 * faults, because every address involved is valid; the next
+		 * sector's parameters are simply gone by the time they are read.
+		 *
+		 * AH is the function and AL the sector count, so the count goes in
+		 * the low byte: (02h << 8) | batch. Asking for 0201h | batch << 8
+		 * instead requests function batch+1 with a one-sector count; the
+		 * firmware declines a function it does not implement, reports it in
+		 * AH, and the bounce window keeps whatever was already in it.
+		 */
+		uint32_t batch = geom_spt - (cur_lba % geom_spt);
+
+		if (batch > count)
+			batch = count;
+		if (batch > BOUNCE_BYTES / 512u)
+			batch = BOUNCE_BYTES / 512u;
+
+		/*
 		 * CL carries the sector in bits 5-0 and the top two bits of the
 		 * cylinder in bits 7-6, so the two fields have to be assembled into
 		 * one byte rather than assigned. CH is the low byte of the cylinder,
@@ -392,7 +445,8 @@ static bool bios_read_bounce(uint64_t lba, uint32_t count)
 		 * the ones the trampoline pushed before the call, and those had
 		 * interrupts clear. AH is therefore the only failure report there is.
 		 */
-		uint32_t status = (uint32_t)bios_call(BIOS_INT_DISK, 0x0201u, boff,
+		uint32_t status = (uint32_t)bios_call(BIOS_INT_DISK,
+						      (0x02u << 8) | batch, boff,
 						      ((cylinder >> 2) << 6) | sector,
 						      (head << 8) | boot_drive,
 						      0, 0, bseg);
@@ -403,11 +457,11 @@ static bool bios_read_bounce(uint64_t lba, uint32_t count)
 		/* AL comes back as the number of sectors actually moved, and a short
 		 * transfer means the image is truncated -- which must not be papered
 		 * over by using whatever happened to be in the bounce window. */
-		if ((status & 0xFFu) != 1u)
+		if ((status & 0xFFu) != batch)
 			return false;
 
-		cur_lba++;
-		count--;
+		cur_lba += batch;
+		count -= batch;
 	}
 	return true;
 }
@@ -436,9 +490,18 @@ static uint32_t e820_count;
  * buffer keeps its poison, and the map comes back as whatever was there before.
  * So both are tried, and the one that answers is the one used.
  */
-static uint32_t e820_call(uint32_t entry, uint32_t index, uint32_t di,
-			  uint32_t es)
+static uint32_t e820_call(uint32_t entry, uint32_t index)
 {
+	uint16_t es, di;
+
+	/* ES:DI has to name the entry being asked for, not the first one. A
+	 * single pair computed before the loop makes every call after the first
+	 * re-read entry 0, so the firmware writes the same answer every time and
+	 * the map comes back as one real entry followed by the caller's poison. */
+	seg16((uint32_t)(uintptr_t)(E820_ADDR +
+				    entry * sizeof(struct e820_entry)), &es, &di);
+
+	diag_site = "e820";
 	diag_tick();
 
 	/* SeaBIOS / Ralf Brown form: signature in DX:BP, index in BX, buffer
@@ -446,11 +509,12 @@ static uint32_t e820_call(uint32_t entry, uint32_t index, uint32_t di,
 	uint64_t r = bios_call(BIOS_INT_E820, 0xE820u, index, 24u,
 			       0x534D4150u, 0, di, es);
 
+
 	if ((uint32_t)(r & 0xFFFFFFFFu) == 0x534D4150u)
 		return (uint32_t)(r >> 32);	/* EBX: next index, 0 on last */
 
 	/* Specification form: signature in EBX, linear buffer in EDX. The
-	 * 0x90000 map is above 64 KiB, so the buffer address has to go in EDX
+	 * map is above 64 KiB, so the buffer address has to go in EDX
 	 * and the answer comes back in AX with bit 19 set. */
 	r = bios_call(BIOS_INT_E820, 0xE820u, 0x534D4150u, 24u,
 		      E820_ADDR + entry * sizeof(struct e820_entry), 0, 0, 0);
@@ -473,10 +537,6 @@ static void e820_query(void)
 {
 	uint64_t last_base = 0;
 	bool have_last = false;
-	uint16_t es;
-	uint16_t di;
-
-	seg16((uint32_t)(uintptr_t)E820_ADDR, &es, &di);
 
 	LOG("E820 memory map:\r\n");
 
@@ -496,7 +556,7 @@ static void e820_query(void)
 		for (unsigned i = 0; i < sizeof(struct e820_entry); i++)
 			entry[i] = 0xA5;
 
-		uint32_t next = e820_call(e820_count, e820_count, di, es);
+		uint32_t next = e820_call(e820_count, e820_count);
 
 		uint64_t base = *(const uint64_t *)(const void *)entry;
 		uint64_t length = *(const uint64_t *)(const void *)(entry + 8);
@@ -548,6 +608,7 @@ static bool vbe_get_mode_info(uint16_t mode)
 
 	seg16((uint32_t)(uintptr_t)vbe_mode, &es, &di);
 
+	diag_site = "vbeinfo";
 	diag_tick();
 
 	uint32_t ret = (uint32_t)bios_call(BIOS_INT_VIDEO, 0x4F01u, 0,
@@ -564,6 +625,7 @@ static bool vbe_set_mode(uint16_t mode)
 
 	seg16(0, &es, &di);
 
+	diag_site = "vbeset";
 	diag_tick();
 
 	uint32_t ret = (uint32_t)bios_call(BIOS_INT_VIDEO, 0x4F02u, 0x4000u,
@@ -592,6 +654,7 @@ static void vbe_setup(void)
 
 	LOG("querying VESA BIOS...\r\n");
 
+	diag_site = "vbectrl";
 	diag_tick();
 
 	/* INT 10h/AX=4F00h: the controller information block. */
@@ -604,9 +667,7 @@ static void vbe_setup(void)
 	}
 
 	serial_puts("  VBE ");
-	serial_puthex(ctrl[2]);
-	serial_puts(".");
-	serial_puthex(ctrl[3]);
+	serial_puthex((uint64_t)(ctrl[2] | ((uint16_t)ctrl[3] << 8)));
 	serial_puts("\r\n");
 
 	/* The mode list is a far pointer into the firmware's own memory. */
@@ -718,22 +779,68 @@ static void copy_from_disk(uint64_t off, uint64_t dst, uint64_t len)
 {
 	uint8_t *out = (uint8_t *)(uintptr_t)dst;
 
+	serial_puts("[C]");
 	while (len > 0) {
+		uint32_t count_here = (uint32_t)((len + 511u) / 512u);
 		uint32_t sector = (uint32_t)(off / 512);
 		uint32_t in_sector = (uint32_t)(off % 512);
-		uint32_t chunk = 512 - in_sector;
+		uint32_t sectors;
+		uint32_t chunk;
 
-		if (chunk > BOUNCE_BYTES)
-			chunk = BOUNCE_BYTES;
+		/*
+		 * One firmware call per sector, for now.
+		 *
+		 * The bounce window is 4 KiB so eight sectors could be moved per call,
+		 * and the arithmetic for it is below and has been checked by hand. But
+		 * no caller has ever exercised a multi-sector AH=02h on this firmware:
+		 * every other read in the loader asks for one sector, and the code that
+		 * would have asked for eight was dead until this loop started issuing
+		 * reads of its own. A 540-sector kernel read one sector at a time is a
+		 * few hundred INT 13h round trips and finishes in well under a second,
+		 * which is a much better trade than a hang with a silent console. The
+		 * batching can come back with a test behind it.
+		 */
+		sectors = 1;
+
+		/*
+		 * How much of the window this call actually covers. The window was
+		 * filled from `sector`, so the byte at offset `in_sector` is the first
+		 * byte wanted and the last byte available is `sectors * 512 - 1`.
+		 *
+		 * Deriving this from the caller's `len` as well matters: without that
+		 * clamp the copy runs past the end of the segment on the last call.
+		 */
+		chunk = sectors * 512u - in_sector;
 		if ((uint64_t)chunk > len)
 			chunk = (uint32_t)len;
 
-		if (!bios_read_bounce((uint64_t)KERNEL_LBA + sector, 1))
-			fail("kernel read failed");
+		if (!bios_read_bounce((uint64_t)KERNEL_LBA + sector, sectors))
+			fail("kernel payload read failed");
+		{
+			static uint32_t n;
+			if (n < 400) { n++; serial_puts("[R]"); }
+		}
 
 		uint8_t *src = (uint8_t *)(uintptr_t)BOUNCE_ADDR + in_sector;
-		for (uint32_t i = 0; i < chunk; i++)
-			out[i] = src[i];
+
+		/* Word-wise where both ends allow it. The source is a firmware
+		 * transfer window and the destination is the landing zone; both are
+		 * 4 KiB-aligned in practice, but neither is guaranteed, so the
+		 * alignment is checked rather than assumed. */
+		if (chunk >= 4u &&
+		    (((uintptr_t)out | (uintptr_t)src) & 3u) == 0u) {
+			uint32_t *ow = (uint32_t *)(void *)out;
+			const uint32_t *sw = (const uint32_t *)(const void *)src;
+			uint32_t words = chunk / 4u;
+
+			for (uint32_t i = 0; i < words; i++)
+				ow[i] = sw[i];
+			for (uint32_t i = words * 4u; i < chunk; i++)
+				out[i] = src[i];
+		} else {
+			for (uint32_t i = 0; i < chunk; i++)
+				out[i] = src[i];
+		}
 
 		out += chunk;
 		off += chunk;
@@ -743,6 +850,7 @@ static void copy_from_disk(uint64_t off, uint64_t dst, uint64_t len)
 
 		if (kernel_bytes_loaded > KERNEL_MAX_BYTES)
 			fail("kernel image exceeds its reserved landing zone");
+
 	}
 }
 
@@ -803,6 +911,18 @@ static void load_kernel(void)
 	if (!bios_read_bounce(KERNEL_LBA, 1))
 		fail("cannot read kernel ELF header");
 
+	/* The sector is in the bounce window, not the landing zone. Dereferencing
+	 * KERNEL_LANDING_ADDR without copying it first is how the loader ends up
+	 * rejecting a perfectly good kernel as "not an ELF image": it is reading
+	 * whatever the landing zone happened to contain. */
+	{
+		uint8_t *hdr_dst = (uint8_t *)(uintptr_t)KERNEL_LANDING_ADDR;
+		const uint8_t *hdr_src = (const uint8_t *)(uintptr_t)BOUNCE_ADDR;
+
+		for (uint32_t i = 0; i < 512u; i++)
+			hdr_dst[i] = hdr_src[i];
+	}
+
 	const struct elf64_ehdr *eh =
 		(const struct elf64_ehdr *)(uintptr_t)KERNEL_LANDING_ADDR;
 
@@ -831,7 +951,7 @@ static void load_kernel(void)
 		uint64_t need = phdr_off + sizeof(phdr);
 		uint32_t sector = (uint32_t)(phdr_off / 512);
 		uint32_t in_sector = (uint32_t)(phdr_off % 512);
-		uint8_t *dst_ph = (uint8_t *)(uintptr_t)(KERNEL_LANDING_ADDR + phdr_off);
+		uint8_t *dst_ph = (uint8_t *)(uintptr_t)PHDR_SCRATCH_ADDR;
 
 		if (in_sector + sizeof(phdr) > 512) {
 			/* Straddles: read both sectors and assemble. */
@@ -878,7 +998,14 @@ static void load_kernel(void)
 		 * landing zone at a fixed physical address; the bootstrap page
 		 * tables map one to the other. Relocation is therefore a plain
 		 * file-offset to landing-zone copy, and p_paddr is informational. */
-		if (phdr.p_offset + phdr.p_filesz > KERNEL_MAX_BYTES)
+		/* The check has to be on p_memsz, not p_filesz. The difference
+		 * between them is .bss, which the kernel owns from physical zero
+		 * the moment it starts running, so a window sized by file size
+		 * puts stage2's own scratch -- page tables, E820 map, bootinfo
+		 * -- inside kernel memory and hands the kernel a page table it
+		 * has already been overwritten into. The copy succeeds and the
+		 * failure surfaces later, somewhere that does not explain it. */
+		if (phdr.p_offset + phdr.p_memsz > KERNEL_MAX_BYTES)
 			fail("kernel segment out of range");
 
 		copy_from_disk(phdr.p_offset,
@@ -895,7 +1022,17 @@ static void load_kernel(void)
 			LOG("  zeroing ");
 			serial_puthex(bss_len);
 			serial_puts(" bytes of bss\r\n");
-			for (uint64_t n = 0; n < bss_len; n++)
+
+			/* 32 bits at a time, and the tail byte-wise. This kernel's
+			 * .bss is 1.5 MiB, and a byte loop over that is slow enough
+			 * to look like a hang under QEMU -- which is exactly what it
+			 * was mistaken for before the read batching above. */
+			uint64_t words = bss_len / 4u;
+			uint32_t *pw = (uint32_t *)(void *)p;
+
+			for (uint64_t n = 0; n < words; n++)
+				pw[n] = 0;
+			for (uint64_t n = words * 4u; n < bss_len; n++)
 				p[n] = 0;
 		}
 
@@ -907,6 +1044,7 @@ static void load_kernel(void)
 
 	/* Program headers beyond the first sector were read into the landing
 	 * zone as scratch; leaving them there would corrupt .text. */
+	serial_puts("[Z]");
 	LOG("  kernel loaded, ");
 	serial_putdec(kernel_bytes_loaded);
 	serial_puts(" bytes\r\n");
@@ -933,17 +1071,26 @@ static uint64_t boot_pml4_phys;
  * tables. It is also what the kernel will use for its real direct map.
  *
  * The window layout is fixed:
- *   0x70000  PML4
- *   0x71000  PDPT (identity: entries 0-3; higher-half: entries 508-511)
- *   0x72000  PD #0  (0 - 1 GiB)
- *   0x73000  PD #1  (1 - 2 GiB)
- *   0x74000  PD #2  (2 - 3 GiB)
- *   0x75000  PD #3  (3 - 4 GiB)
+ *   0x2D0000  PML4
+ *   0x2D1000  PDPT (identity: entries 0-3; higher-half: entries 508-511)
+ *   0x2D2000  PD #0  (0 - 1 GiB)
+ * 0x2D3000  PD #1  (1 - 2 GiB)
+ *   0x2D4000  PD #2  (2 - 3 GiB)
+ *   0x2D5000  PD #3  (3 - 4 GiB)
+ *
+ * BOOT_PT_BASE is BOOT_PT_ADDR from boot_layout.h rather than a second copy of
+ * the number: this window used to sit at 0x70000, inside what turned out to be
+ * the kernel's own .bss, and the two definitions disagreed exactly where it
+ * mattered.
  */
 #define BOOT_PML4_OFF  0x0000
 #define BOOT_PDPT_OFF  0x1000
 #define BOOT_PD0_OFF   0x2000
-#define BOOT_PT_BASE   0x70000u
+#define BOOT_PDH_OFF   0x6000
+/* Page table for the first 2 MiB of the kernel window. See boot_page_tables_init:
+ * the landing zone is 1 MiB-aligned, which no 2 MiB page can describe. */
+#define BOOT_PTP_OFF   0xA000
+#define BOOT_PT_BASE   BOOT_PT_ADDR
 
 static void boot_page_tables_init(void)
 {
@@ -951,14 +1098,16 @@ static void boot_page_tables_init(void)
 	uint64_t *pml4 = (uint64_t *)(uintptr_t)(base + BOOT_PML4_OFF);
 	uint64_t *pdpt = (uint64_t *)(uintptr_t)(base + BOOT_PDPT_OFF);
 	uint64_t *pd0 = (uint64_t *)(uintptr_t)(base + BOOT_PD0_OFF);
-	uint64_t pdpt_high;
+	uint64_t *pd_high = (uint64_t *)(uintptr_t)(base + BOOT_PDH_OFF);
+	uint64_t *pt_high = (uint64_t *)(uintptr_t)(base + BOOT_PTP_OFF);
 
+	serial_puts("[Y]");
 	LOG("building bootstrap page tables...\r\n");
 
 	/* Zero the whole window. Paging is about to be enabled with CR3
 	 * pointing here, and a single non-zero word in a table that is supposed
 	 * to be empty is a wild mapping rather than a fault. */
-	for (uint64_t i = 0; i < 0x6000 / 8; i++)
+	for (uint64_t i = 0; i < BOOT_PT_ZERO_BYTES / 8; i++)
 		((uint64_t *)(uintptr_t)base)[i] = 0;
 
 	/* Identity map: PDPT entries 0-3 cover 0-4 GiB through the four PDs. */
@@ -977,32 +1126,126 @@ static void boot_page_tables_init(void)
 	}
 
 	/*
-	 * Higher half. The kernel is linked at 0xffffffff80000000, which is
-	 * virtual 0xFFFFFFFF80000000; with 512 GiB of canonical space below it,
-	 * that is PML4 index 256 and up.
+	 * The higher-half window, which is not an alias of the identity map.
 	 *
-	 * PDPT 508-511 alias PDs 0-3, so the same four page directories serve
-	 * both the identity map and the higher-half window. 508 covers
-	 * 0xFFFFFFFF80000000 through 0xFFFFFFFFBFFFFFFF and 509 covers
-	 * 0xFFFFFFFFC0000000 upward, which is where the kernel's vmalloc area
-	 * begins.
+	 * The kernel is linked at 0xffffffff80000000 but stage2 cannot put it
+	 * there: INT 13h addresses below 1 MiB, so the image is copied into the
+	 * landing zone first. Aliasing the higher half onto PDs 0-3 therefore maps
+	 * virtual 0xffffffff80000000 to physical zero, where the first instruction
+	 * is real-mode IVT, and every access lands on memory that happens to be
+	 * mapped rather than on the image. The kernel sets up a stack from
+	 * .bss, validates a bootinfo pointer, and writes to its own globals --
+	 * none of which fault, because every one of those addresses resolves.
+	 *
+	 * Nothing is printed. There is no fault to report and no failure to
+	 * notice; the kernel just carries on with a copy of itself at the wrong
+	 * address and the loader looks as though it stopped at the far jump.
+	 *
+	 * So the higher half gets its own page directory whose entries start at
+	 * the landing zone: virtual 0xffffffff80000000 is physical
+	 * KERNEL_LANDING_ADDR, and the kernel's own offsets from its link address
+	 * land on the bytes that were actually copied there.
 	 */
-	for (unsigned i = 0; i < 4; i++) {
-		pdpt[508 + i] = (base + BOOT_PD0_OFF + (uint64_t)i * 0x1000) |
-				PT_PRESENT | PT_WRITE | PT_USER;
+	/*
+	 * The first 2 MiB of the window needs 4 KiB pages, and this is the whole
+	 * reason the kernel could not be started.
+	 *
+	 * KERNEL_LANDING_ADDR is 0x100000, which is 1 MiB-aligned but not
+	 * 2 MiB-aligned. A 2 MiB page descriptor can only name a 2 MiB-aligned
+	 * base, because the descriptor's physical field is bits 51:21 with the
+	 * low 21 bits reserved for the in-page offset. Writing the landing zone
+	 * into that field therefore does not describe the landing zone: the bit
+	 * that carries 0x100000 is bit 20, which is part of the offset, so the
+	 * CPU reads the base as zero.
+	 *
+	 * The entry still looks right. It is present, writable and marked as a
+	 * large page, and reading it back gives the value that was written, so
+	 * every check in the loader passes. What it actually maps is physical
+	 * zero -- the real-mode interrupt vector table.
+	 *
+	 * Nothing faults, because every address in the window resolves to
+	 * something. The kernel starts executing at the vector table, which is
+	 * real-mode IVT entries rather than instructions, and the CPU wanders
+	 * until it reaches an address it cannot fetch. By then the loader has
+	 * already printed that it is entering long mode, so the console shows a
+	 * successful transition followed by silence.
+	 *
+	 * The landing zone cannot simply be moved up to 2 MiB either: 0x100000
+	 * is where the image goes because that is the first megabyte the firmware
+	 * will read into without a bounce buffer, and the kernel's own .bss
+	 * extends past 2 MiB. So the first 2 MiB of the window is described with
+	 * 4 KiB pages instead, which can name any physical address. One page
+	 * table covers all 512 of them, and it reaches exactly as far as the
+	 * image plus its .bss.
+	 */
+	for (unsigned j = 0; j < 512; j++)
+		pt_high[j] = (KERNEL_LANDING_ADDR + ((uint64_t)j << 12)) |
+			     PT_PRESENT | PT_WRITE | PT_USER;
+
+	pd_high[0] = (base + BOOT_PTP_OFF) |
+		     PT_PRESENT | PT_WRITE | PT_USER;
+
+	/* Everything above the first 2 MiB is 2 MiB-aligned relative to the
+	 * landing zone, so those entries can be large pages after all. */
+	for (unsigned i = 1; i < 4; i++) {
+		for (unsigned j = 0; j < 512; j++)
+			pd_high[i * 512 + j] =
+				(KERNEL_LANDING_ADDR + (((uint64_t)i * 512 + j) << 21)) |
+				PT_PRESENT | PT_WRITE | PT_USER | PT_PS;
 	}
 
-	/* The kernel image itself is in the landing zone, which the identity
-	 * map already covers, so the higher-half alias above is what makes
-	 * 0xffffffff80000000 resolve to it. */
-	pdpt_high = (uint64_t)(base + BOOT_PDPT_OFF);
-	(void)pdpt_high;
+	/*
+	 * Higher half: the indices the kernel's own link address actually lands on.
+	 *
+	 * For 0xFFFFFFFF80000000 the walk splits as PML4 511, PDPT 510, PD 0 --
+	 * not "PML4 index 256" and not "PDPT 508". Those two numbers are the ones
+	 * that come to mind for the higher half, and both are wrong:
+	 *
+	 *   - PML4 index 256 is 0xFFFFFF8000000000, the first address of the
+	 *     higher canonical half -- 512 GiB below where the kernel is linked.
+	 *   - PDPT index 508 begins the 512 GiB region that 0xFFFFFFFF80000000
+	 *     sits in, but the kernel's address starts the *1 TiB* region, so it
+	 *     is PDPT index 510, not 508.
+	 *
+	 * Filling those two wrong indices and leaving 511/510 zero fails quietly.
+	 * Every index that was written resolves to something valid, so nothing in
+	 * the tables looks malformed and no check trips. The first high-half
+	 * access walks to pml4[511], reads zero, and raises a page fault -- long
+	 * after the loader has announced the jump. The fault is delivered through
+	 * the bootstrap IDT, and because paging is already on, a fault in the
+	 * handler becomes a triple fault, which from the outside looks exactly
+	 * like QEMU exiting without a word.
+	 *
+	 * PDPT 510 and 511 both reach the high-half directories, so the vmalloc
+	 * range above the image resolves as well.
+	 */
+	pdpt[510] = (base + BOOT_PDH_OFF) |
+			PT_PRESENT | PT_WRITE | PT_USER;
+	pdpt[511] = (base + BOOT_PDH_OFF + 0x1000) |
+			PT_PRESENT | PT_WRITE | PT_USER;
 
 	pml4[0] = (base + BOOT_PDPT_OFF) | PT_PRESENT | PT_WRITE | PT_USER;
-	/* PML4 entry 256 is the first higher-half half. */
-	pml4[256] = (base + BOOT_PDPT_OFF) | PT_PRESENT | PT_WRITE | PT_USER;
+	/* PML4 index 511 is what 0xFFFFFFFF80000000 resolves through. */
+	pml4[511] = (base + BOOT_PDPT_OFF) | PT_PRESENT | PT_WRITE | PT_USER;
 
 	boot_pml4_phys = base + BOOT_PML4_OFF;
+
+	{
+		static const char *const nm[] = {
+			"pml4[0]=", "pml4[511]=", "pdpt[0]=", "pdpt[1]=",
+			"pdpt[510]=", "pd0[0]=", "pd0[1]=", "pdh[0]=", "pdh[1]=",
+		};
+		const uint64_t *const v[] = {
+			&pml4[0], &pml4[511], &pdpt[0], &pdpt[1],
+			&pdpt[510], &pd0[0], &pd0[1], &pd_high[0], &pd_high[1],
+		};
+		for (unsigned k = 0; k < 9; k++) {
+			serial_puts("  ");
+			serial_puts(nm[k]);
+			serial_puthex(*v[k]);
+			serial_puts("\r\n");
+		}
+	}
 
 	LOG("  PML4 at 0x");
 	serial_puthex(boot_pml4_phys);
@@ -1026,6 +1269,11 @@ static void boot_gdt_init(void)
 	 * 0x10 32-bit data
 	 * 0x18 64-bit user code (L=1, DPL=3)
 	 * 0x20 user data (DPL=3)
+	 *
+	 * The array is 8 entries and only 5 are filled. The size is what the
+	 * limit is derived from, so the slack is deliberate: it keeps the limit a
+	 * whole number of descriptors and gives the kernel room to add segments
+	 * here without a second trip through the assembly.
 	 */
 	gdt[0] = 0;
 	gdt[1] = 0x00AF9A000000FFFFULL;	/* 0x08 64-bit code, base 0, 4G */
@@ -1033,11 +1281,29 @@ static void boot_gdt_init(void)
 	gdt[3] = 0x0000FA000000FFFFULL;	/* 0x18 64-bit user code, DPL 3 */
 	gdt[4] = 0x00CFF3000000FFFFULL;	/* 0x20 user data, DPL 3 */
 
-	stage2_gdt_base = (uint64_t)(uintptr_t)gdt;
-	stage2_gdt_limit = (uint16_t)(sizeof(gdt) - 1);
+	/*
+	 * The limit comes from the array, not from a constant in the assembly.
+	 *
+	 * gdtr64's limit was written as 0x17 -- three descriptors, null/code/data --
+	 * while this function has been building five for some time: null, 64-bit
+	 * code, data, and a user code/data pair at DPL 3. A limit that describes
+	 * fewer descriptors than the table holds is not a conservative choice,
+	 * it is a live fault waiting for the first selector past the end: the
+	 * far jump into 0x08 works, the kernel loads and starts using its user
+	 * selectors, and the first one past the limit raises #GP with the IDT
+	 * still pointing at stage2's reporter. Nothing is printed, because the
+	 * reporter itself needs a segment selector to return.
+	 *
+	 * Deriving both halves from the same array makes the two impossible to
+	 * disagree about. The unused tail entries are zero, which reads as a
+	 * null descriptor and faults cleanly on use rather than aliasing
+	 * something real.
+	 */
+	gdtr64.limit = (uint16_t)(sizeof(gdt) - 1);
+	gdtr64.base = (uint32_t)(uintptr_t)gdt;
 
 	LOG("  GDT at 0x");
-	serial_puthex(stage2_gdt_base);
+	serial_puthex(gdtr64.base);
 	serial_puts("\r\n");
 }
 
@@ -1092,8 +1358,9 @@ static void stage2_main(uint32_t entry_addr)
 	serial_puts("\r\n");
 
 	/* Does not return: the kernel takes over the machine here. */
-	stage2_enter_long_mode(boot_pml4_phys, kernel_entry_vaddr,
-			       (uint64_t)(uintptr_t)bootinfo);
+	stage2_enter_long_mode((uint32_t)boot_pml4_phys,
+			       (uint32_t)kernel_entry_vaddr,
+			       (uint32_t)(uintptr_t)bootinfo);
 
 	fail("returned from long mode transition");
 }

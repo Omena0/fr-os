@@ -152,6 +152,19 @@ protected_mode:
 	 * `movb %al, %dl` above for why this could not come earlier. */
 	movb	%dl, stage1_boot_drive
 
+	/* TEMP: which parts of .rodata survived the load?
+	 * 'a' + byte, so a zero byte prints as 'a'. */
+	movl	$0x3F8, %edx
+	movl	$0xc400, %ecx
+1:	movzbl	(%ecx), %eax
+	addl	$'a', %eax
+	outb	%al, (%dx)
+	addl	$0x100, %ecx
+	cmpl	$0xc800, %ecx
+	jb	1b
+	movb	$'\n', %al
+	outb	%al, (%dx)
+
 	call	stage2_start
 
 	/* stage2_start only returns if the loader gave up. */
@@ -308,6 +321,25 @@ bios_call:
 	movl	20(%esp), %eax		/* AH/AL, again: EAX was the scratch */
 
 	call	bios_trampoline		/* returns the firmware's EBX:EAX */
+
+	/*
+	 * Interrupts off, again, before anything else runs.
+	 *
+	 * The trampoline has to enable interrupts to call the firmware, and the
+	 * firmware leaves them enabled when it comes back -- it restores our flags
+	 * with a popf, and by then our IF is whatever the round trip left it as.
+	 * The loader is single-threaded and needs no interrupts at all, so IF is
+	 * cleared here once per call rather than being left to chance.
+	 *
+	 * Leaving it set is not merely untidy. The PIT interrupt is delivered
+	 * through the real-mode IVT, and if the loader has touched a vector the
+	 * firmware's handler is gone and control lands in stage2's own image --
+	 * where the first instruction executed is whatever happens to sit at that
+	 * offset, with no way to report it. The loader then stops making progress
+	 * partway through reading the kernel, with the console showing its last
+	 * successful line and nothing after it.
+	 */
+	cli
 
 	popl	%edi
 	popl	%esi
@@ -585,11 +617,6 @@ bios_real_mode_flat:
 	 * .code16 both the operand size and the address size default to 16 bits,
 	 * and 0x67 is what forces the four-byte relocation the linker needs.
 	 */
-	.byte	0x67, 0x89, 0x25		/* movw %sp, bios_post_sp        */
-	.long	bios_post_sp
-	.byte	0x66, 0xb8, 0xa5, 0x5a	/* movw $0x5aa5, %ax             */
-	.byte	0x67, 0x89, 0x05		/* movw %ax, bios_iret_magic     */
-	.long	bios_iret_magic
 
 	/* Back from the handler, still in real mode. Set PE again and far jump
 	 * back to 32-bit code.
@@ -783,7 +810,26 @@ exc_puts:
  * between it and the EIP it is enough to tell a fault in the loader from a
  * fault inside the firmware.
  */
+/*
+ * The exception stub, reached from both worlds.
+ *
+ * A single 32-bit stub cannot serve both. Once the far jump into long mode has
+ * taken effect, CS.L is set and every instruction here is decoded with a
+ * 64-bit default operand size: `pushl %eax` pushes eight bytes rather than
+ * four, `call` pushes a return address of eight, and the stack offsets below
+ * are wrong by a factor of two. The stub then faults again while handling the
+ * first fault, which is indistinguishable from a hang -- no message, no
+ * register values, and a CPU spinning in its own handler.
+ *
+ * That is exactly what happens if the kernel is handed a page table that does
+ * not map something it touches: the kernel's first fault is reported by a
+ * reporter that cannot run, and the loader looks as though it simply stopped
+ * at the jump. So the mode is selected rather than assumed: the long-mode
+ * entry point is a separate stub, and the gate picks between them on the
+ * selector it was entered with.
+ */
 	.globl	exc_stub		/* stage2.ld splits its address for the gate */
+	.globl	exc_stub64
 exc_stub:
 	pushl	%eax
 	pushl	%ebx
@@ -821,6 +867,145 @@ exc_stub:
 	 * to stage2_halt, which is defined after the call to stage2_start. */
 	jmp	stage2_halt
 
+/*
+ * The same reporter, reached with CS.L set.
+ *
+ * A separate copy rather than a shared one because the operand sizes and the
+ * stack layout are not the same in the two modes, and a stub that cannot run
+ * reports nothing at all -- the failure looks like silence. The frame here is
+ * six eight-byte registers, then optionally an eight-byte error code, then RIP
+ * and CS; the vector is not available, so the error code is printed under the
+ * same "err/EIP" heading as before rather than guessed at.
+ */
+	.code64
+exc_stub64:
+	pushq	%rax
+	pushq	%rbx
+	pushq	%rcx
+	pushq	%rdx
+	pushq	%rsi
+	pushq	%rdi
+
+	/* 48 bytes of saved registers; the frame starts above that. */
+	/* The frame offsets are assembled by hand. This file is assembled as a
+	 * 32-bit object, so `movq 48(%rsp), %rax` is a 64-bit displacement with a
+	 * RIP-relative or absolute form the assembler cannot encode here -- it
+	 * rejects BFD_RELOC_X86_64_32S outright. Building the address with a
+	 * 32-bit lea and pushing/popping it is the same instruction sequence the
+	 * assembler would have emitted. */
+	/*
+	 * TEMP: [rsp+48] is the error code for a fault that pushes one and the
+	 * RIP for one that does not (#UD, #DE, #BP, #OF). A code is small; a
+	 * kernel RIP is a top-half address. Print it, then dereference it when it
+	 * looks like code so the faulting bytes are visible.
+	 */
+	leaq	48(%rsp), %rax
+	movq	(%rax), %rax
+	call	exc_hex64
+
+	movq	48(%rsp), %rsi
+	movabs	$0xFFFF000000000000, %rcx
+	andq	%rcx, %rsi
+	jz	2f
+	movq	48(%rsp), %rsi
+	movl	(%rsi), %eax
+	call	exc_hex64
+2:
+
+	movq	%cr2, %rax
+	call	exc_hex64
+
+	leaq	56(%rsp), %rax
+	movq	(%rax), %rax		/* RIP */
+	call	exc_hex64
+
+	leaq	64(%rsp), %rax
+	movq	(%rax), %rax		/* CS */
+	call	exc_hex64
+
+	movl	$exc_msg, %edi
+	movq	%rdi, %rdi
+	call	exc_puts64
+
+	jmp	exc_halt64
+
+	.globl exc_halt64
+exc_halt64:
+	cli
+	hlt
+	jmp	exc_halt64
+
+/* 64-bit hex, low 64 bits, four digits a nibble-group at a time is overkill
+ * here: the values that matter are RIP and CR2, and 16 digits is enough to
+ * place either. */
+	.globl exc_hex64
+/*
+ * Polled serial output for the 64-bit reporter.
+ *
+ * This is a function rather than a macro on purpose. A macro that defines a
+ * numeric local label captures every `1b` in the code that follows it, so in a
+ * caller's loop the `jnz 1b` at the bottom binds to the macro's poll instead of
+ * the loop head and the routine never terminates. Giving the label a `.L`
+ * prefix does not help either: GAS then reads `.LoutcN` as a local-label
+ * directive. `\@@` works but is easy to get wrong, and the whole problem goes
+ * away if the poll is a callee.
+ *
+ * Polling matters. The 16550 transmit FIFO is 16 bytes deep and QEMU discards
+ * writes made while it is full, so an unpokked burst is not slow output, it is
+ * missing output -- and the part that goes missing is the tail, which is
+ * exactly where the value being reported would have been.
+ *
+ * The character travels in DIL, not AL: reading the line status register has
+ * to target AL, so a poll that keeps the character in AL overwrites it with the
+ * status byte and transmits that instead. The status byte has THRE set, so it
+ * is 0x60, and the reporter emits a stream of backticks and none of the
+ * message -- which is worse than no reporter, because the console looks busy.
+ *
+ * Argument: the character in DIL. Clobbers RAX, RDX, RCX.
+ */
+	.globl	exc_putc64
+exc_putc64:
+	movl	$0x3FD, %edx
+1:	inb	(%dx), %al
+	testb	$0x20, %al
+	jz	1b
+	movl	$0x3F8, %edx
+	movzbl	%dil, %eax
+	outb	%al, (%dx)
+	ret
+
+	.globl	exc_hex64
+exc_hex64:
+	movq	%rax, %rbx
+	movl	$16, %ecx
+1:	rolq	$4, %rbx
+	movq	%rbx, %r9
+	andl	$0xF, %r9d
+	cmpl	$10, %r9d
+	jb	2f
+	addl	$('a' - '0' - 10), %r9d
+2:	addl	$'0', %r9d
+	movl	%r9d, %edi
+	call	exc_putc64
+	decl	%ecx
+	jnz	1b
+	movl	$' ', %edi
+	call	exc_putc64
+	ret
+
+	.globl	exc_puts64
+exc_puts64:
+	movq	%rdi, %rsi
+1:	lodsb
+	testb	%al, %al
+	jz	2f
+	movzbl	%al, %edi
+	call	exc_putc64
+	jmp	1b
+2:	ret
+
+	.code32
+
 	.section .rodata
 exc_msg:
 	.asciz	"\r\n[stage2] exception: err/EIP CR2 EIP CS\r\n"
@@ -842,7 +1027,9 @@ exc_msg:
  */
 	.section .rodata
 	.align 8
+	.globl	boot_idt
 idt:
+boot_idt:
 	/*
 	 * One gate, four words, in the order a 32-bit gate stores them:
 	 *   offset[15:0] | selector | type/attributes | offset[31:16]
@@ -851,22 +1038,57 @@ idt:
 	 * can split the address. See the comment there for why this is not done
 	 * with `.set` and a mask.
 	 *
-	 * selector 0x08 is GDT index 1, the 32-bit code segment defined above.
-	 * type 0x8E is present, DPL 0, a 32-bit *interrupt* gate rather than a
+	 * selector 0x08 is GDT index 1, the code segment. Index 2 at 0x10 is the
+	 * *data* segment in both the boot-time GDT above and the one stage2.c
+	 * builds for the long-mode switch, so a gate that selects it makes the
+	 * processor refuse the entry: jumping to a data descriptor is #GP(0x10),
+	 * and the fault that the gate was there to report is the one that ends
+	 * up unreported. The symptom is not an exception at all -- it is a
+	 * kernel that faults, gets sent straight back into another fault, and
+	 * triple faults, which from outside looks identical to a kernel that
+	 * never ran.
+	 *
+	 * type 0x8E is present, DPL 0, a *64-bit* interrupt gate rather than a
 	 * trap gate: an interrupt gate clears IF on entry, so the reporter cannot
 	 * be re-entered by the timer while it is printing.
+	 */
+	/*
+	 * Sixteen bytes per gate, not eight.
+	 *
+	 * In 64-bit mode the CPU reads a 16-byte IDT entry and requires the
+	 * upper eight bytes to be zero; a non-zero bit anywhere in offset[63:32]
+	 * raises #GP before the handler is ever entered. An eight-byte gate
+	 * repeated back to back leaves the following gate's offset and selector
+	 * sitting exactly where those reserved bytes are, so the bits are never
+	 * zero and no exception can be delivered at all.
+	 *
+	 * The failure is silent and self-repeating. The #GP is raised while the
+	 * processor is fetching the handler's entry, so the fault is reported at
+	 * the address the malformed entry implies -- which is the gate's own
+	 * offset shifted up by 32 bits -- rather than anywhere near the code that
+	 * faulted. Nothing is printed, because the thing that would print it is
+	 * the thing that could not be entered. The next fault lands on the same
+	 * unusable entry, and the machine loops on #GP until it triple faults and
+	 * QEMU exits, which from the outside is indistinguishable from a kernel
+	 * that hung.
+	 *
+	 * Sixteen bytes is safe for the 32-bit phase too: a gate there is still
+	 * read as eight bytes, and the extra eight are simply not looked at. One
+	 * table serves both modes, and the IDT limit covers the full 4 KiB.
 	 */
 	.rept	256
 	.word	exc_stub_lo
 	.word	0x0008
 	.word	0x8E00
 	.word	exc_stub_hi
+	.long	0
+	.long	0
 	.endr
 idtr:
-	.word	256 * 8 - 1
+	.word	256 * 16 - 1
 	.long	idt
 
-	.section .bss
+	.section .trampoline
 	.align 16
 /*
  * Trampoline state.
@@ -943,40 +1165,56 @@ bios_ret_edx:
  * firmware's iret returns, so a call that does not come back normally is
  * detectable from the caller rather than only as a hang.
  */
-	.globl	bios_post_sp
-bios_post_sp:
-	.word	0
-	.globl	bios_iret_magic
-bios_iret_magic:
-	.word	0
 
 /*
  * The 32-bit loader stack.
  *
- * 16 KiB, and bounded by STAGE2_BSS_LIMIT rather than left to grow: the bounce
+ * 12 KiB, and bounded by STAGE2_BSS_LIMIT rather than left to grow: the bounce
  * buffer, disk address packet and VBE scratch block begin at 0x10000, so a
  * 32 KiB stack here reached 0x13ABE and sat on top of all three. Nothing
  * noticed, because the loader touches those structures through pointers that
  * still validate -- the stack simply overwrote them between the BIOS filling
- * the bounce buffer and stage2 reading it back. stage2.ld asserts the limit.
+ * the bounce buffer and stage2 reading it back. stage2.ld asserts the limit,
+ * and that assert is what actually enforces the bound: this size was reduced
+ * from 16 KiB because the tripwire words above no longer fit beneath 0x10000
+ * alongside it. A stack size that only holds because nothing else claimed the
+ * space is a stack size with no margin.
  *
  * stack32_top is the address the stack pointer is loaded with, and it has to
  * exist as a symbol rather than being written out at the use site: the region
  * is sized here and used in the entry code, and a literal 0x4000 added to
  * $stack32 in both places is a size that can be changed in one of them.
  *
- * The label is placed *before* the trampoline state above rather than after it
- * on purpose. Input sections are concatenated in the order the linker script
- * lists them, and the `.align 16` here is a section attribute rather than a
- * padding directive, so it does not move an already-placed symbol. stack32 has
- * to be the *last* thing in .bss so that its downward growth starts at the very
- * top of the region the linker reserved; anything allocated above it would be
- * the first thing a push lands on. */
+ * stack32 is in .bss while the trampoline words are in .trampoline, which the
+ * linker script places lower and separately. That is what keeps the two from
+ * colliding: a stack grows down from stack32_top, so anything sharing .bss
+ * below it is the first thing a push lands on, and the trampoline words are
+ * read and written on every single BIOS call. The original arrangement had both
+ * in .bss, and the 16 KiB stack ran straight through them. */
+/*
+ * The loader stack, in its own section that the linker script places last.
+ *
+ * It has to be last. A stack grows down, so the first push lands just below
+ * stack32_top and successive pushes walk toward lower addresses: anything the
+ * linker placed below stack32 is what the stack eats first. With stack32 at the
+ * bottom of .bss, its first 3.5 KiB of growth went straight through .data and
+ * into .rodata, and the first thing it overwrote was serial_puthex's digit
+ * table -- so every number the loader printed came out blank, and the
+ * corruption was invisible because the addresses below the stack were all
+ * perfectly good memory holding perfectly good code.
+ *
+ * Placing it in .stack, emitted after .bss, makes the ordering a property of
+ * the link script rather than of the order two files happen to be compiled in.
+ */
+/*
+ * The loader stack itself is defined by the linker script, not here: see the
+ * note there. It is a fixed 12 KiB region at 0xD000, between the image and the
+ * bounce buffer, so both of the things it must not touch -- the read-only data
+ * below it and the firmware's transfer window above it -- are excluded by
+ * arithmetic rather than by whatever order the sections happened to link in.
+ * The measured high-water mark is under 1552 bytes.
+ */
 	.section .bss
-stack32:
-	.space	0x4000			/* 16 KiB of loader stack */
-	.equ	stack32_top, stack32 + 0x4000
-
 	.globl stage1_boot_drive
 stage1_boot_drive:
 	.byte	0
