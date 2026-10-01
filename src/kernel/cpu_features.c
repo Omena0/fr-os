@@ -255,8 +255,27 @@ void cpu_features_init(void)
 	FEAT(cpu_features.basic_ecx, 23, CPU_FEATURE_POPCNT);
 	FEAT(cpu_features.basic_ecx, 24, CPU_FEATURE_TSC_DEADLINE);
 	FEAT(cpu_features.basic_ecx, 26, CPU_FEATURE_XSAVE);
-	FEAT(cpu_features.basic_ecx, 27, CPU_FEATURE_OSXSAVE);
-	FEAT(cpu_features.basic_ecx, 28, CPU_FEATURE_AVX);
+	/*
+	 * ECX bit 27 is AVX; bit 28 is OSXSAVE. These were the other way round,
+	 * which made every "can this CPU do X" question in the tree answer the
+	 * wrong thing, and one of the answers was load-bearing.
+	 *
+	 * stage2_long.S gates its XSETBV on ECX.27 && ECX.28. With the bits
+	 * swapped, cpu_features reported OSXSAVE=0 and AVX=1, so the loader's gate
+	 * -- correctly written -- was skipped and XCR0 was never written on any
+	 * machine. Measured three ways on this host: the boot log's feature mask has
+	 * the OSXSAVE bit clear and the AVX bit set, a `-d int` register dump shows
+	 * CR4.OSXSAVE clear, and an exec trace contains no xsetbv at all.
+	 *
+	 * The error direction matters. Swapped this way, `cpu_has(CPU_FEATURE_AVX)`
+	 * answers "can the OS use XCR0", so a CPU with XSAVE and OSXSAVE but no AVX
+	 * -- a KNL, or a hypervisor masking the bit -- passes a check meant to stop
+	 * it. The other way round merely under-reports and disables features, which
+	 * is safe. The mask keeps its bit *IDs*; only the mapping changes, so no
+	 * stored mask is invalidated.
+	 */
+	FEAT(cpu_features.basic_ecx, 27, CPU_FEATURE_AVX);
+	FEAT(cpu_features.basic_ecx, 28, CPU_FEATURE_OSXSAVE);
 	FEAT(cpu_features.basic_ecx, 31, CPU_FEATURE_HYPERVISOR);
 
 	/* CPUID 0x80000001, ECX */

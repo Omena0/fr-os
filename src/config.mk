@@ -59,12 +59,41 @@ OBJ             := $(BUILD)/obj
 # The vector prohibition is the interesting part, and it is at the END of the
 # flag list on purpose.
 #
-# A VEX or SSE instruction is not merely an optimisation here, it is an
-# instruction fault. The register state it needs has to have been enabled
-# through XCR0 before it will execute at all, and the kernel entry path does
-# not and should not program XCR0. So the rule is not "avoid vector code
-# because it is slower", it is "any vector instruction at all is a #UD before
-# the first character is printed".
+# The reason the kernel is GPR-only is NOT that a VEX instruction would fault
+# here. The loader does program XCR0: stage2_long.S:195-251 reads CPUID.1:ECX
+# for AVX (bit 27) and OSXSAVE (bit 28), sets CR4.OSXSAVE, masks whatever the
+# firmware left in XCR0 against CPUID.0x0D subleaf 0, and writes back XCR0|0x7
+# -- x87 | SSE | YMM_Hi128. So on this machine AVX is *enabled*, and a VEX
+# instruction in the kernel would execute.
+#
+# That makes the prohibition three separate things depending on the CPU, which
+# is why it has to be a prohibition and not an inference from a flag:
+#
+#   1. CPU without AVX or without OSXSAVE. The loader takes the .Lno_avx path
+#      and never touches XCR0, so every VEX instruction is #UD. A build that
+#      emits one works on the developer's -cpu max and dies on real hardware,
+#      or the other way round.
+#   2. CPU with AVX, YMM enabled. A VEX instruction in the kernel executes --
+#      and the context switch cannot preserve what it leaves behind.
+#      fpu_save/fpu_restore in context.S are FXSAVE/FXRSTOR, the legacy 512-byte
+#      layout. That layout holds the x87 state and XMM0-XMM15 and nothing
+#      else: YMM_Hi128 is not in it. sched.c calls them on every task switch, so
+#      any YMM upper half a task is holding is silently destroyed when it is
+#      preempted, with no fault and nothing in the log to say so. That is the
+#      failure mode this flag list exists to prevent, and it is worse than the
+#      #UD because it cannot announce itself.
+#   3. A VEX instruction in the kernel is also clobbered by any task switch at
+#      all, since the kernel shares one CPU with the tasks.
+#
+# Note what is deliberately NOT here: -mxsave/-mxsaveopt. Enabling those lets
+# the compiler emit XSAVE/XRSTOR for its own spills, which would change the
+# meaning of a task's state area from "whatever context.S wrote into it" to
+# "whatever the compiler's XSAVE header says is valid", and the two are not
+# reconciled anywhere.
+#
+# So the rule is not "avoid vector code because it is slower". It is "no
+# instruction may write register state that nothing on the kernel side saves
+# and restores across a context switch".
 #
 # Two flags got this wrong before, in the same way, and both were invisible:
 #
@@ -84,6 +113,17 @@ OBJ             := $(BUILD)/obj
 # kernel and fails the build if a single vector instruction survives. The flag
 # list is the policy; the check is what makes it true regardless of what anyone
 # appends to it later.
+#
+# The check is narrower than the policy, in a way worth knowing before relying
+# on it. `verify-isa` runs from the kernel.elf rule only (Makefile:198), so it
+# sees build/kernel.elf and nothing else -- not init.elf, not libc.a. And it
+# exempts fxsave/fxrstor on the grounds that they "move 512 bytes without
+# interpreting any of it", which is true and is also the whole problem: the
+# 512 bytes are the entire contract, and nothing in the build verifies that the
+# contract still covers what the code needs saved. Today it does, because the
+# kernel emits no vector instruction at all -- the exemption is unreachable in
+# the sense that no other vector state exists to lose. Both halves of that
+# sentence are load-bearing and neither is enforced.
 KERNEL_CFLAGS := \
 	-std=gnu11 -ffreestanding -nostdlib -fno-builtin -fno-stack-protector \
 	-fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables \
@@ -119,16 +159,60 @@ BOOT_CFLAGS := \
 BOOT_ASFLAGS := -m32 -I src/include/ -I src/boot/
 
 # -------------------------------------------------------------- userspace ----
-# Userspace targets the same ISA as the kernel but is compiled as ordinary
-# non-PIE position-dependent code: the kernel supplies the entry point and the
-# initial stack, so we keep full control of the process image layout.
+# Userspace is compiled as ordinary non-PIE position-dependent code: the kernel
+# supplies the entry point and the initial stack, so we keep full control of the
+# process image layout.
+#
+# Userspace does NOT target the same ISA as the kernel, and the difference is
+# the whole point of this block.
+#
+# The kernel is GPR-only, which means nothing in the kernel holds register state
+# that a context switch has to carry. Userspace is preemptible and shares one
+# CPU with the kernel, so its register state *is* carried: sched.c:931-933 calls
+# fpu_save(prev->fpu_state) and fpu_restore(next->fpu_state) on every task
+# switch, and those are FXSAVE/FXRSTOR -- the legacy 512-byte image, x87 plus
+# XMM0-XMM15 plus MXCSR and nothing else.
+#
+# So the contract this flag list has to keep is:
+#
+#   XMM (128-bit)     LEGAL.  Covered by the FXSAVE image. Today's init.elf
+#                     contains 46 movaps, 11 movups, 7 movdqa and a few more,
+#                     and every one of those is restored correctly across a
+#                     preemption.
+#
+#   YMM (256-bit)     NOT LEGAL. The upper 128 bits of YMM0-YMM15 are not in
+#                     the FXSAVE layout. A task preempted holding them gets
+#                     them silently overwritten by the next task to run -- no
+#                     fault, no log line, no way to notice except by noticing
+#                     that a computation came out wrong. Only XSAVE/XRSTOR with
+#                     the YMM_Hi128 component set in XCR0 can carry them, and
+#                     nothing on the kernel side does that today.
+#
+#   ZMM/opmask        NOT LEGAL, same reason plus AVX-512 needs components 5, 6
+#                     and 7, which are not in the legacy layout at all.
+#
+# The x86-64 baseline already gives us SSE2, so XMM is legal without asking for
+# it; what has to be forbidden is everything above it, and for the same reason
+# the kernel's -mno- flags are last: on x86 the last -m flag for an ISA feature
+# is the one that counts. `-march=x86-64-v3` is the realistic way this breaks,
+# because it is the natural thing to add to a libc and it silently brings in
+# AVX2, FMA and every YMM user with it.
+#
+# These four flags produce a byte-identical init.elf to the list without them
+# (no VEX instruction is emitted by the current sources, verified by md5), so
+# they are a statement of intent rather than a behaviour change. Unlike the
+# kernel list, they are not backed by a build gate: `verify-isa` is invoked from
+# the kernel.elf rule only (Makefile:198) and never looks at init.elf or
+# libc.a. This list is therefore the *only* thing standing between a future
+# -march= and silent YMM corruption.
 USER_CFLAGS := \
 	-std=gnu11 -ffreestanding -nostdlib -fno-builtin -fno-stack-protector \
 	-fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables \
 	-fno-strict-aliasing -fno-common -m64 -mno-red-zone -mcmodel=small \
 	-O2 -g3 -Wall -Wextra -Wno-unused-parameter \
 	-mbmi -mbmi2 -mpopcnt \
-	-I src/include -I src/libc/include
+	-I src/include -I src/libc/include \
+	-mno-avx -mno-avx2 -mno-fma -mno-f16c
 
 # -static keeps the user image free of an interpreter: the kernel's ELF loader
 # maps PT_LOAD segments and jumps to e_entry. There is no dynamic linker yet.

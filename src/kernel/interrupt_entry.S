@@ -206,10 +206,49 @@ interrupt_common:
 gdt_flush:
 	movq	%rdi, %rax			/* the GDTR pointer, in full */
 	lgdt	(%rax)
-	pushq	$KERNEL_CODE_SELECTOR		/* CS for the far return */
-	leaq	8(%rsp), %rax			/* resume address, past both pushes */
-	pushq	%rax
-	lretq
+	/*
+	 * Three words, because this is a same-privilege return.
+	 *
+	 * IRETQ in 64-bit mode pops RIP, CS and RFLAGS. It pops RSP and SS as well
+	 * only when the new CS has a higher RPL than the current CPL, which is a
+	 * return to a *less* privileged ring. CS here is KERNEL_CODE_SELECTOR, RPL 0,
+	 * at CPL 0, so three is the count. Pushing five made the CPU consume the
+	 * RFLAGS slot and then read the caller's return address as RIP, which is
+	 * where the garbage addresses in the fault dumps came from.
+	 *
+	 * The original pushed two, omitting RFLAGS, so the CPU took RFLAGS from the
+	 * caller's return address instead. Either way the caller's stack is
+	 * disturbed, which is why the fault survived every frame shape tried
+	 * before the descriptor itself was fixed: GDT_ENTRY was never writing byte
+	 * 6, so the code segment had L=0 and the CS load raised #GP regardless of
+	 * what the frame contained.
+	 *
+	 * The resume address is the caller's return address, so IRETQ returns into
+	 * the segment reloads below rather than past them. Those reloads are the
+	 * other half of the reason this function exists, so skipping them leaves
+	 * DS/ES/FS/GS/SS on descriptors LGDT has just invalidated. Three words are
+	 * popped, which puts RSP back exactly where the caller left it, so the `ret`
+	 * at the end needs no adjustment.
+	 *
+	 * That return address is read *before* anything is pushed, not addressed by
+	 * displacement afterwards. With three pushes it happens to sit at 24(%rsp),
+	 * and `leaq 24(%rsp), %rax` is what this used to say -- but the measurement
+	 * showed the two-byte `leaq 8(%rsp)` form it actually shipped, which names
+	 * the RFLAGS slot instead. The frame then held a stack address as RIP, and
+	 * the resume address was left behind it on the stack.
+	 *
+	 * The evidence that the frame was mis-addressed and that the descriptor was
+	 * not: with the corrected GDT_ENTRY the CPU read the frame and faulted with
+	 *   RSP=0xffffffff801abfa0  RAX=0xffffffff801abfb0
+	 * from the iretq itself, which is precisely RSP + 16 -- the address of the
+	 * RFLAGS word, the value RAX held after the lea and before the push. The
+	 * caller's return address was at RSP + 24 where the frame never looked.
+	 */
+	movq	(%rsp), %rax			/* the caller's return address */
+	pushq	$0x202				/* RFLAGS: IF set, plus reserved bit 1 */
+	pushq	$KERNEL_CODE_SELECTOR		/* CS */
+	pushq	%rax				/* RIP */
+	iretq
 	movw	$KERNEL_DATA_SELECTOR, %ax
 	movw	%ax, %ds
 	movw	%ax, %es

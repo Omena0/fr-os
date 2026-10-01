@@ -135,9 +135,13 @@ static void vma_copy(struct vma *dst, const struct vma *src)
  * once rather than twice and, more importantly, the decision to insert and the
  * decision to reject can never be made from two different views of the list.
  *
- * `overlap` reports a VMA strictly containing [start, end): a VMA that is
- * exactly equal is not reported, because VM_FIXED is defined to allow that one
- * case and the caller replaces it.
+ * `overlap` reports a VMA that *intersects* [start, end), in either direction:
+ * one that starts inside the range and one that starts before it and reaches
+ * into it. A VMA is half-open, so one that begins exactly at `end` is disjoint
+ * and is not reported -- which is what lets an adjacent mapping, a split half
+ * of a VMA and the tail of a punch all be re-inserted without a false positive.
+ * `before` is the node the caller must insert *after*; see the note on
+ * list_add() in mm_add_vma().
  */
 static void vma_insertion_point(struct address_space *mm, virt_addr_t start,
 				virt_addr_t end, struct list_head **before,
@@ -151,9 +155,18 @@ static void vma_insertion_point(struct address_space *mm, virt_addr_t start,
 	list_for_each(pos, &mm->vma_list) {
 		struct vma *v = list_entry(pos, struct vma, list);
 
-		if (v->start > end)
+		/* Half-open: [v->start, v->end) starts at v->end at the earliest,
+		 * so a VMA beginning at `end` shares no page with the range and
+		 * neither it nor anything after it can overlap. Testing `>` here
+		 * instead of `>=` reported those as overlaps, which turned every
+		 * re-insert of a freed range into -EEXIST. */
+		if (v->start >= end)
 			break;
-		if (v->start >= start)
+		/* Both halves matter. `v->start >= start` alone misses a VMA that
+		 * begins below the range and extends up into it -- the case where a
+		 * new mapping is dropped into the middle of an existing one, which
+		 * then overlaps it and lands out of order. */
+		if (v->end > start)
 			*overlap = true;
 		*before = pos;
 	}
@@ -404,31 +417,51 @@ void mm_put(struct address_space *mm)
  */
 static int vma_punch(struct address_space *mm, virt_addr_t start, virt_addr_t end)
 {
+	struct vma *head = NULL;
 	struct vma *tail = NULL;
 	struct list_head *pos, *tmp;
 	int rc = 0;
 
 	/*
-	 * At most one VMA can straddle the range, because the list is sorted and
-	 * non-overlapping: everything before it ends at or before `start`, and
-	 * everything after it starts at or after `end`. Finding it first, and
-	 * allocating the tail that the split needs, is what makes the removal
-	 * itself infallible — a caller that gets -ENOMEM here gets an untouched
-	 * address space rather than one missing a VMA it was told still exists.
+	 * Two VMAs can need attention, and they can be the same one: the VMA
+	 * containing `start` keeps everything below it, and the VMA containing
+	 * `end` keeps everything above it. On a sorted, non-overlapping list at
+	 * most one contains each, so one pass finds both.
+	 *
+	 * The tail is allocated here, before anything is modified, which is what
+	 * makes the removal itself infallible: a caller that gets -ENOMEM here
+	 * gets an untouched address space rather than one missing a VMA it was
+	 * told still exists.
+	 *
+	 * Note what the tail's existence is keyed on: `v->end > end`, not
+	 * "`head` straddles". A VMA that contains `start` but ends before `end`
+	 * contributes no tail -- everything from its end to `end` is being
+	 * removed anyway -- and the VMA containing `end` is a separate entry
+	 * that the second pass trims in place.
 	 */
 	list_for_each(pos, &mm->vma_list) {
 		struct vma *v = list_entry(pos, struct vma, list);
 
-		if (v->start < start && v->end > end) {
-			tail = vma_alloc();
-			if (!tail) {
-				rc = -ENOMEM;
-				goto out;
-			}
-			vma_copy(tail, v);
-			tail->start = end;
+		if (v->end <= start)
+			continue;
+		if (v->start >= end)
 			break;
+		if (v->start < start) {
+			head = v;
+			if (v->end > end) {
+				tail = vma_alloc();
+				if (!tail) {
+					rc = -ENOMEM;
+					goto out;
+				}
+				vma_copy(tail, v);
+				tail->start = end;
+			}
+			continue;
 		}
+		/* Not the head, so there is nothing to pre-allocate: whatever this
+		 * is, the second pass either deletes it whole or moves its start. */
+		break;
 	}
 
 	list_for_each_safe(pos, tmp, &mm->vma_list) {
@@ -446,19 +479,28 @@ static int vma_punch(struct address_space *mm, virt_addr_t start, virt_addr_t en
 			continue;
 		}
 
-		/* The head, in the straddle found above. The tail is inserted
-		 * after this VMA has been shortened, so the list stays sorted
-		 * even in the middle. */
-		if (tail) {
+		/* The head. Its end moves up to `start`, and the piece that
+		 * survives past `end` -- which is the tail when this is the same
+		 * VMA -- is re-inserted after it, so the list stays sorted even in
+		 * the middle.
+		 *
+		 * `continue`, not `break`: the VMA containing `end` is a later
+		 * entry whenever the gap between the two VMAs is smaller than the
+		 * range, which is the common case for an mmap region. Breaking here
+		 * left that entry whole and moved this one's *start* to `end`
+		 * instead, producing an interval with end <= start and unmapping
+		 * nothing at all. */
+		if (v == head) {
 			v->end = start;
-			list_add(&tail->list, &v->list);
-			mm->vma_count++;
-			tail = NULL;
-			break;
+			if (tail) {
+				list_add(&tail->list, &v->list);
+				mm->vma_count++;
+				tail = NULL;
+			}
+			continue;
 		}
 
-		/* The tail, when the removal stops inside a VMA but starts at or
-		 * before its first page. */
+		/* The tail, when the removal stops inside a VMA. */
 		v->start = end;
 		break;
 	}
@@ -539,7 +581,18 @@ int mm_add_vma(struct address_space *mm, virt_addr_t start, virt_addr_t end,
 	v->end = end;
 	v->prot = prot;
 	v->flags = flags;
-	list_add_tail(&v->list, before);
+	/*
+	 * list_add(), not list_add_tail(). vma_insertion_point() returns the
+	 * node the new VMA belongs *after* -- the last one that starts below
+	 * `end` -- and list_add() is "insert immediately after pos".
+	 * list_add_tail() splices in at pos->prev, so it put every VMA but the
+	 * first one position too early, and the first insertion into a
+	 * non-empty list landed at the head: the list came out reversed, and
+	 * mm_find_vma() then returned NULL for an address the process owns,
+	 * because it early-returns on the first entry that starts above addr.
+	 * On the empty list both forms agree, which is why one VMA looked fine.
+	 */
+	list_add(&v->list, before);
 	mm->vma_count++;
 
 out:
@@ -559,6 +612,13 @@ int mm_remove_vma(struct address_space *mm, virt_addr_t start, virt_addr_t end)
 	if (end <= start)
 		return -EINVAL;
 	if (!IS_ALIGNED(start, PAGE_SIZE) || !IS_ALIGNED(end, PAGE_SIZE))
+		return -EINVAL;
+	/* The same user-half bound mm_add_vma() applies. syscall.c's
+	 * mmap(MAP_FIXED) punches the range and *then* adds, discarding this
+	 * function's return value, so a request above the limit used to destroy
+	 * the process's own mappings there and fail the add afterwards. Symmetry
+	 * with the insert is what makes the pair refuse instead. */
+	if (start >= MM_USER_LIMIT || end > MM_USER_LIMIT)
 		return -EINVAL;
 
 	flags = spinlock_irqsave(&mm->lock);

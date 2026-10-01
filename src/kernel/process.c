@@ -307,6 +307,31 @@ bool user_range_ok(struct address_space *mm, u64 addr, size_t len)
  */
 static void *user_page(struct address_space *mm, virt_addr_t vaddr, bool write)
 {
+	/*
+	 * Bound-check before translating, not after.
+	 *
+	 * A process PML4 carries the direct map at PML4[256], so the four-level
+	 * walk happily resolves a *user* address such as 0x800000001000: PML4 index
+	 * 256 lands in the direct map and the translation succeeds, returning
+	 * physical 0x1000. phys_to_virt() then hands the caller a kernel pointer
+	 * to a frame the process does not own, and every user-supplied address
+	 * that reaches here without a prior range check is a read or write of
+	 * arbitrary kernel-reachable memory.
+	 *
+	 * `vmm_translate` cannot do this check itself: it is also used to walk
+	 * kernel addresses, which are of course far above USER_ADDRESS_MAX. The
+	 * user half has to be policed where the user half is known, which is here.
+	 *
+	 * The callers that validate ranges already did, so this is a second line
+	 * of defence -- but it is the one that does not depend on every future
+	 * caller remembering. Both routes that reach user_page() with an
+	 * ELF-controlled or syscall-controlled address rely on some other check
+	 * today, and a check that depends on every caller being careful is not
+	 * a check.
+	 */
+	if (vaddr >= USER_ADDRESS_MAX)
+		return NULL;
+
 	phys_addr_t phys = vmm_translate(mm->pgd, vaddr, NULL);
 
 	if (phys)
@@ -477,6 +502,21 @@ long user_memory_write(struct address_space *mm, virt_addr_t addr,
 		       const void *src, size_t len, uint32_t prot)
 {
 	size_t done = 0;
+
+	/*
+	 * The whole range must be in the user half before a single byte moves.
+	 *
+	 * This is called from the ELF loader with a `p_vaddr` straight out of the
+	 * image, so the address is exactly as trustworthy as the file. Without
+	 * this, a segment with a p_vaddr of 0x800000000000 reaches user_page(),
+	 * lands on PML4[256], and is written through a direct-map pointer.
+	 *
+	 * Checking the whole range up front rather than per page is deliberate:
+	 * a partial write that faults halfway leaves the process with some of an
+	 * image mapped and some not, which is worse than refusing.
+	 */
+	if (!user_range_ok(mm, addr, len))
+		return -EFAULT;
 
 	while (done < len) {
 		virt_addr_t vaddr = (virt_addr_t)ALIGN_DOWN(addr + done, PAGE_SIZE);

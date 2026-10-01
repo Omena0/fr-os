@@ -396,20 +396,50 @@ void pt_free(phys_addr_t pgd, unsigned count)
 }
 
 /* Build the PD and PT that `virt` needs but does not have yet. */
+/*
+ * Create whatever intermediate tables an address needs, top down.
+ *
+ * This used to build a PD and a PT and nothing else, and bailed with -1 if the
+ * PDPT was absent. Nothing else in the tree ever created a PDPT or a PML4 entry,
+ * so:
+ *
+ *   - vmalloc() mapped at VMALLOC_AREA = 0xFFFFC00000000000, which is PML4
+ *     index **384**. Nothing installed PML4[384] in the kernel PML4, so every
+ *     single vmalloc returned NULL. That silently took out vma_alloc() (every
+ *     mm_add_vma), kstack_alloc(), and every kmalloc() larger than 4096 --
+ *     and it did so by returning failure, not by faulting, so nothing looked
+ *     broken until something needed one of them.
+ *
+ *   - a user address space has PML4[256] and PML4[511] and nothing else, so
+ *     PML4[0..255] are zero. Every user address failed the walk, demand paging
+ *     returned -ENOMEM, and execve failed at the first write to user memory.
+ *
+ * The fix is to walk down from the PML4 creating whatever is missing at each
+ * level. Supervisor-only, always: a user process must not be able to reach the
+ * tables that describe it. User *access* to the pages those tables map is a
+ * separate matter, decided per-PTE below.
+ */
 static int build_missing_tables(phys_addr_t pgd, virt_addr_t virt)
 {
-	phys_addr_t table = walk(pgd, virt, 2, NULL);
+	phys_addr_t table = pgd;
 	phys_addr_t fresh;
 
-	if (!table) {
-		phys_addr_t pdpt = walk(pgd, virt, 3, NULL);
+	/* Level 3 is the PML4 entry, then PDPT, then PD. Stop once a table that
+	 * is already present is reached: everything below it exists. */
+	for (int level = 3; level >= 2; level--) {
+		phys_addr_t next = walk(pgd, virt, level, NULL);
 
-		if (!pdpt)
-			return -1;
+		if (next) {
+			table = next;
+			continue;
+		}
+
 		fresh = pt_alloc_zeroed(1);
 		if (!fresh)
 			return -1;
-		((uint64_t *)phys_to_virt(pdpt))[PD_ENTRY_OF(virt)] =
+
+		((uint64_t *)phys_to_virt(table))[
+			(level == 3 ? PML4_ENTRY_OF(virt) : PDPT_ENTRY_OF(virt))] =
 			fresh | PTE_PRESENT | PTE_WRITE;
 		table = fresh;
 	}

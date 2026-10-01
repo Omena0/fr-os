@@ -20,63 +20,87 @@
 #define GDT_ACCESS_ACCESSED   (1 << 0)
 
 /* Flags nibble bits (the byte following base:limit). */
-#define GDT_FLAG_GRANULARITY  (1 << 7)  /* limit is scaled by 4096 */
-#define GDT_FLAG_64BIT        (1 << 5)  /* L bit: 64-bit code segment */
-#define GDT_FLAG_DB           (1 << 6)  /* B bit: 32-bit, default operand size */
-#define GDT_FLAG_LONG_MODE    (1 << 5)
+#define GDT_FLAG_GRANULARITY  (1 << 3)  /* G: limit is scaled by 4096 */
+#define GDT_FLAG_64BIT        (1 << 1)  /* L: 64-bit code segment */
+#define GDT_FLAG_DB           (1 << 2)  /* B/DB: 32-bit default operand size */
+#define GDT_FLAG_LONG_MODE    (1 << 1)
 
-/* Compose a descriptor. `limit` is in bytes; with GRANULARITY it is in 4 KiB
- * pages. `base` is the 64-bit linear base. */
-#define GDT_ENTRY(flags, base, limit) \
+/*
+ * Compose one descriptor.
+ *
+ * The 64-bit layout, byte by byte:
+ *
+ *   0-1  limit[15:0]        2-3  base[15:0]     4    base[23:16]
+ *   5    access             6    flags|lim[19:16]
+ *   7    base[31:28]        8-9  base[47:32]
+ *
+ * `flags` is the *byte-6* field -- AVL, L, DB, G -- and `base`/`limit` are
+ * split across every byte they touch.
+ *
+ * This macro used to place `flags` in the access byte instead and never wrote
+ * byte 6 at all. Everything then shifted: a kernel code descriptor came out as
+ * 0x0000ba000000ffff, where 0xba is the access byte with the flags folded into
+ * it and the flags nibble is zero. **L is therefore 0** -- a 16-bit code
+ * segment -- and loading CS with it in long mode raises #GP with the selector
+ * in the error code. The kernel was executing on stage2's descriptor, which is
+ * correct, so nothing looked wrong until the first `lgdt`.
+ *
+ * The same collapse destroyed every DPL, because the flag constants alias the
+ * access byte's own bits: GDT_FLAG_64BIT/LONG_MODE is 1<<5, which is DPL bit 1,
+ * and GDT_FLAG_DB is 1<<6, which is DPL bit 0. GDT_ACCESS_RING3 is (3<<6),
+ * giving DPL 2 rather than 3. So the user descriptors were DPL 1 or 2, and a
+ * SYSRET to them would have #GP'd immediately after the first fault was fixed.
+ *
+ * That is why the #GP survived three different far-return frame shapes: the
+ * frame was never the problem.
+ */
+#define GDT_ENTRY(access, flags, base, limit) \
 	(((uint64_t)(limit) & 0xFFFFULL) \
 	 | (((uint64_t)(base) & 0xFFFFFFULL) << 16) \
-	 | (((uint64_t)(flags) & 0xFFULL) << 40) \
-	 | (((uint64_t)(base) >> 24) & 0xFFULL) << 56)
+	 | (((uint64_t)(access) & 0xFFULL) << 40) \
+	 | ((((uint64_t)(limit) >> 16) & 0xFULL) << 48) \
+	 | (((uint64_t)(flags) & 0xFULL) << 52) \
+	 | ((((uint64_t)(base) >> 24) & 0xFFULL) << 56))
 
 /* The canonical flat segments used by both stages. A limit of 0xFFFFF with a
  * 4 KiB granularity gives exactly 2^47 bytes, which is every canonical address
  * on a 48-bit virtual machine. */
 #define GDT_CODE64_FLAGS \
-	(GDT_ACCESS_PRESENT | GDT_ACCESS_RING0 | GDT_ACCESS_SEGMENT | \
-	 GDT_ACCESS_CODE | GDT_ACCESS_EXEC | GDT_FLAG_GRANULARITY | GDT_FLAG_LONG_MODE)
+	GDT_ACCESS_PRESENT | GDT_ACCESS_RING0 | GDT_ACCESS_SEGMENT | GDT_ACCESS_CODE | GDT_ACCESS_EXEC | GDT_ACCESS_ACCESSED
+
 
 #define GDT_DATA_FLAGS \
-	(GDT_ACCESS_PRESENT | GDT_ACCESS_RING0 | GDT_ACCESS_SEGMENT | \
-	 GDT_ACCESS_DATA | GDT_ACCESS_RW | GDT_ACCESS_ACCESSED | \
-	 GDT_FLAG_GRANULARITY | GDT_FLAG_DB)
+	GDT_ACCESS_PRESENT | GDT_ACCESS_RING0 | GDT_ACCESS_SEGMENT | GDT_ACCESS_DATA | GDT_ACCESS_RW | GDT_ACCESS_ACCESSED
+
 
 #define GDT_CODE32_FLAGS \
-	(GDT_ACCESS_PRESENT | GDT_ACCESS_RING0 | GDT_ACCESS_SEGMENT | \
-	 GDT_ACCESS_CODE | GDT_ACCESS_EXEC | GDT_ACCESS_ACCESSED | \
-	 GDT_FLAG_GRANULARITY | GDT_FLAG_DB)
+	GDT_ACCESS_PRESENT | GDT_ACCESS_RING0 | GDT_ACCESS_SEGMENT | GDT_ACCESS_CODE | GDT_ACCESS_EXEC | GDT_ACCESS_ACCESSED
+
 
 #define GDT_USER_CODE64_FLAGS \
-	(GDT_ACCESS_PRESENT | GDT_ACCESS_RING3 | GDT_ACCESS_SEGMENT | \
-	 GDT_ACCESS_CODE | GDT_ACCESS_EXEC | GDT_ACCESS_ACCESSED | \
-	 GDT_FLAG_GRANULARITY | GDT_FLAG_LONG_MODE)
+	GDT_ACCESS_PRESENT | GDT_ACCESS_RING3 | GDT_ACCESS_SEGMENT | GDT_ACCESS_CODE | GDT_ACCESS_EXEC | GDT_ACCESS_ACCESSED
+
 
 #define GDT_USER_DATA_FLAGS \
-	(GDT_ACCESS_PRESENT | GDT_ACCESS_RING3 | GDT_ACCESS_SEGMENT | \
-	 GDT_ACCESS_DATA | GDT_ACCESS_RW | GDT_ACCESS_ACCESSED | \
-	 GDT_FLAG_GRANULARITY | GDT_FLAG_DB)
+	GDT_ACCESS_PRESENT | GDT_ACCESS_RING3 | GDT_ACCESS_SEGMENT | GDT_ACCESS_DATA | GDT_ACCESS_RW | GDT_ACCESS_ACCESSED
+
 
 #define GDT_USER_CODE32_FLAGS \
-	(GDT_ACCESS_PRESENT | GDT_ACCESS_RING3 | GDT_ACCESS_SEGMENT | \
-	 GDT_ACCESS_CODE | GDT_ACCESS_EXEC | GDT_ACCESS_ACCESSED | \
-	 GDT_FLAG_GRANULARITY | GDT_FLAG_DB)
+	GDT_ACCESS_PRESENT | GDT_ACCESS_RING3 | GDT_ACCESS_SEGMENT | GDT_ACCESS_CODE | GDT_ACCESS_EXEC | GDT_ACCESS_ACCESSED
 
-#define GDT_LCODE64  GDT_ENTRY(GDT_CODE64_FLAGS, 0, 0xFFFFF)
-#define GDT_LDATA64  GDT_ENTRY(GDT_DATA_FLAGS,  0, 0xFFFFF)
-#define GDT_LCODE32  GDT_ENTRY(GDT_CODE32_FLAGS, 0, 0xFFFFF)
-#define GDT_LDATA32  GDT_ENTRY(GDT_DATA_FLAGS,  0, 0xFFFFF)
-#define GDT_LUSER64  GDT_ENTRY(GDT_USER_CODE64_FLAGS, 0, 0xFFFFF)
-#define GDT_LUSERDATA GDT_ENTRY(GDT_USER_DATA_FLAGS, 0, 0xFFFFF)
+
+#define GDT_LCODE64  GDT_ENTRY(GDT_CODE64_FLAGS, GDT_FLAG_GRANULARITY | GDT_FLAG_LONG_MODE, 0, 0xFFFFF)
+#define GDT_LDATA64  GDT_ENTRY(GDT_DATA_FLAGS,  GDT_FLAG_GRANULARITY, 0, 0xFFFFF)
+#define GDT_LCODE32  GDT_ENTRY(GDT_CODE32_FLAGS, GDT_FLAG_GRANULARITY | GDT_FLAG_DB, 0, 0xFFFFF)
+#define GDT_LDATA32  GDT_ENTRY(GDT_DATA_FLAGS,  GDT_FLAG_GRANULARITY | GDT_FLAG_DB, 0, 0xFFFFF)
+#define GDT_LUSER64  GDT_ENTRY(GDT_USER_CODE64_FLAGS, GDT_FLAG_GRANULARITY | GDT_FLAG_LONG_MODE, 0, 0xFFFFF)
+#define GDT_LUSERDATA GDT_ENTRY(GDT_USER_DATA_FLAGS, GDT_FLAG_GRANULARITY, 0, 0xFFFFF)
 
 /* Index 3: a 32-bit ring-3 code descriptor that user code never executes on.
  * It exists only so SYSRET's arithmetic lands in the right place — see
  * "Selector Arithmetic" in docs/src/kernel/privilege-levels.md. SYSRET computes
  * CS = STAR[63:48] + 16, and this is the descriptor STAR[63:48] names. */
-#define GDT_LUSERCODE32 GDT_ENTRY(GDT_USER_CODE32_FLAGS, 0, 0xFFFFF)
+#define GDT_LUSERCODE32 GDT_ENTRY(GDT_USER_CODE32_FLAGS, GDT_FLAG_GRANULARITY | GDT_FLAG_DB, 0, 0xFFFFF)
 
 /* GDT indices. These are not the selector values: a selector is an index
  * shifted left by three, with the requested privilege level in the low two

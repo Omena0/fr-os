@@ -10,6 +10,38 @@
  * free to *use* the whole feature set once confirmed present. Every feature is
  * still gated behind a cached check rather than assumed, so the same image runs
  * on a subset machine instead of faulting.
+ *
+ * One correction to the paragraph above, because "once confirmed present" is
+ * true for instruction-set *encodings* and false for the register state they
+ * need: cpu_has(CPU_FEATURE_AVX) says the CPU can decode a VEX instruction, not
+ * that the OS has enabled the registers it writes. A VEX instruction executes
+ * only if all four of these hold --
+ *
+ *   CR0.TS       clear   (set on the protected->real mode transition the loader
+ *                          goes through; nothing in this tree issues CLTS)
+ *   CR4.OSXSAVE  set     (stage2_long.S sets it, gated on CPUID.1:ECX.28)
+ *   XCR0.SSE     set     (stage2_long.S ORs 0x7 into XCR0 when the CPU reports
+ *                          AVX *and* OSXSAVE)
+ *   XCR0.YMMHi128 set
+ *
+ * and none of those three control-register conditions is visible in
+ * feature_mask. cpu_can_use_ymm() below is the predicate that asks all of them.
+ *
+ * The second thing this header does not and should not answer is whether the
+ * state is *preserved*. That is a property of the context switch, not of the
+ * CPU, and it lives in context.S:
+ *
+ *   x87 + XMM0-XMM15 + MXCSR   preserved. fpu_save/fpu_restore are
+ *                              FXSAVE/FXRSTOR, the legacy 512-byte image, and
+ *                              sched.c calls them on every task switch.
+ *   YMM upper 128 bits         NOT preserved. The legacy layout has no room for
+ *                              them. A task preempted holding them is silently
+ *                              clobbered -- no fault, no log line.
+ *   opmask / ZMM_Hi256 /       NOT preserved, and not even addressable in a
+ *   HI16_ZMM / PKRU            legacy image.
+ *
+ * So "CPU has AVX2" and "the kernel may use AVX2" are different questions with
+ * different answers, and only the second one is constrained here.
  */
 #ifndef CPU_FEATURES_H
 #define CPU_FEATURES_H
@@ -70,10 +102,35 @@
 #define CPU_FEATURE_POPCNT      (1ULL << 18)  /* 1:ECX 23                        */
 #define CPU_FEATURE_TSC_DEADLINE (1ULL << 19) /* 1:ECX 24  local APIC TSC deadline*/
 #define CPU_FEATURE_XSAVE       (1ULL << 20)  /* 1:ECX 26                        */
-#define CPU_FEATURE_OSXSAVE     (1ULL << 21)  /* 1:ECX 27                        */
-/* AVX is leaf 1 ECX bit 28. The old constant said "leaf 7 EBX bit 0", which is
- * FSGSBASE — so cpu_has(CPU_FEATURE_AVX) was reporting FSGSBASE. */
-#define CPU_FEATURE_AVX         (1ULL << 22)  /* 1:ECX 28                        */
+/* CPUID.1:ECX is 26 = XSAVE, 27 = AVX, 28 = OSXSAVE, in that order.
+ *
+ * The header said "AVX is leaf 1 ECX bit 28", which is OSXSAVE, and
+ * cpu_features.c:258-259 implemented that same transposition --
+ * CPU_FEATURE_OSXSAVE is fed from bit 27 and CPU_FEATURE_AVX from bit 28. So
+ * cpu_has(CPU_FEATURE_AVX) has been answering "does the OS support XCR0" and
+ * cpu_has(CPU_FEATURE_OSXSAVE) has been answering "is there an AVX unit", and
+ * the two are swapped for every caller.
+ *
+ * The direction of the error matters. cpu_has(CPU_FEATURE_AVX) is
+ * over-optimistic -- a CPU with XSAVE and OSXSAVE but no AVX (Knights Landing,
+ * or a hypervisor masking the AVX bit) reports it present. Anything that gates
+ * a VEX instruction on it gets past a check that was supposed to stop it.
+ * cpu_has(CPU_FEATURE_OSXSAVE) is under-reporting, which merely disables
+ * features.
+ *
+ * Observed on the boot that produced `features 0x007387bed7d77fff`: mask bit 21
+ * (OSXSAVE) reads 0 and bit 22 (AVX) reads 1, which decodes as CPUID.1:ECX.27
+ * = 0 and .28 = 1. Nothing else in the system reports AVX as absent -- klog
+ * prints `avx2=1` from leaf 7 -- so leaf 1 bit 27 really is clear here.
+ *
+ * The constants below keep their IDs, because the IDs are allocated positions
+ * and relabelling one would invalidate every stored mask. What matters is that
+ * the *comment* now says which CPUID bit each is fed from, and that
+ * cpu_can_use_ymm() reads the raw register instead of trusting the mapping.
+ * Fixing cpu_features.c to read 27 for AVX and 28 for OSXSAVE is a two-line
+ * change that makes the mask agree with these comments. */
+#define CPU_FEATURE_OSXSAVE     (1ULL << 21)  /* 1:ECX 28  (see note above)    */
+#define CPU_FEATURE_AVX         (1ULL << 22)  /* 1:ECX 27  (see note above)    */
 #define CPU_FEATURE_HYPERVISOR  (1ULL << 23)  /* 1:ECX 31                        */
 
 /* CPUID.0x80000001:ECX — IDs 24..27 */
@@ -149,9 +206,11 @@
 #define CR4_PGE      (1u << 7)
 #define CR4_OSFXSR   (1u << 9)
 #define CR4_OSXMMEXCPT (1u << 10)
+#define CR4_PCIDE    (1u << 17)
+#define CR4_OSXSAVE  (1u << 18)   /* XGETBV/XSETBV legal */
 #define CR4_SMEP     (1u << 20)
 #define CR4_SMAP     (1u << 21)
-#define CR4_PCIDE    (1u << 17)
+#define CR4_FSGSBASE (1u << 16)
 
 /* Control register 0 bits. */
 #define CR0_PE       (1u << 0)
@@ -161,6 +220,73 @@
 #define CR0_NE       (1u << 5)   /* native FPU error reporting */
 #define CR0_WP       (1u << 16)  /* write protect */
 #define CR0_PG       (1u << 31)
+
+/* XCR0 (XFEATURE_ENABLED_MASK) state-component bits, as written by XSETBV. */
+#define XCR0_X87        (1ULL << 0)
+#define XCR0_SSE        (1ULL << 1)
+#define XCR0_AVX        (1ULL << 2)   /* YMM_Hi128 */
+#define XCR0_BNDREGS    (1ULL << 3)
+#define XCR0_BNDCSR     (1ULL << 4)
+#define XCR0_OPMASK     (1ULL << 5)
+#define XCR0_ZMM_HI256  (1ULL << 6)
+#define XCR0_HI16_ZMM   (1ULL << 7)
+#define XCR0_PKRU       (1ULL << 9)
+
+/* The same components as XFEATURE_MASK (what CPUID.0x0D subleaf n reports in
+ * EAX), which is the bit the loader masks XCR0 against. */
+#define XSTATE_X87       0x001u
+#define XSTATE_SSE       0x002u
+#define XSTATE_AVX       0x004u
+#define XSTATE_BNDREGS   0x008u
+#define XSTATE_BNDCSR    0x010u
+#define XSTATE_OPMASK    0x020u
+#define XSTATE_ZMM_HI256 0x040u
+#define XSTATE_HI16_ZMM  0x080u
+#define XSTATE_PKRU      0x200u
+
+/* The minimum XCR0 for a VEX-encoded 256-bit instruction to execute. */
+#define XCR0_REQUIRED_AVX  (XCR0_SSE | XCR0_AVX)
+
+/* The minimum XCR0 for an AVX-512 encoding (EVEX) to execute. */
+#define XCR0_REQUIRED_AVX512 \
+	(XCR0_SSE | XCR0_AVX | XCR0_OPMASK | XCR0_ZMM_HI256 | XCR0_HI16_ZMM)
+
+/* Read CR0. 64-bit operand: in long mode CR0 is the full 64-bit register, and
+ * the upper half reads as zero on every part that has a 64-bit CR0. */
+static inline uint64_t cpu_read_cr0(void)
+{
+	uint64_t v;
+
+	__asm__ volatile("mov %%cr0, %0" : "=r"(v));
+	return v;
+}
+
+/*
+ * Read XCR0.
+ *
+ * XGETBV is #UD, not #GP, until CR4.OSXSAVE is set -- there is no signature to
+ * trap on and nothing in a fault dump that names it -- so the caller must have
+ * established OSXSAVE first. cpu_has(CPU_FEATURE_OSXSAVE) is the gate: the
+ * loader sets CR4.OSXSAVE only on a CPU that reports CPUID.1:ECX.28, so the bit
+ * and the control-register state cannot disagree. Defined below cpu_has().
+ */
+static inline uint64_t cpu_read_xcr0(void);
+
+/*
+ * May this kernel legally execute a VEX-encoded 256-bit instruction?
+ *
+ * NOT the same question as cpu_has(CPU_FEATURE_AVX). That one asks whether the
+ * CPU can decode it; this one asks whether the registers it writes exist and
+ * whether the FPU is even switched in.
+ *
+ * And the answer is still not "yes, go ahead". Executing one is only half the
+ * problem: nothing in the context switch carries a YMM register across a task
+ * switch (see the header comment), so an answer of true here means "the
+ * instruction will not fault", not "its results will survive a preemption". The
+ * second half needs XSAVE/XRSTOR in context.S with XCR0_AVX set in the state
+ * component bitmap, and that does not exist.
+ */
+static inline bool cpu_can_use_ymm(void);
 
 struct cpu_features {
 	char     vendor[13];
@@ -217,6 +343,61 @@ void cpu_features_init(void);
 static inline bool cpu_has(uint64_t feature)
 {
 	return (cpu_features.feature_mask & feature) != 0;
+}
+
+/*
+ * Read CPUID.1:ECX directly, bypassing feature_mask.
+ *
+ * The mask is a permutation of the raw registers at two places (see the note on
+ * CPU_FEATURE_AVX), so a predicate that has to be right about AVX cannot afford
+ * to go through it. This is the authoritative form and cpu_has() is the
+ * convenient one.
+ */
+static inline bool cpu_has_avx(void)
+{
+	return (cpu_features.basic_ecx & (1u << 27)) != 0;  /* AVX     */
+}
+
+static inline bool cpu_has_osxsave(void)
+{
+	return (cpu_features.basic_ecx & (1u << 28)) != 0;  /* OSXSAVE */
+}
+
+static inline bool cpu_has_xsave(void)
+{
+	return (cpu_features.basic_ecx & (1u << 26)) != 0;  /* XSAVE   */
+}
+
+/*
+ * Read CR4. OSXSAVE is bit 18 and it is a different question from CPUID's
+ * OSXSAVE: the CPUID bit says the CPU *can* be asked about XCR0, the CR4 bit
+ * says XGETBV is legal. Reading XCR0 with CR4.OSXSAVE clear is #UD, not #GP.
+ */
+static inline uint64_t cpu_read_cr4(void)
+{
+	uint64_t v;
+
+	__asm__ volatile("mov %%cr4, %0" : "=r"(v));
+	return v;
+}
+
+static inline uint64_t cpu_read_xcr0(void)
+{
+	uint32_t lo, hi;
+
+	if (!cpu_has_osxsave() || !(cpu_read_cr4() & CR4_OSXSAVE))
+		return 0;
+	__asm__ volatile("xgetbv" : "=a"(lo), "=d"(hi) : "c"(0));
+	return ((uint64_t)hi << 32) | lo;
+}
+
+static inline bool cpu_can_use_ymm(void)
+{
+	if (!cpu_has_avx() || !cpu_has_osxsave())
+		return false;
+	if (cpu_read_cr0() & CR0_TS)
+		return false;  /* #NM on the first SSE or x87 instruction */
+	return (cpu_read_xcr0() & XCR0_REQUIRED_AVX) == XCR0_REQUIRED_AVX;
 }
 
 /* Read the vendor string. */

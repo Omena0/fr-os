@@ -12,6 +12,7 @@
 #include <interrupt.h>
 
 #include <console.h>
+#include <drivers/serial.h>
 #include <gdt.h>
 #include <io.h>
 #include <klog.h>
@@ -218,6 +219,10 @@ void idt_set_handler(uint8_t vector, irq_handler_t handler, uint8_t ist,
  */
 static void exception_handler(struct interrupt_frame *f);
 
+/* The PIT bring-up, defined with the other 8259 code further down and called
+ * from idt_init() once the IDTR is loaded. */
+static void pit_init(void);
+
 void exceptions_init(void)
 {
 	static void (*const stubs[VECTOR_EXCEPTIONS_MAX])(void) = {
@@ -315,6 +320,19 @@ void idt_init(void)
 
 	klog(KLOG_INFO, "idt: %u entries at %#llx, %u bytes\n", IDT_ENTRIES,
 	     (unsigned long long)idtr.base, (unsigned)idtr.limit);
+
+	/*
+	 * The timer is started here rather than from main.c for two reasons,
+	 * both about ordering rather than convenience.
+	 *
+	 * 1. This is the first instruction of kernel initialisation at which a
+	 *    vector can be delivered to: the gates exist, the IDTR is loaded, and
+	 *    exceptions_init() has run. Nothing earlier would work.
+	 * 2. It has to be before sched_start(), which never returns. Anything
+	 *    that wants to print the tick count has to do so after this point
+	 *    and before the scheduler takes the CPU away.
+	 */
+	pit_init();
 }
 
 /* ------------------------------------------------- exception policy ------- */
@@ -479,12 +497,31 @@ fatal:
 	 * Not survivable. panic() writes the full register set through its own
 	 * serial path without touching the scheduler or the allocator, because
 	 * either of those may be the thing that broke.
+	 *
+	 * CS and the ring go into the message, and that is not decoration. CS
+	 * cannot be a MOV destination in 64-bit mode, so there is no instruction
+	 * here that could read it, and panic.S's comment claims a "caller-side
+	 * stub" records it — this is that stub, and the only honest way to get
+	 * the value is the one the CPU already put in the frame. It goes in the
+	 * message rather than in panic_state.cs because panic_common() calls
+	 * panic_regs() first and that overwrites the whole tail of the struct;
+	 * the message is formatted after it and survives.
+	 *
+	 * The "cs %p" field that panic_common() prints from panic_state is NOT
+	 * that CS, and it cannot be made to be from here: panic.S's field
+	 * numbering has no cs slot at all, so it stores RFLAGS into the cs
+	 * offset and everything after it is one slot short. See the report. Until
+	 * panic.S is fixed, read CS and RPL off this line and off the #EXC line
+	 * above it, both of which are read from the real frame.
 	 */
 	report_exception(f, from_user ? "kernel panic (user exception)"
 				       : "kernel panic");
-	panic("unhandled exception: %s (vector %lu) at rip 0x%lx",
+	panic("unhandled exception: %s (vector %lu) at rip 0x%lx, cs 0x%04lx "
+	      "rpl %lu, entered from %s",
 	      exception_name(f->vector), (unsigned long)f->vector,
-	      (unsigned long)f->rip);
+	      (unsigned long)f->rip, (unsigned long)f->cs,
+	      (unsigned long)(f->cs & 3),
+	      from_user ? "ring 3" : "ring 0");
 }
 
 /* ------------------------------------------------- 8259 PIC --------------- */
@@ -498,8 +535,28 @@ fatal:
 #define PIC1_VECTOR_BASE 0x20
 #define PIC2_VECTOR_BASE 0x28
 
+/*
+ * One remap per boot, enforced here rather than at the call sites.
+ *
+ * tty.c keeps its own `pic_remapped` bool with a comment saying the guard has
+ * to be somewhere, and it is right that it is needed — but a guard in each
+ * caller cannot see the other callers, and this is now one of several: the
+ * timer below remaps because it needs the vector offset, the keyboard remaps
+ * because it needs a vector in range. A second ICW1 sequence is not harmless:
+ * it re-enters initialisation on a controller that is already in 8086 mode
+ * with a cascade wired, and it finishes by masking every line again, which
+ * silently disarms the timer that the first caller had just unmasked. Two
+ * subsystems each believing they own the sequence is the same hazard
+ * idt_set_handler() refuses for a vector, in one place further down.
+ */
+static bool pic_remapped;
+
 void pic_remap(void)
 {
+	if (pic_remapped)
+		return;
+	pic_remapped = true;
+
 	/*
 	 * The BIOS leaves both PICs identity-mapped, so IRQ 8 lands on vector 8,
 	 * which the CPU has already defined as #DF. The first timer interrupt
@@ -531,6 +588,152 @@ void pic_remap(void)
 
 	klog(KLOG_INFO, "pic: remapped to %#x-%#x, both lines masked\n",
 	     PIC1_VECTOR_BASE, PIC2_VECTOR_BASE + 8);
+}
+
+/*
+ * Unmask one line, leaving the others as they were.
+ *
+ * Read-modify-write rather than a literal, because the mask is shared state:
+ * writing a table of "everything except bit n" would re-mask every line some
+ * other driver had already enabled. That is not hypothetical here — the timer
+ * and the keyboard both live on the master.
+ */
+static void pic_unmask(uint8_t irq)
+{
+	uint16_t port = (irq < 8) ? PIC1_DATA : PIC2_DATA;
+
+	outb(port, (uint8_t)(inb(port) & ~(1u << (irq & 7))));
+}
+
+/* ------------------------------------------------- PIT (8253/8254) -------- */
+
+/*
+ * The timer that was missing. Until this existed the kernel had no interrupt
+ * source whatsoever: stage2 masks both 8259s at the top of stage2_main()
+ * (src/boot/stage2.c, `outb(0x21,0xFF); outb(0xA1,0xFF)`) and nothing in the
+ * kernel ever unmasked a line, so no interrupt was ever delivered. That
+ * masking is boot-critical and is deliberately left alone — an unmasked IRQ0
+ * lands inside a real-mode BIOS round trip in stage2 and executes the
+ * bootloader's 32-bit reporter as 16-bit. Unmasking here, in the kernel, after
+ * the kernel has installed its own IDT, is the place it was always safe.
+ *
+ * Channel 0 only. It is the only channel wired to IRQ0 on a PC, and it is the
+ * one the PC timer is defined to be.
+ */
+#define PIT_CH0_DATA   0x40
+#define PIT_CH0_MODE   0x43
+
+/*
+ * 1193182 Hz is the PC-compatible input clock rounded down; the real value is
+ * 1193181.666..., so the measured rate is 0.0002 % low. Nobody has ever
+ * noticed and the divisor below cannot express the fraction anyway.
+ */
+#define PIT_INPUT_HZ   1193182u
+
+/*
+ * 100 Hz, not the usual 18.2. The PIT divides by a 16-bit integer only, so the
+ * highest rate it can produce is 1193182/65536 ≈ 18.2 Hz — and a divisor that
+ * small is exactly what produced the bootloader's problem. 100 Hz costs
+ * nothing on the path that matters (the handler is a counter increment) and
+ * gives the scheduler five times the resolution.
+ */
+#define PIT_HZ         100u
+
+/* Divisor 0 and 1 mean 65536 and 65535, not 0 and 1. */
+#define PIT_DIVISOR    (PIT_INPUT_HZ / PIT_HZ)
+
+/*
+ * Ticks delivered on this CPU. Incremented in interrupt context, so it is
+ * volatile and it is never read-modify-written by anything else — there is one
+ * writer, on one CPU, and a lost update is not possible.
+ */
+static volatile u64 pit_ticks;
+
+/*
+ * Announced on the first tick and once a second thereafter, through the
+ * polled serial path rather than klog.
+ *
+ * The reason is the whole design constraint. klog_emit() formats into 1.1 KiB
+ * of stack and then takes the console spinlock, so a tick arriving while the
+ * interrupted code already holds that lock spins forever with IF clear and the
+ * machine stops with no output — a hang, indistinguishable from the bug that
+ * made this timer worth having. ksnprintf() below is the same formatter with
+ * none of the locking, and serial_puts() is the same polled primitive
+ * panic() is documented to use from contexts that may hold anything.
+ */
+static void pit_announce(u64 n)
+{
+	char line[64];
+
+	(void)ksnprintf(line, sizeof(line), "\r\npit: tick %llu, IRQ0 is live\r\n",
+			(unsigned long long)n);
+	serial_puts(line);
+}
+
+static void pit_irq(struct interrupt_frame *f)
+{
+	(void)f;
+	pit_ticks++;
+
+	if (pit_ticks == 1 || (pit_ticks % PIT_HZ) == 0)
+		pit_announce(pit_ticks);
+
+	/*
+	 * The documented contract: "The timer driver calls this; the dispatch
+	 * path consumes it." Kept, so that the tick means something the moment
+	 * a run queue exists. It is a flag and a per-CPU index — no scheduler
+	 * state is touched here, which is why it is safe to call before
+	 * sched_init().
+	 */
+	idt_request_reschedule();
+}
+
+/*
+ * Bring up the PIT and IRQ0. Called from idt_init(), which is the earliest
+ * point in the kernel at which a vector exists to be delivered to and the
+ * IDTR is loaded; see the comment at the call site.
+ */
+static void pit_init(void)
+{
+	/*
+	 * The timer cannot work before this: with the BIOS's identity mapping an
+	 * IRQ0 tick is vector 8, which the CPU has already defined as #DF. This
+	 * is idempotent (see pic_remap) and masks both PICs, so the handler has
+	 * to be installed and the channel programmed before the line is
+	 * unmasked — an enabled line whose handler is not installed fires
+	 * forever and the machine spends its whole life in interrupt entry.
+	 */
+	pic_remap();
+
+	/*
+	 * Control byte 0x34: channel 0, lobyte/hibyte access, mode 2 (rate
+	 * generator), binary. Mode 2 reloads the count on every terminal count,
+	 * which is what makes the output a steady square wave rather than a
+	 * single pulse followed by silence; mode 3 would also work but has a
+	 * duty cycle to get right for no benefit here.
+	 */
+	outb(PIT_CH0_MODE, 0x34);
+	outb(PIT_CH0_DATA, (uint8_t)(PIT_DIVISOR & 0xFF));
+	outb(PIT_CH0_DATA, (uint8_t)((PIT_DIVISOR >> 8) & 0xFF));
+
+	/* Handler before the line is unmasked, in that order and not the
+	 * other way round. */
+	idt_set_handler(VECTOR_IRQ_TIMER, pit_irq, IST_NONE, 0);
+	pic_unmask(0);
+
+	klog(KLOG_INFO, "pit: ch0 divisor %u = %u.%u Hz, IRQ0 on vector %u "
+	     "(first tick in %u us)\n", PIT_DIVISOR,
+	     PIT_INPUT_HZ / PIT_DIVISOR, (PIT_INPUT_HZ % PIT_DIVISOR) * 10 / PIT_DIVISOR,
+	     VECTOR_IRQ_TIMER, 1000000u / PIT_HZ);
+}
+
+/*
+ * Ticks delivered since pit_init(). Safe to read from any context: it is a
+ * single aligned load of a value only the handler writes.
+ */
+u64 pit_tick_count(void)
+{
+	return pit_ticks;
 }
 
 void pic_eoi(uint8_t vector)
@@ -580,11 +783,35 @@ void interrupt_dispatch(struct interrupt_frame *f)
 
 	per_cpu(preempt_count)--;
 
-	/* Reschedule only at the outermost level: a timer that fires inside a
-	 * handler has interrupted work that is not finished. */
-	if (per_cpu(preempt_count) == 0 &&
-	    need_resched[this_cpu_id() & (MAX_CPUS - 1)]) {
-		need_resched[this_cpu_id() & (MAX_CPUS - 1)] = 0;
+	/*
+	 * Reschedule only at the outermost level: a timer that fires inside a
+	 * handler has interrupted work that is not finished.
+	 *
+	 * The run-queue check is not a workaround, it is the contract sched.h
+	 * states for itself: "One run queue per CPU, allocated by that CPU in
+	 * sched_init(). Indexed by this_cpu_id(); NULL before sched_init() has
+	 * run on that CPU." sched_tick() dereferences it on its second
+	 * statement (`rq->clock = now`), so calling it before then is a NULL
+	 * dereference — and a timer turns "the scheduler was not started yet"
+	 * from a silent non-event into a #PF on the first tick, 10 ms into the
+	 * boot, on whatever code happened to be running.
+	 *
+	 * As of this change sched_init() has no caller anywhere in the tree, so
+	 * this branch never reaches it and a tick only counts. That is the
+	 * correct shape for the moment sched_init() is wired up: no change to
+	 * this file is needed then, and until then a tick can do no harm.
+	 *
+	 * The request is cleared whether or not the tick runs. Leaving it set
+	 * would be a latch with no reader, and a latch whose only effect is to
+	 * surprise whoever reads it next.
+	 */
+	unsigned cpu = this_cpu_id();
+
+	if (per_cpu(preempt_count) != 0 || !need_resched[cpu & (MAX_CPUS - 1)])
+		return;
+
+	need_resched[cpu & (MAX_CPUS - 1)] = 0;
+
+	if (sched_runqueues[cpu])
 		sched_tick();
-	}
 }
