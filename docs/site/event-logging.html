@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Debugging/event-logging — Fr OS</title>
+  <meta property="og:title" content="Debugging/event-logging — Fr OS">
+  <meta name="description" content="Debugging/event-logging — Fr OS documentation">
+  <meta property="og:description" content="Debugging/event-logging — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="README.html">Overview</a></li>
+    <li><a href="overview.html">Architecture</a></li>
+    <li><a href="memory-layout.html">Memory Layout</a></li>
+    <li><a href="posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="security-model.html">Security Model</a></li>
+    <li><a href="performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="stage1.html">Stage 1</a></li>
+    <li><a href="stage2.html">Stage 2</a></li>
+    <li><a href="kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="memory-map.html">Memory Map</a></li>
+    <li><a href="serial-output.html">Serial Output</a></li>
+    <li><a href="build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="early-boot.html">Early Boot</a></li>
+    <li><a href="interrupt-handling.html">Interrupts</a></li>
+    <li><a href="context-switching.html">Context Switching</a></li>
+    <li><a href="privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="panic-system.html">Panic</a></li>
+    <li><a href="logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="slab-allocator.html">SLAB</a></li>
+    <li><a href="virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="mlfq.html">MLFQ</a></li>
+    <li><a href="realtime-scheduler.html">Realtime</a></li>
+    <li><a href="multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="process-syscalls.html">Process</a></li>
+    <li><a href="memory-syscalls.html">Memory</a></li>
+    <li><a href="file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="libc.html">Fr Libc</a></li>
+    <li><a href="process-model.html">Process Model</a></li>
+    <li><a href="elf-loading.html">ELF Loading</a></li>
+    <li><a href="init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Filesystem</a></li>
+    <li><a href="overview.html">Networking</a></li>
+    <li><a href="overview.html">IPC</a></li>
+    <li><a href="overview.html">Drivers</a></li>
+    <li><a href="overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Build Overview</a></li>
+    <li><a href="toolchain.html">Toolchain</a></li>
+    <li><a href="makefile-structure.html">Makefile</a></li>
+    <li><a href="qemu-setup.html">QEMU</a></li>
+    <li><a href="testing.html">Testing</a></li>
+    <li><a href="overview.html">Debugging</a></li>
+    <li><a href="serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>Event Logging</h1>
+<h2>Overview</h2>
+<p>The kernel maintains a structured event log — distinct from the tracepoint ring buffers. The event log is for higher-level diagnostic messages: driver initialization, subsystem errors, security events. It is the kernel equivalent of syslog.</p>
+<h2>Log Levels</h2>
+<table>
+<thead>
+<tr>
+<th>Level</th>
+<th>Value</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>LOG_EMERG</code></td>
+<td>0</td>
+<td>System is unusable (kernel panic imminent)</td>
+</tr>
+<tr>
+<td><code>LOG_ALERT</code></td>
+<td>1</td>
+<td>Action must be taken immediately</td>
+</tr>
+<tr>
+<td><code>LOG_CRIT</code></td>
+<td>2</td>
+<td>Critical condition (driver failure, OOM)</td>
+</tr>
+<tr>
+<td><code>LOG_ERR</code></td>
+<td>3</td>
+<td>Error condition</td>
+</tr>
+<tr>
+<td><code>LOG_WARN</code></td>
+<td>4</td>
+<td>Warning (deprecated API, degraded mode)</td>
+</tr>
+<tr>
+<td><code>LOG_NOTICE</code></td>
+<td>5</td>
+<td>Normal but significant event</td>
+</tr>
+<tr>
+<td><code>LOG_INFO</code></td>
+<td>6</td>
+<td>Informational (device probed, service started)</td>
+</tr>
+<tr>
+<td><code>LOG_DEBUG</code></td>
+<td>7</td>
+<td>Debug-level information</td>
+</tr>
+</tbody>
+</table>
+<h2>Kernel Logging API</h2>
+<pre><code class="language-c"><span class="hl-comment">// In-kernel API:</span>
+<span class="hl-function-call">klog</span><span class="hl-punctuation-bracket">(</span><span class="hl-constant">LOG_INFO</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-string">&quot;net&quot;</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-string">&quot;virtio-net: device %d MAC %02x:%02x:%02x:%02x:%02x:%02x&quot;</span><span class="hl-punctuation-delimiter">,</span>
+     <span class="hl-variable">dev</span><span class="hl-operator">-&gt;</span><span class="hl-property">id</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">mac</span><span class="hl-punctuation-bracket">[</span><span class="hl-number">0</span><span class="hl-punctuation-bracket">]</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">mac</span><span class="hl-punctuation-bracket">[</span><span class="hl-number">1</span><span class="hl-punctuation-bracket">]</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">mac</span><span class="hl-punctuation-bracket">[</span><span class="hl-number">2</span><span class="hl-punctuation-bracket">]</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">mac</span><span class="hl-punctuation-bracket">[</span><span class="hl-number">3</span><span class="hl-punctuation-bracket">]</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">mac</span><span class="hl-punctuation-bracket">[</span><span class="hl-number">4</span><span class="hl-punctuation-bracket">]</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">mac</span><span class="hl-punctuation-bracket">[</span><span class="hl-number">5</span><span class="hl-punctuation-bracket">]</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<p>The <code>klog</code> macro captures:
+- Timestamp (<code>RDTSC</code> → converted to wall clock).
+- CPU number.
+- Subsystem tag (up to 16 bytes): <code>&quot;sched&quot;</code>, <code>&quot;mm&quot;</code>, <code>&quot;net&quot;</code>, <code>&quot;fs&quot;</code>, <code>&quot;drv&quot;</code>, <code>&quot;sec&quot;</code>, etc.
+- Log level.
+- The formatted message (up to 256 bytes).</p>
+<h2>Internal Ring Buffer</h2>
+<p>Log entries are stored in a kernel-managed circular buffer:</p>
+<pre><code class="language-c"><span class="hl-keyword-directive-define">#define</span> <span class="hl-constant-macro">KLOG_BUF_SIZE</span> <span class="hl-variable">(</span><span class="hl-number">1</span><span class="hl-punctuation-bracket"> </span><span class="hl-operator">&lt;&lt;</span><span class="hl-punctuation-bracket"> </span><span class="hl-number">20</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-bracket"> </span><span class="hl-comment">// 1 MB</span>
+
+<span class="hl-keyword-type">struct</span> <span class="hl-type">klog_entry</span> <span class="hl-punctuation-bracket">{</span>
+    <span class="hl-type-builtin">uint64_t</span> <span class="hl-property">timestamp_ns</span><span class="hl-punctuation-delimiter">;</span>
+    <span class="hl-type-builtin">uint32_t</span> <span class="hl-property">cpu</span><span class="hl-punctuation-delimiter">;</span>
+    <span class="hl-type-builtin">uint8_t</span>  <span class="hl-property">level</span><span class="hl-punctuation-delimiter">;</span>
+    <span class="hl-type-builtin">char</span>     <span class="hl-property">subsystem</span><span class="hl-punctuation-bracket">[</span><span class="hl-number">16</span><span class="hl-punctuation-bracket">]</span><span class="hl-punctuation-delimiter">;</span>
+    <span class="hl-type-builtin">char</span>     <span class="hl-property">message</span><span class="hl-punctuation-bracket">[</span><span class="hl-number">256</span><span class="hl-punctuation-bracket">]</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-punctuation-bracket">}</span><span class="hl-punctuation-delimiter">;</span>
+
+<span class="hl-keyword-modifier">static</span> <span class="hl-keyword-type">struct</span> <span class="hl-type">klog_entry</span> <span class="hl-variable">klog_buf</span><span class="hl-punctuation-bracket">[</span><span class="hl-constant">KLOG_BUF_SIZE</span> <span class="hl-operator">/</span> <span class="hl-keyword-operator">sizeof</span><span class="hl-punctuation-bracket">(</span><span class="hl-keyword-type">struct</span><span class="hl-type"> </span><span class="hl-type">klog_entry</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-bracket">]</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-keyword-modifier">static</span> <span class="hl-type-builtin">uint32_t</span> <span class="hl-variable">klog_head</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">klog_tail</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-keyword-modifier">static</span> <span class="hl-type">spinlock_t</span> <span class="hl-variable">klog_lock</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<p>Writing: protected by <code>klog_lock</code> (only held for the duration of the ring buffer write).</p>
+<h2>Reading from Userspace</h2>
+<p>The log is accessible via:
+1. <code>/debug/klog</code>: a character device that provides a sequential read of all logged messages, newline-separated, in the format: <code>&#91;timestamp_ns&#93; &#91;cpu&#93; &#91;level&#93; &#91;subsystem&#93;: message</code>.
+2. A dedicated <code>sys_klog_read</code> syscall for streaming reads (non-blocking, returns up to N entries).</p>
+<h2>Serial Echo</h2>
+<p>Log entries at level <code>LOG_WARN</code> and above are also echoed to the serial port (COM1) for early-boot and crash diagnostics. This is unconditional and not configurable at runtime (it persists through kernel panics).</p>
+<h2>Log Format</h2>
+<pre><code>[  12345678.001] [CPU 3] [INFO ] [net ]: virtio-net: device 0 MAC 52:54:00:12:34:56
+[  12345678.002] [CPU 0] [WARN ] [mm  ]: page reclaim: 89% of RAM in use
+[  12345678.100] [CPU 1] [ERR  ] [drv ]: nvme: timeout waiting for completion queue
+</code></pre>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="debugging/overview.html">overview.md</a></li>
+<li><a href="debugging/kernel-tracing.html">kernel-tracing.md</a></li>
+<li><a href="debugging/serial-diagnostics.html">serial-diagnostics.md</a></li>
+<li><a href="kernel/logging.html">kernel/logging.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="script.js" defer></script>
+</body>
+</html>

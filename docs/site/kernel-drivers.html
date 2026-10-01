@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Drivers/kernel-drivers — Fr OS</title>
+  <meta property="og:title" content="Drivers/kernel-drivers — Fr OS">
+  <meta name="description" content="Drivers/kernel-drivers — Fr OS documentation">
+  <meta property="og:description" content="Drivers/kernel-drivers — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="README.html">Overview</a></li>
+    <li><a href="overview.html">Architecture</a></li>
+    <li><a href="memory-layout.html">Memory Layout</a></li>
+    <li><a href="posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="security-model.html">Security Model</a></li>
+    <li><a href="performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="stage1.html">Stage 1</a></li>
+    <li><a href="stage2.html">Stage 2</a></li>
+    <li><a href="kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="memory-map.html">Memory Map</a></li>
+    <li><a href="serial-output.html">Serial Output</a></li>
+    <li><a href="build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="early-boot.html">Early Boot</a></li>
+    <li><a href="interrupt-handling.html">Interrupts</a></li>
+    <li><a href="context-switching.html">Context Switching</a></li>
+    <li><a href="privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="panic-system.html">Panic</a></li>
+    <li><a href="logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="slab-allocator.html">SLAB</a></li>
+    <li><a href="virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="mlfq.html">MLFQ</a></li>
+    <li><a href="realtime-scheduler.html">Realtime</a></li>
+    <li><a href="multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="process-syscalls.html">Process</a></li>
+    <li><a href="memory-syscalls.html">Memory</a></li>
+    <li><a href="file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="libc.html">Fr Libc</a></li>
+    <li><a href="process-model.html">Process Model</a></li>
+    <li><a href="elf-loading.html">ELF Loading</a></li>
+    <li><a href="init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Filesystem</a></li>
+    <li><a href="overview.html">Networking</a></li>
+    <li><a href="overview.html">IPC</a></li>
+    <li><a href="overview.html">Drivers</a></li>
+    <li><a href="overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Build Overview</a></li>
+    <li><a href="toolchain.html">Toolchain</a></li>
+    <li><a href="makefile-structure.html">Makefile</a></li>
+    <li><a href="qemu-setup.html">QEMU</a></li>
+    <li><a href="testing.html">Testing</a></li>
+    <li><a href="overview.html">Debugging</a></li>
+    <li><a href="serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>Kernel Driver Infrastructure</h1>
+<h2>Overview</h2>
+<p>The kernel driver infrastructure provides the in-kernel half of the hybrid driver model. It handles device discovery, interrupt management, DMA, and the shared-memory region setup for userspace drivers.</p>
+<h2>Device Model</h2>
+<p>Every discovered device is represented by a <code>struct device</code>:</p>
+<pre><code class="language-c"><span class="hl-keyword-type">struct</span> <span class="hl-type">device</span> <span class="hl-punctuation-bracket">{</span>
+    <span class="hl-type-builtin">char</span>            <span class="hl-property">name</span><span class="hl-punctuation-bracket">[</span><span class="hl-number">64</span><span class="hl-punctuation-bracket">]</span><span class="hl-punctuation-delimiter">;</span>
+    <span class="hl-keyword-type">enum</span> <span class="hl-type">bus_type</span>   <span class="hl-property">bus</span><span class="hl-punctuation-delimiter">;</span>          <span class="hl-comment">// BUS_PCI, BUS_VIRTIO, BUS_PLATFORM</span>
+    <span class="hl-keyword-type">struct</span> <span class="hl-type">driver</span>  <span class="hl-operator">*</span><span class="hl-property">driver</span><span class="hl-punctuation-delimiter">;</span>       <span class="hl-comment">// matched driver (NULL if unbound)</span>
+    <span class="hl-type-builtin">void</span>           <span class="hl-operator">*</span><span class="hl-property">driver_data</span><span class="hl-punctuation-delimiter">;</span>  <span class="hl-comment">// driver-private pointer</span>
+    <span class="hl-type-builtin">uint32_t</span>        <span class="hl-property">pci_bus</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-property">pci_dev</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-property">pci_func</span><span class="hl-punctuation-delimiter">;</span>  <span class="hl-comment">// PCI address (if BUS_PCI)</span>
+    <span class="hl-keyword-type">struct</span> <span class="hl-type">list_head</span> <span class="hl-property">children</span><span class="hl-punctuation-delimiter">;</span>    <span class="hl-comment">// child devices</span>
+    <span class="hl-keyword-type">struct</span> <span class="hl-type">device</span>  <span class="hl-operator">*</span><span class="hl-property">parent</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-punctuation-bracket">}</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<h2>PCI Enumeration</h2>
+<p>During early boot, the kernel scans PCI bus 0 (and bridges recursively):</p>
+<pre><code class="language-c"><span class="hl-keyword-repeat">for</span> <span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">uint8_t</span> <span class="hl-variable">bus</span> <span class="hl-operator">=</span> <span class="hl-number">0</span><span class="hl-punctuation-delimiter">;</span> <span class="hl-variable">bus</span> <span class="hl-operator">&lt;</span> <span class="hl-number">256</span><span class="hl-punctuation-delimiter">;</span> <span class="hl-variable">bus</span><span class="hl-operator">++</span><span class="hl-punctuation-bracket">)</span>
+    <span class="hl-keyword-repeat">for</span> <span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">uint8_t</span> <span class="hl-variable">dev</span> <span class="hl-operator">=</span> <span class="hl-number">0</span><span class="hl-punctuation-delimiter">;</span> <span class="hl-variable">dev</span> <span class="hl-operator">&lt;</span> <span class="hl-number">32</span><span class="hl-punctuation-delimiter">;</span> <span class="hl-variable">dev</span><span class="hl-operator">++</span><span class="hl-punctuation-bracket">)</span>
+        <span class="hl-keyword-repeat">for</span> <span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">uint8_t</span> <span class="hl-variable">func</span> <span class="hl-operator">=</span> <span class="hl-number">0</span><span class="hl-punctuation-delimiter">;</span> <span class="hl-variable">func</span> <span class="hl-operator">&lt;</span> <span class="hl-number">8</span><span class="hl-punctuation-delimiter">;</span> <span class="hl-variable">func</span><span class="hl-operator">++</span><span class="hl-punctuation-bracket">)</span> <span class="hl-punctuation-bracket">{</span>
+            <span class="hl-type-builtin">uint16_t</span> <span class="hl-variable">vendor</span> <span class="hl-operator">=</span> <span class="hl-function-call">pci_read_config_word</span><span class="hl-punctuation-bracket">(</span><span class="hl-variable">bus</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">dev</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">func</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-number">0</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+            <span class="hl-keyword-conditional">if</span> <span class="hl-punctuation-bracket">(</span><span class="hl-variable">vendor</span> <span class="hl-operator">==</span> <span class="hl-number">0xFFFF</span><span class="hl-punctuation-bracket">)</span> <span class="hl-keyword-repeat">continue</span><span class="hl-punctuation-delimiter">;</span>  <span class="hl-comment">// no device</span>
+            <span class="hl-keyword-type">struct</span> <span class="hl-type">device</span> <span class="hl-operator">*</span><span class="hl-variable">d</span> <span class="hl-operator">=</span> <span class="hl-function-call">alloc_device</span><span class="hl-punctuation-bracket">(</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+            <span class="hl-variable">d</span><span class="hl-operator">-&gt;</span><span class="hl-property">bus</span> <span class="hl-operator">=</span> <span class="hl-constant">BUS_PCI</span><span class="hl-punctuation-delimiter">;</span>
+            <span class="hl-variable">d</span><span class="hl-operator">-&gt;</span><span class="hl-property">pci_bus</span> <span class="hl-operator">=</span> <span class="hl-variable">bus</span><span class="hl-punctuation-delimiter">;</span> <span class="hl-variable">d</span><span class="hl-operator">-&gt;</span><span class="hl-property">pci_dev</span> <span class="hl-operator">=</span> <span class="hl-variable">dev</span><span class="hl-punctuation-delimiter">;</span> <span class="hl-variable">d</span><span class="hl-operator">-&gt;</span><span class="hl-property">pci_func</span> <span class="hl-operator">=</span> <span class="hl-variable">func</span><span class="hl-punctuation-delimiter">;</span>
+            <span class="hl-function-call">device_register</span><span class="hl-punctuation-bracket">(</span><span class="hl-variable">d</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+            <span class="hl-function-call">driver_try_probe</span><span class="hl-punctuation-bracket">(</span><span class="hl-variable">d</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+        <span class="hl-punctuation-bracket">}</span>
+</code></pre>
+<p>QEMU provides virtio devices on the PCI bus (vendor <code>0x1AF4</code>).</p>
+<h2>Driver Probe and Bind</h2>
+<p><code>driver_try_probe(device)</code> iterates the registered driver list and calls <code>driver-&gt;probe(device)</code> for the first driver with a matching PCI vendor/device ID (or bus type for platform drivers). The <code>probe</code> function:</p>
+<ol>
+<li>Reads device configuration registers (PCI BAR addresses, capabilities).</li>
+<li>Maps MMIO regions into kernel virtual memory (<code>ioremap</code>).</li>
+<li>Allocates DMA-coherent memory for command and completion queues.</li>
+<li>Registers interrupt handlers (<code>irq_register(vector, handler, device)</code>).</li>
+<li>Sets up the shared memory region for the userspace driver.</li>
+<li>Spawns the userspace driver process (<code>kernel_exec(&quot;/usr/lib/drivers/&lt;name&gt;&quot;)</code>).</li>
+</ol>
+<h2>Interrupt Registration</h2>
+<pre><code class="language-c"><span class="hl-type-builtin">int</span> <span class="hl-function">irq_register</span><span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">uint8_t</span> <span class="hl-variable-parameter">vector</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type">irq_handler_t</span> <span class="hl-variable-parameter">handler</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">void</span> <span class="hl-operator">*</span><span class="hl-variable">dev</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">void</span> <span class="hl-function">irq_unregister</span><span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">uint8_t</span> <span class="hl-variable-parameter">vector</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<p>The IRQ vector is programmed in the I/O APIC routing table to deliver to the correct CPU (or all CPUs for shared IRQs). The handler runs in interrupt context (interrupts disabled, cannot sleep).</p>
+<p>IRQ handler rules:</p>
+<ul>
+<li>Must not call sleeping functions (<code>kmutex_lock</code>, <code>kfree</code>).</li>
+<li>Must acknowledge the interrupt (EOI to LAPIC).</li>
+<li>Should do minimal work: acknowledge the device, write a completion entry, wake the userspace driver (via <code>irq_count</code> increment and optional futex wake).</li>
+</ul>
+<h2>DMA</h2>
+<p>The kernel provides a DMA API:</p>
+<pre><code class="language-c"><span class="hl-type-builtin">void</span> <span class="hl-operator">*</span><span class="hl-function">dma_alloc_coherent</span><span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">size_t</span> <span class="hl-variable-parameter">size</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type">dma_addr_t</span> <span class="hl-operator">*</span><span class="hl-variable">phys_out</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">void</span>  <span class="hl-function">dma_free_coherent</span><span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">void</span> <span class="hl-operator">*</span><span class="hl-variable">virt</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type">dma_addr_t</span> <span class="hl-variable-parameter">phys</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">size_t</span> <span class="hl-variable-parameter">size</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type">dma_addr_t</span> <span class="hl-function">dma_map_page</span><span class="hl-punctuation-bracket">(</span><span class="hl-keyword-type">struct</span> <span class="hl-type">page</span> <span class="hl-operator">*</span><span class="hl-variable">page</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">size_t</span> <span class="hl-variable-parameter">offset</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">size_t</span> <span class="hl-variable-parameter">size</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">int</span> <span class="hl-variable-parameter">direction</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">void</span>       <span class="hl-function">dma_unmap_page</span><span class="hl-punctuation-bracket">(</span><span class="hl-type">dma_addr_t</span> <span class="hl-variable-parameter">addr</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">size_t</span> <span class="hl-variable-parameter">size</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">int</span> <span class="hl-variable-parameter">direction</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<p>All DMA addresses are physical addresses. QEMU with <code>-enable-kvm</code> and the identity-mapped direct region (0xFFFF_8000_0000_0000 + phys_addr) makes DMA transparent.</p>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="drivers/hybrid-architecture.html">hybrid-architecture.md</a></li>
+<li><a href="drivers/userspace-drivers.html">userspace-drivers.md</a></li>
+<li><a href="drivers/driver-communication.html">driver-communication.md</a></li>
+<li><a href="drivers/hotplug.html">hotplug.md</a></li>
+<li><a href="kernel/interrupt-handling.html">kernel/interrupt-handling.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="script.js" defer></script>
+</body>
+</html>

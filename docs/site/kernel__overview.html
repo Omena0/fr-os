@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kernel/overview — Fr OS</title>
+  <meta property="og:title" content="Kernel/overview — Fr OS">
+  <meta name="description" content="Kernel/overview — Fr OS documentation">
+  <meta property="og:description" content="Kernel/overview — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="README.html">Overview</a></li>
+    <li><a href="overview.html">Architecture</a></li>
+    <li><a href="memory-layout.html">Memory Layout</a></li>
+    <li><a href="posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="security-model.html">Security Model</a></li>
+    <li><a href="performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="stage1.html">Stage 1</a></li>
+    <li><a href="stage2.html">Stage 2</a></li>
+    <li><a href="kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="memory-map.html">Memory Map</a></li>
+    <li><a href="serial-output.html">Serial Output</a></li>
+    <li><a href="build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html" class="active">Overview</a></li>
+    <li><a href="early-boot.html">Early Boot</a></li>
+    <li><a href="interrupt-handling.html">Interrupts</a></li>
+    <li><a href="context-switching.html">Context Switching</a></li>
+    <li><a href="privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="panic-system.html">Panic</a></li>
+    <li><a href="logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="slab-allocator.html">SLAB</a></li>
+    <li><a href="virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="mlfq.html">MLFQ</a></li>
+    <li><a href="realtime-scheduler.html">Realtime</a></li>
+    <li><a href="multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="process-syscalls.html">Process</a></li>
+    <li><a href="memory-syscalls.html">Memory</a></li>
+    <li><a href="file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="libc.html">Fr Libc</a></li>
+    <li><a href="process-model.html">Process Model</a></li>
+    <li><a href="elf-loading.html">ELF Loading</a></li>
+    <li><a href="init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Filesystem</a></li>
+    <li><a href="overview.html">Networking</a></li>
+    <li><a href="overview.html">IPC</a></li>
+    <li><a href="overview.html">Drivers</a></li>
+    <li><a href="overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Build Overview</a></li>
+    <li><a href="toolchain.html">Toolchain</a></li>
+    <li><a href="makefile-structure.html">Makefile</a></li>
+    <li><a href="qemu-setup.html">QEMU</a></li>
+    <li><a href="testing.html">Testing</a></li>
+    <li><a href="overview.html">Debugging</a></li>
+    <li><a href="serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>Kernel Overview</h1>
+<div class="callout callout-info">  <span class="callout-icon" aria-hidden="true">    <svg viewBox="0 0 24 24">      <circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8h.01"/>    </svg>  </span>  <div class="callout-content">    <p>This page is about <strong>Fr Core</strong>, the kernel. Fr Core is one component of
+<strong>Fr OS</strong>; it is not the system. A panic in Fr Core does not mean Fr Boot or
+the firmware are down, and the kernel's own diagnostics say "Fr Core" for
+exactly that reason. <code>KERNEL_VERSION_STRING</code> is <code>FR_CORE_NAME &quot; &quot; KERNEL_VERSION</code>.</p>  </div></div>
+<h2>Architecture</h2>
+<p>The kernel is a <strong>monolithic kernel</strong> with the following characteristics:</p>
+<ul>
+<li>All core subsystems (memory, scheduler, VFS, networking, IPC) run in ring 0.</li>
+<li>Device driver functionality is split: a minimal core driver runs in ring 0, the bulk of driver logic runs in ring 3 as a userspace process.</li>
+<li>The kernel is <strong>fully preemptible</strong> outside of critical sections (spinlocks, interrupt handlers).</li>
+<li>Kernel threads and user threads share the same scheduling infrastructure.</li>
+</ul>
+<h2>Source Layout</h2>
+<pre><code>src/kernel/
+├── main.c              kernel_main() — early init sequence
+├── boot/               Early boot stubs, multiboot2 shim
+├── arch/x86_64/        Architecture-specific code
+│   ├── idt.c           Interrupt Descriptor Table setup
+│   ├── gdt.c           Global Descriptor Table
+│   ├── apic.c          Local and I/O APIC management
+│   ├── context.asm     Context switch assembly stub
+│   ├── syscall.asm     SYSCALL/SYSRET entry point
+│   └── cpu.c           Per-CPU data, CPU feature detection
+├── mm/                 Memory management
+├── sched/              Scheduler
+├── fs/                 VFS + ext4
+├── ipc/                Pipes and shared memory
+├── net/                Networking stack
+├── drivers/            Kernel-side driver core
+├── security/           Capabilities, seccomp, namespaces
+├── module/             Loadable kernel module system
+└── lib/                Internal kernel utility library
+</code></pre>
+<h2>Core Kernel Components</h2>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>File(s)</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Interrupt handling</td>
+<td><code>arch/x86_64/idt.c</code>, <code>apic.c</code></td>
+<td>IDT, APIC routing, per-CPU interrupt stacks</td>
+</tr>
+<tr>
+<td>Context switching</td>
+<td><code>arch/x86_64/context.asm</code></td>
+<td>Save/restore GPRs, SIMD, scheduling metadata</td>
+</tr>
+<tr>
+<td>Privilege levels</td>
+<td><code>arch/x86_64/gdt.c</code></td>
+<td>GDT segments, TSS, ring transitions</td>
+</tr>
+<tr>
+<td>Syscall dispatch</td>
+<td><code>arch/x86_64/syscall.asm</code></td>
+<td>SYSCALL entry, dispatch table, SYSRET</td>
+</tr>
+<tr>
+<td>Module system</td>
+<td><code>module/</code></td>
+<td>ELF module loader, symbol table, versioning</td>
+</tr>
+<tr>
+<td>Panic system</td>
+<td><code>lib/panic.c</code></td>
+<td>Panic handler, diagnostic dump, halt</td>
+</tr>
+<tr>
+<td>Kernel logging</td>
+<td><code>lib/klog.c</code></td>
+<td>Structured log with severity levels</td>
+</tr>
+<tr>
+<td>Early boot</td>
+<td><code>main.c</code>, <code>boot/</code></td>
+<td>Sequenced subsystem initialization</td>
+</tr>
+</tbody>
+</table>
+<h2>Kernel Object Model</h2>
+<p>Kernel objects (processes, threads, files, sockets, etc.) are reference-counted. The reference count is managed with atomic operations. Objects are allocated from the SLAB allocator. Destruction is deferred to a safe point (no outstanding references, not in interrupt context).</p>
+<h2>Locking Discipline</h2>
+<table>
+<thead>
+<tr>
+<th>Lock type</th>
+<th>Use case</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Spinlock</td>
+<td>Short critical sections in interrupt context or between CPUs</td>
+</tr>
+<tr>
+<td>Mutex</td>
+<td>Long-held locks that allow sleeping (process context only)</td>
+</tr>
+<tr>
+<td>RW lock</td>
+<td>Reader-heavy data (dentry cache, routing table)</td>
+</tr>
+<tr>
+<td>RCU</td>
+<td>Read-mostly with infrequent updates (module list, process list)</td>
+</tr>
+<tr>
+<td>Per-CPU</td>
+<td>Data accessed only by one CPU (run queue, SLAB magazine) — no lock needed</td>
+</tr>
+</tbody>
+</table>
+<p>Spinlocks disable preemption for their duration. Mutexes do not.</p>
+<h2>Preemption Model</h2>
+<p>The kernel is preemptible with preemption disabled only in:</p>
+<ul>
+<li>Spinlock critical sections</li>
+<li>Interrupt handlers</li>
+<li>NMI handlers</li>
+</ul>
+<p>Preemption is implemented via a per-thread <code>preempt_count</code>. When <code>preempt_count</code> drops to zero and a reschedule flag is set, the scheduler runs at the next safe point.</p>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="kernel/interrupt-handling.html">interrupt-handling.md</a></li>
+<li><a href="kernel/context-switching.html">context-switching.md</a></li>
+<li><a href="kernel/privilege-levels.html">privilege-levels.md</a></li>
+<li><a href="kernel/syscall-abi.html">syscall-abi.md</a></li>
+<li><a href="kernel/module-system.html">module-system.md</a></li>
+<li><a href="kernel/kernel-libraries.html">kernel-libraries.md</a></li>
+<li><a href="kernel/panic-system.html">panic-system.md</a></li>
+<li><a href="kernel/logging.html">logging.md</a></li>
+<li><a href="kernel/early-boot.html">early-boot.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="script.js" defer></script>
+</body>
+</html>

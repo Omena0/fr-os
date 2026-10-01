@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Memory/overcommit-policy — Fr OS</title>
+  <meta property="og:title" content="Memory/overcommit-policy — Fr OS">
+  <meta name="description" content="Memory/overcommit-policy — Fr OS documentation">
+  <meta property="og:description" content="Memory/overcommit-policy — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="README.html">Overview</a></li>
+    <li><a href="overview.html">Architecture</a></li>
+    <li><a href="memory-layout.html">Memory Layout</a></li>
+    <li><a href="posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="security-model.html">Security Model</a></li>
+    <li><a href="performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="stage1.html">Stage 1</a></li>
+    <li><a href="stage2.html">Stage 2</a></li>
+    <li><a href="kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="memory-map.html">Memory Map</a></li>
+    <li><a href="serial-output.html">Serial Output</a></li>
+    <li><a href="build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="early-boot.html">Early Boot</a></li>
+    <li><a href="interrupt-handling.html">Interrupts</a></li>
+    <li><a href="context-switching.html">Context Switching</a></li>
+    <li><a href="privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="panic-system.html">Panic</a></li>
+    <li><a href="logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="slab-allocator.html">SLAB</a></li>
+    <li><a href="virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="mlfq.html">MLFQ</a></li>
+    <li><a href="realtime-scheduler.html">Realtime</a></li>
+    <li><a href="multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="process-syscalls.html">Process</a></li>
+    <li><a href="memory-syscalls.html">Memory</a></li>
+    <li><a href="file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="libc.html">Fr Libc</a></li>
+    <li><a href="process-model.html">Process Model</a></li>
+    <li><a href="elf-loading.html">ELF Loading</a></li>
+    <li><a href="init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Filesystem</a></li>
+    <li><a href="overview.html">Networking</a></li>
+    <li><a href="overview.html">IPC</a></li>
+    <li><a href="overview.html">Drivers</a></li>
+    <li><a href="overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Build Overview</a></li>
+    <li><a href="toolchain.html">Toolchain</a></li>
+    <li><a href="makefile-structure.html">Makefile</a></li>
+    <li><a href="qemu-setup.html">QEMU</a></li>
+    <li><a href="testing.html">Testing</a></li>
+    <li><a href="overview.html">Debugging</a></li>
+    <li><a href="serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>Overcommit Policy</h1>
+<h2>Overview</h2>
+<p>Memory overcommit is the practice of allowing processes to be allocated more virtual memory than the system has physical memory to back it. Overcommit is possible because most allocated virtual memory is never all accessed at the same time. It enables more efficient resource utilization at the cost of the possibility of OOM (Out-Of-Memory) conditions if all allocated memory is actually used.</p>
+<h2>Overcommit Modes</h2>
+<p>Three overcommit modes are supported, configurable at boot via kernel parameter <code>vm.overcommit_memory</code>:</p>
+<h3>Mode 0 — Heuristic Overcommit (Default)</h3>
+<p>The kernel uses a heuristic to decide whether to allow an allocation:</p>
+<pre><code>allowed = total_physical_memory + total_swap_space - currently_committed
+</code></pre>
+<p>If <code>requested_size &gt; allowed * OVERCOMMIT_RATIO</code> (default ratio: 50%): reject with <code>ENOMEM</code>. Otherwise: allow.</p>
+<p>This mode allows reasonable overcommit while rejecting obviously unreasonable allocations (e.g., a single process requesting 10× physical RAM).</p>
+<h3>Mode 1 — Always Overcommit</h3>
+<p>All <code>mmap</code> and <code>brk</code> requests succeed regardless of available physical memory. Applications that use virtual address space speculatively (allocate a large range but only access a small part) can use this mode to avoid allocation failures. The risk of OOM is maximized.</p>
+<h3>Mode 2 — Never Overcommit (Strict)</h3>
+<p>Allocations are refused if they would cause committed memory to exceed:</p>
+<pre><code>max_committed = (total_physical_memory + total_swap_space) * OVERCOMMIT_LIMIT
+</code></pre>
+<p><code>OVERCOMMIT_LIMIT</code> default: 0.95 (95% of physical + swap). In this mode, <code>malloc</code> in userspace may return <code>NULL</code> for large allocations even when memory is not critically low.</p>
+<h2>Commit Accounting</h2>
+<p>The kernel tracks committed virtual memory (sum of all <code>mmap</code> and <code>brk</code> allocations that are not backed by a file). This is distinct from physical memory usage:</p>
+<ul>
+<li><code>committed_as</code>: Total committed virtual memory across all processes.</li>
+<li><code>physical_used</code>: Resident physical pages.</li>
+<li><code>committed_as</code> ≥ <code>physical_used</code> (committed can exceed physical by the overcommit amount).</li>
+</ul>
+<h2>OOM Interaction</h2>
+<p>Regardless of overcommit mode, if physical memory is fully exhausted and the page reclamation subsystem cannot free enough pages, the OOM killer is invoked. Overcommit mode determines how likely OOM is to occur:</p>
+<ul>
+<li>Mode 0: OOM is possible but less likely.</li>
+<li>Mode 1: OOM is most likely on systems where allocations are large but sparse.</li>
+<li>Mode 2: OOM is least likely (allocations are refused before exhaustion).</li>
+</ul>
+<h2>Configuration at Runtime</h2>
+<p>The overcommit policy can be changed at runtime via the kernel configuration interface (a <code>/proc/sys/vm/overcommit_memory</code>-equivalent path):</p>
+<pre><code>echo 0 &gt; /proc/sys/vm/overcommit_memory   # heuristic
+echo 1 &gt; /proc/sys/vm/overcommit_memory   # always
+echo 2 &gt; /proc/sys/vm/overcommit_memory   # never
+</code></pre>
+<p>Requires <code>CAP_SYS_ADMIN</code>.</p>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="memory/page-reclamation.html">page-reclamation.md</a></li>
+<li><a href="memory/virtual-memory.html">virtual-memory.md</a></li>
+<li><a href="memory/userspace-malloc.html">userspace-malloc.md</a></li>
+<li><a href="security/overview.html">security/overview.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="script.js" defer></script>
+</body>
+</html>

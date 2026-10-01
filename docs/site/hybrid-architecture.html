@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Drivers/hybrid-architecture — Fr OS</title>
+  <meta property="og:title" content="Drivers/hybrid-architecture — Fr OS">
+  <meta name="description" content="Drivers/hybrid-architecture — Fr OS documentation">
+  <meta property="og:description" content="Drivers/hybrid-architecture — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="README.html">Overview</a></li>
+    <li><a href="overview.html">Architecture</a></li>
+    <li><a href="memory-layout.html">Memory Layout</a></li>
+    <li><a href="posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="security-model.html">Security Model</a></li>
+    <li><a href="performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="stage1.html">Stage 1</a></li>
+    <li><a href="stage2.html">Stage 2</a></li>
+    <li><a href="kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="memory-map.html">Memory Map</a></li>
+    <li><a href="serial-output.html">Serial Output</a></li>
+    <li><a href="build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="early-boot.html">Early Boot</a></li>
+    <li><a href="interrupt-handling.html">Interrupts</a></li>
+    <li><a href="context-switching.html">Context Switching</a></li>
+    <li><a href="privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="panic-system.html">Panic</a></li>
+    <li><a href="logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="slab-allocator.html">SLAB</a></li>
+    <li><a href="virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="mlfq.html">MLFQ</a></li>
+    <li><a href="realtime-scheduler.html">Realtime</a></li>
+    <li><a href="multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="process-syscalls.html">Process</a></li>
+    <li><a href="memory-syscalls.html">Memory</a></li>
+    <li><a href="file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="libc.html">Fr Libc</a></li>
+    <li><a href="process-model.html">Process Model</a></li>
+    <li><a href="elf-loading.html">ELF Loading</a></li>
+    <li><a href="init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Filesystem</a></li>
+    <li><a href="overview.html">Networking</a></li>
+    <li><a href="overview.html">IPC</a></li>
+    <li><a href="overview.html">Drivers</a></li>
+    <li><a href="overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Build Overview</a></li>
+    <li><a href="toolchain.html">Toolchain</a></li>
+    <li><a href="makefile-structure.html">Makefile</a></li>
+    <li><a href="qemu-setup.html">QEMU</a></li>
+    <li><a href="testing.html">Testing</a></li>
+    <li><a href="overview.html">Debugging</a></li>
+    <li><a href="serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>Hybrid Driver Architecture</h1>
+<h2>Design Rationale</h2>
+<p>Traditional monolithic kernels run all device drivers in ring-0. A bug in any driver can corrupt kernel state and crash the system. Microkernels run drivers in ring-3, but the per-operation context switching cost is prohibitive for high-throughput devices (e.g., NVMe SSDs at 1M IOPS).</p>
+<p>The hybrid model splits the driver at a carefully chosen boundary:</p>
+<ul>
+<li><strong>Ring-0</strong>: Only the code that must run in ring-0 (interrupt acknowledgment, DMA configuration, MMIO access) stays in the kernel.</li>
+<li><strong>Ring-3</strong>: Everything else (protocol state machine, request parsing, completion processing) runs in a userspace process.</li>
+</ul>
+<p>Communication between the two is via <strong>shared memory ring buffers</strong> — after initial setup, the hot path requires no syscalls on the kernel side.</p>
+<h2>Shared Memory Protocol</h2>
+<p>The kernel allocates two ring buffers in a shared memory region:</p>
+<pre><code class="language-c"><span class="hl-keyword-type">struct</span> <span class="hl-type">driver_shared_region</span> <span class="hl-punctuation-bracket">{</span>
+    <span class="hl-keyword-type">struct</span> <span class="hl-type">ring_buf</span> <span class="hl-property">cmd_queue</span><span class="hl-punctuation-delimiter">;</span>    <span class="hl-comment">// kernel → userspace: commands/events</span>
+    <span class="hl-keyword-type">struct</span> <span class="hl-type">ring_buf</span> <span class="hl-property">rsp_queue</span><span class="hl-punctuation-delimiter">;</span>    <span class="hl-comment">// userspace → kernel: completions/results</span>
+    <span class="hl-type-builtin">uint64_t</span>        <span class="hl-property">doorbell</span><span class="hl-punctuation-delimiter">;</span>     <span class="hl-comment">// userspace writes non-zero to kick kernel</span>
+    <span class="hl-type-builtin">uint64_t</span>        <span class="hl-property">irq_count</span><span class="hl-punctuation-delimiter">;</span>    <span class="hl-comment">// kernel increments on interrupt; userspace reads</span>
+    <span class="hl-type-builtin">uint32_t</span>        <span class="hl-property">flags</span><span class="hl-punctuation-delimiter">;</span>        <span class="hl-comment">// DRIVER_FLAG_ALIVE | DRIVER_FLAG_ERROR</span>
+    <span class="hl-type-builtin">uint8_t</span>         <span class="hl-property">data</span><span class="hl-punctuation-bracket">[</span><span class="hl-number">0</span><span class="hl-punctuation-bracket">]</span><span class="hl-punctuation-delimiter">;</span>      <span class="hl-comment">// device-specific data follows</span>
+<span class="hl-punctuation-bracket">}</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<p>The shared region is mmap'd into the userspace driver's address space at initialization.</p>
+<h2>Hot Path (Storage Example)</h2>
+<ol>
+<li>Userspace process calls <code>submit_bio(bio)</code>.</li>
+<li>Bio parameters are written into <code>cmd_queue</code> (ring buffer append — no syscall).</li>
+<li>Userspace writes to <code>doorbell</code> word (shared memory write — visible to kernel via poll).</li>
+<li>Kernel reads <code>cmd_queue</code>, programs DMA, submits to device.</li>
+<li>Device completes, IRQ fires → kernel ISR runs.</li>
+<li>Kernel writes completion to <code>rsp_queue</code>. Increments <code>irq_count</code>.</li>
+<li>Userspace detects new <code>irq_count</code> (polling or futex wait) and processes completion.</li>
+</ol>
+<p>Steps 2–3 and 5–7 involve no kernel-level locks. Steps 4–5 are kernel-side only.</p>
+<h2>Event-Driven Userspace Driver</h2>
+<p>Userspace drivers run an event loop:</p>
+<pre><code class="language-c"><span class="hl-keyword-repeat">while</span> <span class="hl-punctuation-bracket">(</span><span class="hl-number">1</span><span class="hl-punctuation-bracket">)</span> <span class="hl-punctuation-bracket">{</span>
+    <span class="hl-comment">// Wait for events (interrupt, timeout, or doorbell from kernel)</span>
+    <span class="hl-function-call">sys_futex</span><span class="hl-punctuation-bracket">(</span><span class="hl-operator">&amp;</span><span class="hl-variable">shared</span><span class="hl-operator">-&gt;</span><span class="hl-property">irq_count</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-constant">FUTEX_WAIT</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">last_irq_count</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-constant-builtin">NULL</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-constant-builtin">NULL</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-number">0</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+
+    <span class="hl-comment">// Drain completion queue</span>
+    <span class="hl-keyword-repeat">while</span> <span class="hl-punctuation-bracket">(</span><span class="hl-function-call">rsp_queue_has_entry</span><span class="hl-punctuation-bracket">(</span><span class="hl-operator">&amp;</span><span class="hl-variable">shared</span><span class="hl-operator">-&gt;</span><span class="hl-property">rsp_queue</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-bracket">)</span> <span class="hl-punctuation-bracket">{</span>
+        <span class="hl-keyword-type">struct</span> <span class="hl-type">driver_completion</span> <span class="hl-variable">comp</span><span class="hl-punctuation-delimiter">;</span>
+        <span class="hl-function-call">rsp_queue_dequeue</span><span class="hl-punctuation-bracket">(</span><span class="hl-operator">&amp;</span><span class="hl-variable">shared</span><span class="hl-operator">-&gt;</span><span class="hl-property">rsp_queue</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-operator">&amp;</span><span class="hl-variable">comp</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+        <span class="hl-function-call">handle_completion</span><span class="hl-punctuation-bracket">(</span><span class="hl-operator">&amp;</span><span class="hl-variable">comp</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+    <span class="hl-punctuation-bracket">}</span>
+
+    <span class="hl-comment">// Submit pending commands if space available</span>
+    <span class="hl-keyword-repeat">while</span> <span class="hl-punctuation-bracket">(</span><span class="hl-operator">!</span><span class="hl-function-call">cmd_queue_full</span><span class="hl-punctuation-bracket">(</span><span class="hl-operator">&amp;</span><span class="hl-variable">shared</span><span class="hl-operator">-&gt;</span><span class="hl-property">cmd_queue</span><span class="hl-punctuation-bracket">)</span> <span class="hl-operator">&amp;&amp;</span> <span class="hl-function-call">has_pending_work</span><span class="hl-punctuation-bracket">(</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-bracket">)</span> <span class="hl-punctuation-bracket">{</span>
+        <span class="hl-keyword-type">struct</span> <span class="hl-type">driver_cmd</span> <span class="hl-variable">cmd</span> <span class="hl-operator">=</span> <span class="hl-function-call">build_next_cmd</span><span class="hl-punctuation-bracket">(</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+        <span class="hl-function-call">cmd_queue_enqueue</span><span class="hl-punctuation-bracket">(</span><span class="hl-operator">&amp;</span><span class="hl-variable">shared</span><span class="hl-operator">-&gt;</span><span class="hl-property">cmd_queue</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-operator">&amp;</span><span class="hl-variable">cmd</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+    <span class="hl-punctuation-bracket">}</span>
+    <span class="hl-function-call">write_doorbell</span><span class="hl-punctuation-bracket">(</span><span class="hl-operator">&amp;</span><span class="hl-variable">shared</span><span class="hl-operator">-&gt;</span><span class="hl-property">doorbell</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-punctuation-bracket">}</span>
+</code></pre>
+<h2>Isolation Boundary</h2>
+<p>The userspace driver runs as a dedicated process with a minimal capability set:</p>
+<ul>
+<li><code>CAP_IPC_LOCK</code> (to lock shared memory pages).</li>
+<li>Specific device file access (e.g., <code>/dev/driver_ctl</code>).</li>
+<li>No other capabilities.</li>
+</ul>
+<p>A crash of the userspace driver process does not affect the kernel or other processes. The kernel detects driver process death (via <code>EPIPE</code> on the shared region fd or process exit notification) and activates a stub that returns errors to callers.</p>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="drivers/kernel-drivers.html">kernel-drivers.md</a></li>
+<li><a href="drivers/userspace-drivers.html">userspace-drivers.md</a></li>
+<li><a href="drivers/driver-communication.html">driver-communication.md</a></li>
+<li><a href="drivers/driver-isolation.html">driver-isolation.md</a></li>
+<li><a href="ipc/shared-memory.html">ipc/shared-memory.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="script.js" defer></script>
+</body>
+</html>

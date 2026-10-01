@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Userspace/gui-architecture — Fr OS</title>
+  <meta property="og:title" content="Userspace/gui-architecture — Fr OS">
+  <meta name="description" content="Userspace/gui-architecture — Fr OS documentation">
+  <meta property="og:description" content="Userspace/gui-architecture — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="README.html">Overview</a></li>
+    <li><a href="overview.html">Architecture</a></li>
+    <li><a href="memory-layout.html">Memory Layout</a></li>
+    <li><a href="posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="security-model.html">Security Model</a></li>
+    <li><a href="performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="stage1.html">Stage 1</a></li>
+    <li><a href="stage2.html">Stage 2</a></li>
+    <li><a href="kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="memory-map.html">Memory Map</a></li>
+    <li><a href="serial-output.html">Serial Output</a></li>
+    <li><a href="build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="early-boot.html">Early Boot</a></li>
+    <li><a href="interrupt-handling.html">Interrupts</a></li>
+    <li><a href="context-switching.html">Context Switching</a></li>
+    <li><a href="privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="panic-system.html">Panic</a></li>
+    <li><a href="logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="slab-allocator.html">SLAB</a></li>
+    <li><a href="virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="mlfq.html">MLFQ</a></li>
+    <li><a href="realtime-scheduler.html">Realtime</a></li>
+    <li><a href="multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="process-syscalls.html">Process</a></li>
+    <li><a href="memory-syscalls.html">Memory</a></li>
+    <li><a href="file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="libc.html">Fr Libc</a></li>
+    <li><a href="process-model.html">Process Model</a></li>
+    <li><a href="elf-loading.html">ELF Loading</a></li>
+    <li><a href="init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Filesystem</a></li>
+    <li><a href="overview.html">Networking</a></li>
+    <li><a href="overview.html">IPC</a></li>
+    <li><a href="overview.html">Drivers</a></li>
+    <li><a href="overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Build Overview</a></li>
+    <li><a href="toolchain.html">Toolchain</a></li>
+    <li><a href="makefile-structure.html">Makefile</a></li>
+    <li><a href="qemu-setup.html">QEMU</a></li>
+    <li><a href="testing.html">Testing</a></li>
+    <li><a href="overview.html">Debugging</a></li>
+    <li><a href="serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>GUI Architecture</h1>
+<h2>Overview</h2>
+<p>The OS provides a framebuffer-based graphical user interface consisting of three layers:
+1. <strong>Display server</strong>: owns the framebuffer, manages windows, routes input events.
+2. <strong>Window manager</strong>: controls window placement, decorations, focus policy.
+3. <strong>Widget toolkit</strong>: provides standard UI controls (buttons, text fields, menus).</p>
+<h2>Display Server</h2>
+<p>The display server runs in ring-3 with access to the framebuffer device (<code>/dev/fb0</code>). Applications connect to it via a Unix domain socket (<code>/run/display</code>).</p>
+<h3>Client Protocol</h3>
+<p>Each application window is backed by a <strong>shared memory buffer</strong> (allocated via <code>sys_shm_open</code>). When the application wants to update its window:
+1. It renders into the shared memory buffer.
+2. It sends a <code>DAMAGE</code> message to the display server with the dirty rectangle.
+3. The display server composites the damaged region from the shared buffer into the framebuffer.</p>
+<p>This avoids copying pixel data through the socket — only metadata crosses the IPC boundary.</p>
+<h3>Message Types</h3>
+<table>
+<thead>
+<tr>
+<th>Message</th>
+<th>Direction</th>
+<th>Payload</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>MSG_CREATE_WINDOW</code></td>
+<td>Client → Server</td>
+<td>Width, height, title</td>
+</tr>
+<tr>
+<td><code>MSG_DESTROY_WINDOW</code></td>
+<td>Client → Server</td>
+<td>Window ID</td>
+</tr>
+<tr>
+<td><code>MSG_DAMAGE</code></td>
+<td>Client → Server</td>
+<td>Window ID, dirty rect</td>
+</tr>
+<tr>
+<td><code>MSG_RESIZE</code></td>
+<td>Server → Client</td>
+<td>New width and height</td>
+</tr>
+<tr>
+<td><code>MSG_KEY_EVENT</code></td>
+<td>Server → Client</td>
+<td>Keycode, modifier mask, down/up</td>
+</tr>
+<tr>
+<td><code>MSG_MOUSE_EVENT</code></td>
+<td>Server → Client</td>
+<td>X, Y, button mask, scroll delta</td>
+</tr>
+<tr>
+<td><code>MSG_FOCUS_IN/OUT</code></td>
+<td>Server → Client</td>
+<td>Focus gained/lost</td>
+</tr>
+<tr>
+<td><code>MSG_CLOSE_REQUEST</code></td>
+<td>Server → Client</td>
+<td>User clicked the close button</td>
+</tr>
+</tbody>
+</table>
+<h2>Window Manager</h2>
+<p>The window manager is a separate process that connects to the display server as a privileged client. It:
+- Draws window decorations (title bar, borders, close/minimize/maximize buttons).
+- Handles mouse events on decorations (drag to move, resize handles).
+- Manages window stacking order (z-order).
+- Implements focus policy (click-to-focus or follow-mouse).</p>
+<p>The window manager and display server communicate via the same IPC protocol as regular clients, but with additional privileged messages for repositioning and stacking windows.</p>
+<h2>Framebuffer Layout</h2>
+<p>The display server maps <code>/dev/fb0</code> (the framebuffer memory) directly into its address space. The framebuffer is a flat array of pixels in <code>XRGB8888</code> format:</p>
+<pre><code>offset = y * pitch + x * 4
+pixel  = (0xFF &lt;&lt; 24) | (r &lt;&lt; 16) | (g &lt;&lt; 8) | b
+</code></pre>
+<p><code>pitch</code> is the number of bytes per row (may include padding for alignment). The screen resolution and pitch are queried via <code>ioctl(fb_fd, FBIOGET_VSCREENINFO, ...)</code>.</p>
+<h2>Compositing</h2>
+<p>The display server maintains a list of visible windows (front-to-back order). When a window sends a <code>DAMAGE</code> message, the compositor:
+1. Clips the damaged rect to the screen bounds.
+2. For each pixel in the dirty area: find the topmost window that covers that pixel; blit from that window's shared buffer.
+3. Update the framebuffer (<code>memcpy</code> or SIMD copy).</p>
+<p>For 18-core systems: compositing can be parallelized by dividing the dirty area into horizontal bands and processing them on multiple threads.</p>
+<h2>Widget Toolkit</h2>
+<p>The widget toolkit provides standard UI controls. It is a userspace library that:
+- Renders widgets into the window's shared memory buffer.
+- Translates display server events into high-level widget events (button clicks, text input).
+- Manages widget layout (flex-like layout engine).</p>
+<h3>Widget Tree</h3>
+<pre><code>Window
+  └─ VBox (vertical layout)
+       ├─ MenuBar
+       ├─ HBox (horizontal layout)
+       │    ├─ TextArea (main content)
+       │    └─ Scrollbar
+       └─ StatusBar
+</code></pre>
+<p>Each widget has a bounding box (position + size) within the window. Layout is computed top-down.</p>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="userspace/overview.html">overview.md</a></li>
+<li><a href="drivers/display-driver.html">drivers/display-driver.md</a></li>
+<li><a href="drivers/input-driver.html">drivers/input-driver.md</a></li>
+<li><a href="ipc/unix-sockets.html">ipc/unix-sockets.md</a></li>
+<li><a href="ipc/shared-memory.html">ipc/shared-memory.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="script.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bootloader/filesystem/ext4-journaling — Fr OS</title>
+  <meta property="og:title" content="Bootloader/filesystem/ext4-journaling — Fr OS">
+  <meta name="description" content="Bootloader/filesystem/ext4-journaling — Fr OS documentation">
+  <meta property="og:description" content="Bootloader/filesystem/ext4-journaling — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="README.html">Overview</a></li>
+    <li><a href="overview.html">Architecture</a></li>
+    <li><a href="memory-layout.html">Memory Layout</a></li>
+    <li><a href="posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="security-model.html">Security Model</a></li>
+    <li><a href="performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="stage1.html">Stage 1</a></li>
+    <li><a href="stage2.html">Stage 2</a></li>
+    <li><a href="kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="memory-map.html">Memory Map</a></li>
+    <li><a href="serial-output.html">Serial Output</a></li>
+    <li><a href="build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="early-boot.html">Early Boot</a></li>
+    <li><a href="interrupt-handling.html">Interrupts</a></li>
+    <li><a href="context-switching.html">Context Switching</a></li>
+    <li><a href="privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="panic-system.html">Panic</a></li>
+    <li><a href="logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="slab-allocator.html">SLAB</a></li>
+    <li><a href="virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="mlfq.html">MLFQ</a></li>
+    <li><a href="realtime-scheduler.html">Realtime</a></li>
+    <li><a href="multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="process-syscalls.html">Process</a></li>
+    <li><a href="memory-syscalls.html">Memory</a></li>
+    <li><a href="file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="libc.html">Fr Libc</a></li>
+    <li><a href="process-model.html">Process Model</a></li>
+    <li><a href="elf-loading.html">ELF Loading</a></li>
+    <li><a href="init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Filesystem</a></li>
+    <li><a href="overview.html">Networking</a></li>
+    <li><a href="overview.html">IPC</a></li>
+    <li><a href="overview.html">Drivers</a></li>
+    <li><a href="overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Build Overview</a></li>
+    <li><a href="toolchain.html">Toolchain</a></li>
+    <li><a href="makefile-structure.html">Makefile</a></li>
+    <li><a href="qemu-setup.html">QEMU</a></li>
+    <li><a href="testing.html">Testing</a></li>
+    <li><a href="overview.html">Debugging</a></li>
+    <li><a href="serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>ext4 Journaling</h1>
+<h2>Purpose</h2>
+<p>The ext4 journal (JBD2 — Journaling Block Device 2) ensures filesystem consistency after crashes. Without journaling, a crash during a metadata update (e.g., file creation involves updating the inode bitmap, the directory entry, and the inode itself) can leave the filesystem in an inconsistent state requiring a slow <code>fsck</code> scan at next boot.</p>
+<p>With journaling, all metadata changes are written to a sequential journal first. If a crash occurs, the journal is replayed at next mount to bring the filesystem to a consistent state. This reduces recovery time from minutes to seconds.</p>
+<h2>Journal Location</h2>
+<p>The journal is stored in a dedicated inode (inode 8 by convention) on the filesystem. The journal occupies a contiguous region of blocks (default: 128 MB).</p>
+<h2>Journal Modes</h2>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>What is journaled</th>
+<th>Performance</th>
+<th>Data safety</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>data=journal</code></td>
+<td>All metadata + data</td>
+<td>Slowest</td>
+<td>Highest</td>
+</tr>
+<tr>
+<td><code>data=ordered</code> (default)</td>
+<td>Metadata only; data written before metadata</td>
+<td>Good</td>
+<td>High</td>
+</tr>
+<tr>
+<td><code>data=writeback</code></td>
+<td>Metadata only; data order not enforced</td>
+<td>Fastest</td>
+<td>Lower</td>
+</tr>
+</tbody>
+</table>
+<p>Default mode: <code>data=ordered</code>. Data blocks are written to disk before the metadata commit, ensuring that committed metadata always points to valid data.</p>
+<h2>Journal Transaction Model</h2>
+<p>Changes to filesystem metadata are grouped into <strong>transactions</strong>. A transaction is:</p>
+<ol>
+<li><strong>Started</strong>: A handle is obtained (<code>jbd2_journal_start</code>).</li>
+<li><strong>Operations</strong>: Metadata blocks are modified in memory. Each modified block is tagged as part of the transaction.</li>
+<li><strong>Committed</strong>: The transaction is submitted (<code>jbd2_journal_commit</code>). The journal writes a <strong>commit block</strong> followed by all dirty metadata blocks in a single sequential write.</li>
+<li><strong>Checkpointed</strong>: After the metadata blocks are written to their final on-disk locations, the journal space is marked free.</li>
+</ol>
+<h2>Journal Data Structures</h2>
+<pre><code class="language-c"><span class="hl-keyword-type">struct</span> <span class="hl-type">journal_header</span> <span class="hl-punctuation-bracket">{</span>
+    <span class="hl-type-builtin">uint32_t</span> <span class="hl-property">magic</span><span class="hl-punctuation-delimiter">;</span>        <span class="hl-comment">// JBD2_MAGIC = 0xC03B3998</span>
+    <span class="hl-type-builtin">uint32_t</span> <span class="hl-property">blocktype</span><span class="hl-punctuation-delimiter">;</span>    <span class="hl-comment">// descriptor, commit, revoke, superblock</span>
+    <span class="hl-type-builtin">uint32_t</span> <span class="hl-property">sequence</span><span class="hl-punctuation-delimiter">;</span>     <span class="hl-comment">// transaction sequence number</span>
+<span class="hl-punctuation-bracket">}</span><span class="hl-punctuation-delimiter">;</span>
+
+<span class="hl-keyword-type">struct</span> <span class="hl-type">journal_superblock</span> <span class="hl-punctuation-bracket">{</span>
+    <span class="hl-keyword-type">struct</span> <span class="hl-type">journal_header</span> <span class="hl-property">header</span><span class="hl-punctuation-delimiter">;</span>
+    <span class="hl-type-builtin">uint32_t</span> <span class="hl-property">blocksize</span><span class="hl-punctuation-delimiter">;</span>
+    <span class="hl-type-builtin">uint32_t</span> <span class="hl-property">maxlen</span><span class="hl-punctuation-delimiter">;</span>       <span class="hl-comment">// journal length in blocks</span>
+    <span class="hl-type-builtin">uint32_t</span> <span class="hl-property">first</span><span class="hl-punctuation-delimiter">;</span>        <span class="hl-comment">// first journal block</span>
+    <span class="hl-type-builtin">uint32_t</span> <span class="hl-property">sequence</span><span class="hl-punctuation-delimiter">;</span>     <span class="hl-comment">// next transaction sequence to use</span>
+    <span class="hl-type-builtin">uint32_t</span> <span class="hl-property">start</span><span class="hl-punctuation-delimiter">;</span>        <span class="hl-comment">// start of log</span>
+    <span class="hl-comment">// ...</span>
+<span class="hl-punctuation-bracket">}</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<h2>Recovery</h2>
+<p>On mount, if the filesystem was not cleanly unmounted (the superblock's <code>s_state</code> flag is not clean):</p>
+<ol>
+<li>Read the journal superblock.</li>
+<li>Scan from <code>journal.start</code> for valid transactions (valid magic + matching sequence).</li>
+<li>Replay each committed transaction: write the journaled metadata blocks to their final locations.</li>
+<li>Mark the journal clean.</li>
+<li>Mount proceeds normally.</li>
+</ol>
+<p>Recovery is O(journal size), not O(filesystem size).</p>
+<h2>Barrier Writes</h2>
+<p>To ensure write ordering guarantees (prevent reordering by device firmware), the journal uses <strong>write barriers</strong> (cache flush commands) between:</p>
+<ol>
+<li>Data writes and the journal commit.</li>
+<li>The journal commit and the checkpoint writes.</li>
+</ol>
+<p>On QEMU with virtio-blk, barriers are handled by the virtio driver's flush command.</p>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="ext4-overview.html">ext4-overview.md</a></li>
+<li><a href="bootloader/filesystem/ext4-extents.html">ext4-extents.md</a></li>
+<li><a href="bootloader/filesystem/page-cache.html">page-cache.md</a></li>
+<li><a href="drivers/storage-driver.html">drivers/storage-driver.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="script.js" defer></script>
+</body>
+</html>

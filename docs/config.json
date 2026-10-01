@@ -1,9 +1,9 @@
 {
   "$schema": "https://raw.githubusercontent.com/Omena0/fr-docs/main/config.schema.json",
   "project_name": "Fr OS",
-  "copyright_holder": "CHANGE_ME",
-  "project_url": "",
-  "site_path_prefix": "/",
+  "copyright_holder": "Omena0",
+  "project_url": "https://github.io/Omena0/Fr-OS",
+  "site_path_prefix": "/fr-os",
   "src_dir": "src",
   "out_dir": "site",
   "docs_dir": ".",
@@ -279,15 +279,14 @@
     "live_label": "Live"
   },
   "source_files": {
-    "search_dirs": [
-      "parent",
-      "src_parent",
-      "docs"
-    ],
     "patterns": [
       "docs/src/*.md",
-      "docs/*.js",
-      "docs/*.css"
+      "src/*.c",
+      "src/*.h",
+      "src/*.S",
+      "src/*.mk",
+      "src/*.ld",
+      "src/*.d"
     ],
     "ignore_dirs": []
   },

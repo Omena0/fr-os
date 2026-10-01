@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Debugging/performance-counters — Fr OS</title>
+  <meta property="og:title" content="Debugging/performance-counters — Fr OS">
+  <meta name="description" content="Debugging/performance-counters — Fr OS documentation">
+  <meta property="og:description" content="Debugging/performance-counters — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="README.html">Overview</a></li>
+    <li><a href="overview.html">Architecture</a></li>
+    <li><a href="memory-layout.html">Memory Layout</a></li>
+    <li><a href="posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="security-model.html">Security Model</a></li>
+    <li><a href="performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="stage1.html">Stage 1</a></li>
+    <li><a href="stage2.html">Stage 2</a></li>
+    <li><a href="kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="memory-map.html">Memory Map</a></li>
+    <li><a href="serial-output.html">Serial Output</a></li>
+    <li><a href="build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="early-boot.html">Early Boot</a></li>
+    <li><a href="interrupt-handling.html">Interrupts</a></li>
+    <li><a href="context-switching.html">Context Switching</a></li>
+    <li><a href="privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="panic-system.html">Panic</a></li>
+    <li><a href="logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="slab-allocator.html">SLAB</a></li>
+    <li><a href="virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="mlfq.html">MLFQ</a></li>
+    <li><a href="realtime-scheduler.html">Realtime</a></li>
+    <li><a href="multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="process-syscalls.html">Process</a></li>
+    <li><a href="memory-syscalls.html">Memory</a></li>
+    <li><a href="file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="libc.html">Fr Libc</a></li>
+    <li><a href="process-model.html">Process Model</a></li>
+    <li><a href="elf-loading.html">ELF Loading</a></li>
+    <li><a href="init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Filesystem</a></li>
+    <li><a href="overview.html">Networking</a></li>
+    <li><a href="overview.html">IPC</a></li>
+    <li><a href="overview.html">Drivers</a></li>
+    <li><a href="overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Build Overview</a></li>
+    <li><a href="toolchain.html">Toolchain</a></li>
+    <li><a href="makefile-structure.html">Makefile</a></li>
+    <li><a href="qemu-setup.html">QEMU</a></li>
+    <li><a href="testing.html">Testing</a></li>
+    <li><a href="overview.html">Debugging</a></li>
+    <li><a href="serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>Performance Counters</h1>
+<h2>Overview</h2>
+<p>Modern x86-64 processors have a <strong>Performance Monitoring Unit (PMU)</strong> — a set of hardware registers that count low-level microarchitectural events: retired instructions, cache misses, branch mispredictions, TLB misses, etc.</p>
+<h2>Hardware Counter Registers</h2>
+<p>On x86-64 (Intel/AMD), the PMU provides:
+- <strong>Fixed counters</strong> (3): always-on, count specific events:
+  - <code>IA32_FIXED_CTR0</code>: instructions retired.
+  - <code>IA32_FIXED_CTR1</code>: core CPU cycles unhalted.
+  - <code>IA32_FIXED_CTR2</code>: reference cycles unhalted (at TSC frequency).
+- <strong>Programmable counters</strong> (4–8, depends on CPU model): configurable to count any supported event via <code>IA32_PERFEVTSELx</code> registers.</p>
+<h2>Common Programmable Events</h2>
+<table>
+<thead>
+<tr>
+<th>Event code</th>
+<th>Mask</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x3C</code></td>
+<td><code>0x00</code></td>
+<td>Unhalted core cycles</td>
+</tr>
+<tr>
+<td><code>0xC0</code></td>
+<td><code>0x00</code></td>
+<td>Instructions retired</td>
+</tr>
+<tr>
+<td><code>0x2E</code></td>
+<td><code>0x4F</code></td>
+<td>Last-level cache misses</td>
+</tr>
+<tr>
+<td><code>0xC5</code></td>
+<td><code>0x00</code></td>
+<td>Branch mispredictions</td>
+</tr>
+<tr>
+<td><code>0x08</code></td>
+<td><code>0x01</code></td>
+<td>DTLB load misses</td>
+</tr>
+<tr>
+<td><code>0x49</code></td>
+<td><code>0x01</code></td>
+<td>DTLB store misses</td>
+</tr>
+</tbody>
+</table>
+<h2>Programming Counters</h2>
+<pre><code class="language-c"><span class="hl-comment">// Set up programmable counter 0 to count LLC misses:</span>
+<span class="hl-type-builtin">uint64_t</span> <span class="hl-variable">evtsel</span> <span class="hl-operator">=</span> <span class="hl-number">0</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-variable">evtsel</span> <span class="hl-operator">|=</span> <span class="hl-number">0x2E</span><span class="hl-punctuation-delimiter">;</span>        <span class="hl-comment">// EventSelect = 0x2E (LLC)</span>
+<span class="hl-variable">evtsel</span> <span class="hl-operator">|=</span> <span class="hl-punctuation-bracket">(</span><span class="hl-number">0x4F</span> <span class="hl-operator">&lt;&lt;</span> <span class="hl-number">8</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span> <span class="hl-comment">// UMask = 0x4F</span>
+<span class="hl-variable">evtsel</span> <span class="hl-operator">|=</span> <span class="hl-punctuation-bracket">(</span><span class="hl-number">1</span> <span class="hl-operator">&lt;&lt;</span> <span class="hl-number">16</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>   <span class="hl-comment">// USR: count in ring 3</span>
+<span class="hl-variable">evtsel</span> <span class="hl-operator">|=</span> <span class="hl-punctuation-bracket">(</span><span class="hl-number">1</span> <span class="hl-operator">&lt;&lt;</span> <span class="hl-number">17</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>   <span class="hl-comment">// OS: count in ring 0</span>
+<span class="hl-variable">evtsel</span> <span class="hl-operator">|=</span> <span class="hl-punctuation-bracket">(</span><span class="hl-number">1</span> <span class="hl-operator">&lt;&lt;</span> <span class="hl-number">22</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>   <span class="hl-comment">// EN: enable the counter</span>
+<span class="hl-function-call">wrmsr</span><span class="hl-punctuation-bracket">(</span><span class="hl-constant">IA32_PERFEVTSEL0</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">evtsel</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+
+<span class="hl-comment">// Zero the counter:</span>
+<span class="hl-function-call">wrmsr</span><span class="hl-punctuation-bracket">(</span><span class="hl-constant">IA32_PMC0</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-number">0</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+
+<span class="hl-comment">// Read the counter:</span>
+<span class="hl-type-builtin">uint64_t</span> <span class="hl-variable">count</span> <span class="hl-operator">=</span> <span class="hl-function-call">rdpmc</span><span class="hl-punctuation-bracket">(</span><span class="hl-number">0</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>  <span class="hl-comment">// RDPMC instruction (ring 3 accessible if CR4.PCE=1)</span>
+</code></pre>
+<h2>Userspace Access via RDPMC</h2>
+<p>The kernel can set <code>CR4.PCE</code> (Performance Counter Enable) to allow userspace to read PMU counters directly with the <code>RDPMC</code> instruction — without a syscall. This is used by profiling tools for very low overhead sampling.</p>
+<p>Per-process PMU context is saved/restored on context switch (via <code>XSAVE</code> extended state if supported, or explicit <code>RDMSR</code>/<code>WRMSR</code>).</p>
+<h2>Overflow Interrupts</h2>
+<p>Counters can generate an interrupt when they overflow (count rolls over from <code>0xFFFFFFFF</code> to 0). This is used by <strong>sampling profilers</strong>:
+1. Set the counter to <code>(2^32 - N)</code> (will overflow after N events).
+2. On overflow: a <code>#PMI</code> (Performance Monitoring Interrupt) fires.
+3. The interrupt handler records the current <code>RIP</code> (instruction pointer) and other state.
+4. Resets the counter and resumes.</p>
+<p>This produces a statistical sample of where the CPU spends its time.</p>
+<h2>Userspace API</h2>
+<p>The kernel exposes PMU access via:
+1. <code>/debug/pmu/&lt;cpu&gt;/fixed0</code> etc.: virtual files to read current counter values.
+2. <code>sys_perf_event_open</code>-equivalent syscall: programmatic counter configuration and event streaming.</p>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="debugging/overview.html">overview.md</a></li>
+<li><a href="debugging/profiling.html">profiling.md</a></li>
+<li><a href="debugging/kernel-tracing.html">kernel-tracing.md</a></li>
+<li><a href="debugging/observability-api.html">observability-api.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="script.js" defer></script>
+</body>
+</html>

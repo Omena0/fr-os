@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Memory/slab-allocator — Fr OS</title>
+  <meta property="og:title" content="Memory/slab-allocator — Fr OS">
+  <meta name="description" content="Memory/slab-allocator — Fr OS documentation">
+  <meta property="og:description" content="Memory/slab-allocator — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="README.html">Overview</a></li>
+    <li><a href="overview.html">Architecture</a></li>
+    <li><a href="memory-layout.html">Memory Layout</a></li>
+    <li><a href="posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="security-model.html">Security Model</a></li>
+    <li><a href="performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="stage1.html">Stage 1</a></li>
+    <li><a href="stage2.html">Stage 2</a></li>
+    <li><a href="kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="memory-map.html">Memory Map</a></li>
+    <li><a href="serial-output.html">Serial Output</a></li>
+    <li><a href="build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="early-boot.html">Early Boot</a></li>
+    <li><a href="interrupt-handling.html">Interrupts</a></li>
+    <li><a href="context-switching.html">Context Switching</a></li>
+    <li><a href="privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="panic-system.html">Panic</a></li>
+    <li><a href="logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="slab-allocator.html" class="active">SLAB</a></li>
+    <li><a href="virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="mlfq.html">MLFQ</a></li>
+    <li><a href="realtime-scheduler.html">Realtime</a></li>
+    <li><a href="multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="process-syscalls.html">Process</a></li>
+    <li><a href="memory-syscalls.html">Memory</a></li>
+    <li><a href="file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="libc.html">Fr Libc</a></li>
+    <li><a href="process-model.html">Process Model</a></li>
+    <li><a href="elf-loading.html">ELF Loading</a></li>
+    <li><a href="init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Filesystem</a></li>
+    <li><a href="overview.html">Networking</a></li>
+    <li><a href="overview.html">IPC</a></li>
+    <li><a href="overview.html">Drivers</a></li>
+    <li><a href="overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Build Overview</a></li>
+    <li><a href="toolchain.html">Toolchain</a></li>
+    <li><a href="makefile-structure.html">Makefile</a></li>
+    <li><a href="qemu-setup.html">QEMU</a></li>
+    <li><a href="testing.html">Testing</a></li>
+    <li><a href="overview.html">Debugging</a></li>
+    <li><a href="serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>SLAB Allocator</h1>
+<h2>Overview</h2>
+<p>The SLAB allocator provides efficient fixed-size object allocation for the kernel. It reduces fragmentation and allocation overhead for frequently allocated objects (inodes, task structs, VMAs, network buffers, etc.) by maintaining pools of pre-initialized objects.</p>
+<h2>Architecture</h2>
+<p>The SLAB allocator has three levels:</p>
+<pre><code>kmalloc(size)
+    ↓
+[size class selection → appropriate slab cache]
+    ↓
+Per-CPU magazine (hot path, no lock)
+    ↓
+Per-NUMA slab partial/full list (under slab cache lock)
+    ↓
+Buddy allocator (page allocation, under zone lock)
+</code></pre>
+<h2>Slab Caches</h2>
+<p>A slab cache is created for each type of kernel object:</p>
+<pre><code class="language-c"><span class="hl-keyword-type">struct</span> <span class="hl-type">slab_cache</span> <span class="hl-operator">*</span><span class="hl-function">kmem_cache_create</span><span class="hl-punctuation-bracket">(</span>
+    <span class="hl-keyword-modifier">const</span> <span class="hl-type-builtin">char</span> <span class="hl-operator">*</span><span class="hl-variable">name</span><span class="hl-punctuation-delimiter">,</span>      <span class="hl-comment">// e.g., &quot;task_struct&quot;</span>
+    <span class="hl-type-builtin">size_t</span>      <span class="hl-variable-parameter">obj_size</span><span class="hl-punctuation-delimiter">,</span>  <span class="hl-comment">// object size in bytes</span>
+    <span class="hl-type-builtin">size_t</span>      <span class="hl-variable-parameter">align</span><span class="hl-punctuation-delimiter">,</span>     <span class="hl-comment">// alignment requirement</span>
+    <span class="hl-type-builtin">unsigned</span>    <span class="hl-variable-parameter">flags</span><span class="hl-punctuation-delimiter">,</span>     <span class="hl-comment">// SLAB_ZERO, SLAB_HWCACHE_ALIGN, etc.</span>
+    <span class="hl-type-builtin">void</span> <span class="hl-punctuation-bracket">(</span><span class="hl-operator">*</span><span class="hl-variable">ctor</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">void</span> <span class="hl-operator">*</span><span class="hl-punctuation-bracket">)</span>   <span class="hl-comment">// optional constructor, called on new objects</span>
+<span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<p>Predefined caches for common kernel objects are created during <code>slab_init()</code>. The <code>kmalloc</code> API uses a set of power-of-2 generic caches:</p>
+<pre><code>kmalloc-8, kmalloc-16, kmalloc-32, kmalloc-64, kmalloc-128,
+kmalloc-256, kmalloc-512, kmalloc-1024, kmalloc-2048, kmalloc-4096
+</code></pre>
+<h2>Slab Structure</h2>
+<p>A slab is one or more contiguous physical pages containing:</p>
+<ul>
+<li>A <code>struct slab</code> header (at the beginning of the page or out-of-line).</li>
+<li>A freelist of available objects (encoded as a linked list of indices).</li>
+<li>The objects themselves (contiguous, with <code>align</code> padding).</li>
+</ul>
+<pre><code class="language-c"><span class="hl-keyword-type">struct</span> <span class="hl-type">slab</span> <span class="hl-punctuation-bracket">{</span>
+    <span class="hl-keyword-type">struct</span> <span class="hl-type">slab_cache</span> <span class="hl-operator">*</span><span class="hl-property">cache</span><span class="hl-punctuation-delimiter">;</span>  <span class="hl-comment">// owning cache</span>
+    <span class="hl-type-builtin">uint32_t</span> <span class="hl-property">free_count</span><span class="hl-punctuation-delimiter">;</span>       <span class="hl-comment">// number of free objects in this slab</span>
+    <span class="hl-type-builtin">uint32_t</span> <span class="hl-property">total_count</span><span class="hl-punctuation-delimiter">;</span>      <span class="hl-comment">// total object capacity</span>
+    <span class="hl-type-builtin">uint16_t</span> <span class="hl-property">freelist</span><span class="hl-punctuation-delimiter">;</span>         <span class="hl-comment">// index of first free object</span>
+    <span class="hl-comment">// followed by: uint8_t objs[total_count * obj_size]</span>
+<span class="hl-punctuation-bracket">}</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<p>States: <strong>full</strong> (no free objects), <strong>partial</strong> (some free), <strong>empty</strong> (all free — can be returned to buddy allocator).</p>
+<h2>Per-CPU Magazine (Fast Path)</h2>
+<p>Each CPU has a per-cache <strong>magazine</strong> — a small array of pre-allocated objects:</p>
+<pre><code class="language-c"><span class="hl-keyword-type">struct</span> <span class="hl-type">slab_magazine</span> <span class="hl-punctuation-bracket">{</span>
+    <span class="hl-type-builtin">uint32_t</span> <span class="hl-property">count</span><span class="hl-punctuation-delimiter">;</span>            <span class="hl-comment">// number of objects currently in magazine</span>
+    <span class="hl-type-builtin">uint32_t</span> <span class="hl-property">capacity</span><span class="hl-punctuation-delimiter">;</span>         <span class="hl-comment">// magazine size (e.g., 64 objects)</span>
+    <span class="hl-type-builtin">void</span>    <span class="hl-operator">*</span><span class="hl-property">objects</span><span class="hl-punctuation-bracket">[</span><span class="hl-number">64</span><span class="hl-punctuation-bracket">]</span><span class="hl-punctuation-delimiter">;</span>      <span class="hl-comment">// the objects</span>
+<span class="hl-punctuation-bracket">}</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<p>Allocation fast path:</p>
+<pre><code>if magazine-&gt;count &gt; 0:
+    return magazine-&gt;objects[--magazine-&gt;count]  // O(1), no lock
+</code></pre>
+<p>Deallocation fast path:</p>
+<pre><code>if magazine-&gt;count &lt; magazine-&gt;capacity:
+    magazine-&gt;objects[magazine-&gt;count++] = obj    // O(1), no lock
+</code></pre>
+<p>When the magazine empties/fills: swap with the per-CPU depot (a loaded/empty magazine pair). If the depot has no spare: go to the global slab cache under lock to refill.</p>
+<h2>SLAB vs. SLUB</h2>
+<p>This allocator is conceptually based on the SLAB design. A simplified implementation without per-NUMA node lists and without per-object debugging metadata is sufficient for initial implementation. More sophisticated SLUB-like per-CPU slabs may be adopted in a future optimization pass.</p>
+<h2>Allocation Lifecycle</h2>
+<pre><code>kmem_cache_alloc(cache):
+  1. Check per-CPU magazine → O(1), no lock
+  2. Swap magazine from depot if empty → O(1), per-CPU spinlock
+  3. Allocate from partial slab → slab cache lock
+  4. If no partial slabs: allocate new slab from buddy → zone lock
+  5. Return object
+
+kmem_cache_free(cache, obj):
+  1. Return to per-CPU magazine → O(1), no lock
+  2. If magazine full: swap with depot → per-CPU spinlock
+  3. If depot also full: flush a full magazine to the slab cache → slab cache lock
+</code></pre>
+<h2>Destructor and Constructor</h2>
+<p>If the cache was created with a <code>ctor</code>, it is called once when a new slab is allocated. The constructor initializes invariant fields. When an object is freed, only variable fields (non-invariant state) need to be reset — the constructor's work persists. This reduces initialization overhead on the allocation path.</p>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="memory/physical-allocator.html">physical-allocator.md</a></li>
+<li><a href="memory/per-cpu-caches.html">per-cpu-caches.md</a></li>
+<li><a href="memory/virtual-memory.html">virtual-memory.md</a></li>
+<li><a href="kernel/kernel-libraries.html">kernel/kernel-libraries.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="script.js" defer></script>
+</body>
+</html>

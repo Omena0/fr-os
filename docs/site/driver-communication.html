@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Drivers/driver-communication — Fr OS</title>
+  <meta property="og:title" content="Drivers/driver-communication — Fr OS">
+  <meta name="description" content="Drivers/driver-communication — Fr OS documentation">
+  <meta property="og:description" content="Drivers/driver-communication — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="README.html">Overview</a></li>
+    <li><a href="overview.html">Architecture</a></li>
+    <li><a href="memory-layout.html">Memory Layout</a></li>
+    <li><a href="posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="security-model.html">Security Model</a></li>
+    <li><a href="performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="stage1.html">Stage 1</a></li>
+    <li><a href="stage2.html">Stage 2</a></li>
+    <li><a href="kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="memory-map.html">Memory Map</a></li>
+    <li><a href="serial-output.html">Serial Output</a></li>
+    <li><a href="build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="early-boot.html">Early Boot</a></li>
+    <li><a href="interrupt-handling.html">Interrupts</a></li>
+    <li><a href="context-switching.html">Context Switching</a></li>
+    <li><a href="privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="panic-system.html">Panic</a></li>
+    <li><a href="logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="slab-allocator.html">SLAB</a></li>
+    <li><a href="virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="mlfq.html">MLFQ</a></li>
+    <li><a href="realtime-scheduler.html">Realtime</a></li>
+    <li><a href="multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="process-syscalls.html">Process</a></li>
+    <li><a href="memory-syscalls.html">Memory</a></li>
+    <li><a href="file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="libc.html">Fr Libc</a></li>
+    <li><a href="process-model.html">Process Model</a></li>
+    <li><a href="elf-loading.html">ELF Loading</a></li>
+    <li><a href="init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Filesystem</a></li>
+    <li><a href="overview.html">Networking</a></li>
+    <li><a href="overview.html">IPC</a></li>
+    <li><a href="overview.html">Drivers</a></li>
+    <li><a href="overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Build Overview</a></li>
+    <li><a href="toolchain.html">Toolchain</a></li>
+    <li><a href="makefile-structure.html">Makefile</a></li>
+    <li><a href="qemu-setup.html">QEMU</a></li>
+    <li><a href="testing.html">Testing</a></li>
+    <li><a href="overview.html">Debugging</a></li>
+    <li><a href="serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>Driver Communication Protocol</h1>
+<h2>Overview</h2>
+<p>The kernel driver core and the userspace driver process communicate via shared memory ring buffers. This section specifies the ring buffer structure, serialization format, and ordering guarantees.</p>
+<h2>Ring Buffer Structure</h2>
+<pre><code class="language-c"><span class="hl-keyword-directive-define">#define</span> <span class="hl-constant-macro">RING_SIZE</span> <span class="hl-variable">256</span><span class="hl-number">   </span><span class="hl-comment">// must be power of 2</span>
+
+<span class="hl-keyword-type">struct</span> <span class="hl-type">ring_buf</span> <span class="hl-punctuation-bracket">{</span>
+    <span class="hl-type-builtin">uint32_t</span> <span class="hl-property">head</span><span class="hl-punctuation-delimiter">;</span>                   <span class="hl-comment">// write index (producer)</span>
+    <span class="hl-type-builtin">uint32_t</span> <span class="hl-property">tail</span><span class="hl-punctuation-delimiter">;</span>                   <span class="hl-comment">// read index (consumer)</span>
+    <span class="hl-type-builtin">uint32_t</span> <span class="hl-property">mask</span><span class="hl-punctuation-delimiter">;</span>                   <span class="hl-comment">// RING_SIZE - 1</span>
+    <span class="hl-type-builtin">uint8_t</span>  <span class="hl-property">_pad</span><span class="hl-punctuation-bracket">[</span><span class="hl-number">52</span><span class="hl-punctuation-bracket">]</span><span class="hl-punctuation-delimiter">;</span>               <span class="hl-comment">// pad to cache line</span>
+    <span class="hl-keyword-type">struct</span> <span class="hl-type">ring_entry</span> <span class="hl-property">entries</span><span class="hl-punctuation-bracket">[</span><span class="hl-constant">RING_SIZE</span><span class="hl-punctuation-bracket">]</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-punctuation-bracket">}</span><span class="hl-punctuation-delimiter">;</span>
+
+<span class="hl-keyword-type">struct</span> <span class="hl-type">ring_entry</span> <span class="hl-punctuation-bracket">{</span>
+    <span class="hl-type-builtin">uint32_t</span> <span class="hl-property">type</span><span class="hl-punctuation-delimiter">;</span>       <span class="hl-comment">// command/event type (device-specific)</span>
+    <span class="hl-type-builtin">uint32_t</span> <span class="hl-property">flags</span><span class="hl-punctuation-delimiter">;</span>      <span class="hl-comment">// per-entry flags</span>
+    <span class="hl-type-builtin">uint64_t</span> <span class="hl-property">id</span><span class="hl-punctuation-delimiter">;</span>         <span class="hl-comment">// request correlation ID</span>
+    <span class="hl-type-builtin">uint64_t</span> <span class="hl-property">addr</span><span class="hl-punctuation-delimiter">;</span>       <span class="hl-comment">// data address (physical or shared memory offset)</span>
+    <span class="hl-type-builtin">uint32_t</span> <span class="hl-property">len</span><span class="hl-punctuation-delimiter">;</span>        <span class="hl-comment">// data length</span>
+    <span class="hl-type-builtin">uint32_t</span> <span class="hl-property">status</span><span class="hl-punctuation-delimiter">;</span>     <span class="hl-comment">// completion status (0 = success, errno = error)</span>
+    <span class="hl-type-builtin">uint8_t</span>  <span class="hl-property">payload</span><span class="hl-punctuation-bracket">[</span><span class="hl-number">32</span><span class="hl-punctuation-bracket">]</span><span class="hl-punctuation-delimiter">;</span><span class="hl-comment">// inline data or type-specific fields</span>
+<span class="hl-punctuation-bracket">}</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<h2>Producer/Consumer Protocol</h2>
+<p><strong>Enqueue (producer)</strong>:</p>
+<ol>
+<li>Compute <code>next_head = (head + 1) &amp; mask</code>.</li>
+<li>If <code>next_head == tail</code>: ring is full. Spin or wait for consumer to advance tail.</li>
+<li>Write <code>entries&#91;head&#93;</code> (all fields).</li>
+<li>Memory barrier (<code><strong>asm</strong> volatile(&quot;sfence&quot;)</code> on x86).</li>
+<li>Increment <code>head</code> (atomic store with release semantics).</li>
+</ol>
+<p><strong>Dequeue (consumer)</strong>:</p>
+<ol>
+<li>Read <code>head</code> (atomic load with acquire semantics).</li>
+<li>If <code>head == tail</code>: ring is empty. Sleep on futex or poll.</li>
+<li>Read <code>entries&#91;tail&#93;</code>.</li>
+<li>Memory barrier (<code><strong>asm</strong> volatile(&quot;lfence&quot;)</code>).</li>
+<li>Increment <code>tail</code> (atomic store with release semantics).</li>
+</ol>
+<p>The memory barriers ensure that the entry contents are fully visible before the index update.</p>
+<h2>Command Types</h2>
+<p>Each device type defines its own command/event types within <code>ring_entry.type</code>:</p>
+<h3>Block Device Command Types</h3>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Direction</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BLK_CMD_READ</code></td>
+<td>kernel → driver</td>
+<td>Read N sectors from LBA</td>
+</tr>
+<tr>
+<td><code>BLK_CMD_WRITE</code></td>
+<td>kernel → driver</td>
+<td>Write N sectors to LBA</td>
+</tr>
+<tr>
+<td><code>BLK_CMD_FLUSH</code></td>
+<td>kernel → driver</td>
+<td>Flush device write cache</td>
+</tr>
+<tr>
+<td><code>BLK_RSP_COMPLETE</code></td>
+<td>driver → kernel</td>
+<td>Request complete; <code>status</code> = result</td>
+</tr>
+</tbody>
+</table>
+<h3>Display Command Types</h3>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Direction</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DISP_CMD_SETMODE</code></td>
+<td>kernel → driver</td>
+<td>Set display mode (width, height, depth)</td>
+</tr>
+<tr>
+<td><code>DISP_CMD_FLIP</code></td>
+<td>kernel → driver</td>
+<td>Flip framebuffer</td>
+</tr>
+<tr>
+<td><code>DISP_RSP_VSYNC</code></td>
+<td>driver → kernel</td>
+<td>Vertical sync event</td>
+</tr>
+</tbody>
+</table>
+<h2>Doorbell</h2>
+<p>When the producer appends entries to the ring, it writes to the <code>doorbell</code> word in the shared region:</p>
+<pre><code class="language-c"><span class="hl-function-call">atomic_store</span><span class="hl-punctuation-bracket">(</span><span class="hl-operator">&amp;</span><span class="hl-variable">shm</span><span class="hl-operator">-&gt;</span><span class="hl-property">doorbell</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-operator">++</span><span class="hl-variable">shm_local_seq</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">memory_order_release</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<p>The consumer uses a futex wait on the <code>doorbell</code> to sleep until new entries appear:</p>
+<pre><code class="language-c"><span class="hl-function-call">sys_futex</span><span class="hl-punctuation-bracket">(</span><span class="hl-operator">&amp;</span><span class="hl-variable">shm</span><span class="hl-operator">-&gt;</span><span class="hl-property">doorbell</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-constant">FUTEX_WAIT</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">last_doorbell</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">timeout</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-constant-builtin">NULL</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-number">0</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<p>For low-latency devices, the driver may busy-poll <code>doorbell</code> instead of sleeping.</p>
+<h2>IRQ Notification (Driver → Kernel)</h2>
+<p>The userspace driver does not send IRQs to the kernel. Instead:</p>
+<ol>
+<li>The hardware sends a real IRQ.</li>
+<li>The kernel ISR increments <code>shm-&gt;irq_count</code>.</li>
+<li>The userspace driver polls <code>irq_count</code> or waits via futex.</li>
+</ol>
+<p>The driver then reads device completion data (from device MMIO registers or DMA buffers) and writes completion entries to <code>rsp_queue</code>.</p>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="drivers/hybrid-architecture.html">hybrid-architecture.md</a></li>
+<li><a href="drivers/kernel-drivers.html">kernel-drivers.md</a></li>
+<li><a href="drivers/userspace-drivers.html">userspace-drivers.md</a></li>
+<li><a href="ipc/shared-memory.html">ipc/shared-memory.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="script.js" defer></script>
+</body>
+</html>

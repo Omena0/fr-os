@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Memory/virtual-memory — Fr OS</title>
+  <meta property="og:title" content="Memory/virtual-memory — Fr OS">
+  <meta name="description" content="Memory/virtual-memory — Fr OS documentation">
+  <meta property="og:description" content="Memory/virtual-memory — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="README.html">Overview</a></li>
+    <li><a href="overview.html">Architecture</a></li>
+    <li><a href="memory-layout.html">Memory Layout</a></li>
+    <li><a href="posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="security-model.html">Security Model</a></li>
+    <li><a href="performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="stage1.html">Stage 1</a></li>
+    <li><a href="stage2.html">Stage 2</a></li>
+    <li><a href="kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="memory-map.html">Memory Map</a></li>
+    <li><a href="serial-output.html">Serial Output</a></li>
+    <li><a href="build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="early-boot.html">Early Boot</a></li>
+    <li><a href="interrupt-handling.html">Interrupts</a></li>
+    <li><a href="context-switching.html">Context Switching</a></li>
+    <li><a href="privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="panic-system.html">Panic</a></li>
+    <li><a href="logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="slab-allocator.html">SLAB</a></li>
+    <li><a href="virtual-memory.html" class="active">Virtual Memory</a></li>
+    <li><a href="userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="mlfq.html">MLFQ</a></li>
+    <li><a href="realtime-scheduler.html">Realtime</a></li>
+    <li><a href="multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="process-syscalls.html">Process</a></li>
+    <li><a href="memory-syscalls.html">Memory</a></li>
+    <li><a href="file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="libc.html">Fr Libc</a></li>
+    <li><a href="process-model.html">Process Model</a></li>
+    <li><a href="elf-loading.html">ELF Loading</a></li>
+    <li><a href="init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Filesystem</a></li>
+    <li><a href="overview.html">Networking</a></li>
+    <li><a href="overview.html">IPC</a></li>
+    <li><a href="overview.html">Drivers</a></li>
+    <li><a href="overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Build Overview</a></li>
+    <li><a href="toolchain.html">Toolchain</a></li>
+    <li><a href="makefile-structure.html">Makefile</a></li>
+    <li><a href="qemu-setup.html">QEMU</a></li>
+    <li><a href="testing.html">Testing</a></li>
+    <li><a href="overview.html">Debugging</a></li>
+    <li><a href="serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>Virtual Memory Manager</h1>
+<h2>Overview</h2>
+<p>The Virtual Memory Manager (VMM) manages per-process virtual address spaces. It maps virtual pages to physical frames, handles page faults, and provides the <code>mmap</code>/<code>munmap</code>/<code>mprotect</code> syscall interface.</p>
+<h2>Virtual Memory Areas (VMAs)</h2>
+<p>Each process has a set of Virtual Memory Areas (VMAs) describing the layout of its address space. A VMA is a contiguous range of virtual pages with uniform properties:</p>
+<pre><code class="language-c"><span class="hl-keyword-type">struct</span> <span class="hl-type">vma</span> <span class="hl-punctuation-bracket">{</span>
+    <span class="hl-type-builtin">uintptr_t</span>   <span class="hl-property">start</span><span class="hl-punctuation-delimiter">;</span>         <span class="hl-comment">// start virtual address (page-aligned)</span>
+    <span class="hl-type-builtin">uintptr_t</span>   <span class="hl-property">end</span><span class="hl-punctuation-delimiter">;</span>           <span class="hl-comment">// end virtual address (exclusive, page-aligned)</span>
+    <span class="hl-type-builtin">uint32_t</span>    <span class="hl-property">prot</span><span class="hl-punctuation-delimiter">;</span>          <span class="hl-comment">// PROT_READ | PROT_WRITE | PROT_EXEC</span>
+    <span class="hl-type-builtin">uint32_t</span>    <span class="hl-property">flags</span><span class="hl-punctuation-delimiter">;</span>         <span class="hl-comment">// MAP_PRIVATE | MAP_SHARED | MAP_ANONYMOUS</span>
+    <span class="hl-keyword-type">struct</span> <span class="hl-type">file</span> <span class="hl-operator">*</span><span class="hl-property">file</span><span class="hl-punctuation-delimiter">;</span>         <span class="hl-comment">// backing file (NULL for anonymous)</span>
+    <span class="hl-type">off_t</span>        <span class="hl-property">offset</span><span class="hl-punctuation-delimiter">;</span>       <span class="hl-comment">// offset into backing file</span>
+    <span class="hl-keyword-type">struct</span> <span class="hl-type">list_head</span> <span class="hl-property">list</span><span class="hl-punctuation-delimiter">;</span>     <span class="hl-comment">// linked list of VMAs</span>
+    <span class="hl-keyword-type">struct</span> <span class="hl-type">rb_node</span> <span class="hl-property">rb_node</span><span class="hl-punctuation-delimiter">;</span>    <span class="hl-comment">// red-black tree node (for fast lookup by address)</span>
+<span class="hl-punctuation-bracket">}</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<p>VMAs are stored in a list ordered by ascending start address, which makes
+<code>mm_find_vma</code> a binary search. Lookup is by ascending start address, and the
+page-fault path needs "the VMA containing this address".</p>
+<h2>Address Space Structure</h2>
+<pre><code class="language-c"><span class="hl-keyword-type">struct</span> <span class="hl-type">address_space</span> <span class="hl-punctuation-bracket">{</span>
+    <span class="hl-type">phys_addr_t</span>        <span class="hl-property">pgd</span><span class="hl-punctuation-delimiter">;</span>            <span class="hl-comment">// physical address of PML4</span>
+    <span class="hl-type">spinlock_t</span>         <span class="hl-property">lock</span><span class="hl-punctuation-delimiter">;</span>
+    <span class="hl-keyword-type">struct</span> <span class="hl-type">list_head</span>   <span class="hl-property">vma_list</span><span class="hl-punctuation-delimiter">;</span>       <span class="hl-comment">// VMAs ordered by ascending start</span>
+    <span class="hl-type-builtin">uint64_t</span>           <span class="hl-property">vma_count</span><span class="hl-punctuation-delimiter">;</span>
+
+    <span class="hl-type">virt_addr_t</span> <span class="hl-property">start_code</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-property">end_code</span><span class="hl-punctuation-delimiter">;</span>
+    <span class="hl-type">virt_addr_t</span> <span class="hl-property">start_data</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-property">end_data</span><span class="hl-punctuation-delimiter">;</span>
+    <span class="hl-type">virt_addr_t</span> <span class="hl-property">start_brk</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-property">brk</span><span class="hl-punctuation-delimiter">;</span>        <span class="hl-comment">// current heap break</span>
+    <span class="hl-type">virt_addr_t</span> <span class="hl-property">stack_top</span><span class="hl-punctuation-delimiter">;</span>
+
+    <span class="hl-type">virt_addr_t</span> <span class="hl-property">mmap_base</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-property">mmap_next</span><span class="hl-punctuation-delimiter">;</span>  <span class="hl-comment">// randomised mmap base (ASLR policy)</span>
+    <span class="hl-keyword-modifier">volatile</span> <span class="hl-type">s32</span> <span class="hl-property">refcount</span><span class="hl-punctuation-delimiter">;</span>             <span class="hl-comment">// threads sharing it hold references</span>
+<span class="hl-punctuation-bracket">}</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<p>One <code>struct address_space</code> per process. Threads within the same process share it.</p>
+<p>VMAs are a <strong>sorted list, not a red-black tree</strong>. A first implementation of this
+document specified an <code>rb_root</code> alongside the list; the struct in
+<code>src/kernel/include/vmm.h</code> has no tree, and <code>mm_find_vma()</code> binary-searches the
+sorted list instead. The list is kept sorted on insert, so lookup is O(log n) with
+no extra allocation and no second index to keep consistent — which is the whole
+reason to have picked one over the other. If lookup ever shows up in a profile,
+adding the tree is a change to <code>mm_find_vma</code> alone.</p>
+<h2>Boot Order</h2>
+<p>Virtual memory is initialised <strong>before</strong> physical memory, and the order is forced
+rather than chosen:</p>
+<ol>
+<li><code>vmm_init()</code> — builds the direct map, the kernel window, and the kernel PML4.</li>
+<li><code>vmm_switch_to_kernel_pgd()</code> — replaces the bootloader's tables. <code>phys_to_virt()</code> resolves from here on.</li>
+<li><code>pmm_init()</code> — places its bitmaps and page array through <code>phys_to_virt()</code>.</li>
+</ol>
+<p><code>pmm_init()</code> cannot come first: it dereferences <code>PHYS_DIRECT_MAP + phys</code> for its
+metadata, and that address does not resolve until the direct map exists. Running
+the other way round faults on the first <code>memset</code> of the page array, before
+anything has printed a character.</p>
+<p><code>vmm_init()</code> needs no allocator, which is what breaks the apparent circularity.
+Its first page tables come from a static pool inside the kernel image, which the
+bootloader's identity mapping already covers. The pool is physically inside the
+image, so <code>pmm_reserve_range()</code> on the low megabyte keeps it out of the buddy
+allocator permanently.</p>
+<p>The kernel window is an <strong>identity map with 4 KiB pages</strong>, not 2 MiB. The image
+shares 2 MiB boundaries with ordinary allocatable memory, so a 2 MiB mapping there
+would make physical 1–16 MiB writable through the kernel window, and a stray
+store would corrupt a buddy block the allocator believes is free. The direct map
+uses 1 GiB or 2 MiB pages, where no such hazard exists.</p>
+<h2>Not Yet Implemented</h2>
+<p>Stated explicitly so the gap is not mistaken for a bug:</p>
+<ul>
+<li><strong>No recursive page-table map.</strong> <code>vmm.c</code> uses an ordinary four-level walk. The
+  recursive-map layout is documented in <code>vmm.h</code> and its helpers compile, but no
+  tables are recursively mapped. See the comment at the top of <code>vmm.h</code>.</li>
+<li><strong>No file-backed VMAs.</strong> A VMA with a non-NULL <code>file</code> faults; there is no page
+  cache yet. <code>vmm_handle_page_fault</code> handles anonymous demand paging only.</li>
+<li><strong>No copy-on-write.</strong> A shared read-only page is not tracked, so a write to one
+  is a fault rather than a private copy.</li>
+<li><strong>No TLB shootdown.</strong> The IPI it needs is not implemented, so page-table
+  changes are only correct on a uniprocessor. <code>vmm_map_page</code> and
+  <code>vmm_unmap_page</code> call <code>invlpg</code> locally, which is sufficient today and will need
+  the IPI when a second CPU exists.</li>
+<li><strong><code>vfree</code> does not reclaim.</strong> It marks a block free and leaves both the mapping
+  and the physical frames in place. A stale pointer therefore reads stable
+  memory rather than recycled frames, at the cost of never returning a freed
+  range.</li>
+</ul>
+<h2><code>mmap</code> Implementation</h2>
+<p><code>sys_mmap(addr, len, prot, flags, fd, offset)</code>:</p>
+<ol>
+<li>Select a virtual address (use <code>addr</code> if <code>MAP_FIXED</code>, else find a free region from <code>aslr_base_mmap</code>).</li>
+<li>Validate range does not conflict with existing VMAs.</li>
+<li>Allocate a <code>struct vma</code> and insert into tree and list.</li>
+<li>For <code>MAP_ANONYMOUS</code>: pages are not allocated yet — demand-paged on first access.</li>
+<li>For file-backed: no pages allocated yet — faults will read from the page cache.</li>
+<li>Return the virtual address.</li>
+</ol>
+<p>Pages are not physically allocated until the process accesses them (demand paging via page fault handler).</p>
+<h2>Page Fault Handling</h2>
+<p>On a page fault (<code>#PF</code>, vector 14):</p>
+<ol>
+<li>Get fault address from CR2.</li>
+<li>Look up the VMA for the fault address (binary search over the sorted list).</li>
+<li>If no VMA: return failure, and the caller delivers SIGSEGV.</li>
+<li>If VMA found and anonymous: allocate a physical page (<code>pmm_alloc_page</code>), zero
+   it, insert the page table entry, and return to retry the instruction. A write
+   to a VMA without <code>VM_WRITE</code> fails rather than silently being granted write.</li>
+<li>File-backed and COW cases are not implemented; see "Not Yet Implemented".</li>
+</ol>
+<h2>TLB Shootdown</h2>
+<p><em>Not implemented. See "Not Yet Implemented" above; this is the plan for when a
+second CPU exists.</em></p>
+<p>When a page table entry is modified (unmapped, permission changed), all CPUs that may have the old entry in their TLB must be notified. This is done via TLB shootdown IPIs:</p>
+<ol>
+<li>Modify the page table entry.</li>
+<li>Flush the local TLB for the affected address (<code>invlpg</code>).</li>
+<li>Send TLB shootdown IPI (vector 240) to all CPUs sharing this address space.</li>
+<li>Each receiving CPU executes <code>invlpg</code> for the affected address.</li>
+<li>The originating CPU waits (via per-CPU ack counter) until all CPUs have flushed.</li>
+</ol>
+<p>Shootdown is batched: multiple address invalidations are collected and sent in a single IPI when possible.</p>
+<h2><code>brk</code> System Call</h2>
+<p><code>sys_brk(new_brk)</code>: Extend or shrink the process heap.</p>
+<ul>
+<li>Extending: create a new anonymous VMA from the old <code>brk</code> to <code>new_brk</code> (or extend the existing heap VMA).</li>
+<li>Shrinking: remove the excess VMA range and unmap the pages.</li>
+<li>Returns the new <code>brk</code> value on success.</li>
+</ul>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="memory/physical-allocator.html">physical-allocator.md</a></li>
+<li><a href="memory/slab-allocator.html">slab-allocator.md</a></li>
+<li><a href="memory/userspace-malloc.html">userspace-malloc.md</a></li>
+<li><a href="memory/huge-pages.html">huge-pages.md</a></li>
+<li><a href="security/aslr.html">security/aslr.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="script.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Syscalls/file-syscalls — Fr OS</title>
+  <meta property="og:title" content="Syscalls/file-syscalls — Fr OS">
+  <meta name="description" content="Syscalls/file-syscalls — Fr OS documentation">
+  <meta property="og:description" content="Syscalls/file-syscalls — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="README.html">Overview</a></li>
+    <li><a href="overview.html">Architecture</a></li>
+    <li><a href="memory-layout.html">Memory Layout</a></li>
+    <li><a href="posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="security-model.html">Security Model</a></li>
+    <li><a href="performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="stage1.html">Stage 1</a></li>
+    <li><a href="stage2.html">Stage 2</a></li>
+    <li><a href="kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="memory-map.html">Memory Map</a></li>
+    <li><a href="serial-output.html">Serial Output</a></li>
+    <li><a href="build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="early-boot.html">Early Boot</a></li>
+    <li><a href="interrupt-handling.html">Interrupts</a></li>
+    <li><a href="context-switching.html">Context Switching</a></li>
+    <li><a href="privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="panic-system.html">Panic</a></li>
+    <li><a href="logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="slab-allocator.html">SLAB</a></li>
+    <li><a href="virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="mlfq.html">MLFQ</a></li>
+    <li><a href="realtime-scheduler.html">Realtime</a></li>
+    <li><a href="multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="process-syscalls.html">Process</a></li>
+    <li><a href="memory-syscalls.html">Memory</a></li>
+    <li><a href="file-syscalls.html" class="active">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="libc.html">Fr Libc</a></li>
+    <li><a href="process-model.html">Process Model</a></li>
+    <li><a href="elf-loading.html">ELF Loading</a></li>
+    <li><a href="init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Filesystem</a></li>
+    <li><a href="overview.html">Networking</a></li>
+    <li><a href="overview.html">IPC</a></li>
+    <li><a href="overview.html">Drivers</a></li>
+    <li><a href="overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Build Overview</a></li>
+    <li><a href="toolchain.html">Toolchain</a></li>
+    <li><a href="makefile-structure.html">Makefile</a></li>
+    <li><a href="qemu-setup.html">QEMU</a></li>
+    <li><a href="testing.html">Testing</a></li>
+    <li><a href="overview.html">Debugging</a></li>
+    <li><a href="serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>File Syscalls</h1>
+<h2>Syscall Table: Filesystem (Numbers 64–91)</h2>
+<table>
+<thead>
+<tr>
+<th>Number</th>
+<th>Name</th>
+<th>Signature</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>64</td>
+<td><code>sys_open</code></td>
+<td><code>int sys_open(const char *path, int flags, mode_t mode)</code></td>
+<td>Open or create a file</td>
+</tr>
+<tr>
+<td>65</td>
+<td><code>sys_openat</code></td>
+<td><code>int sys_openat(int dirfd, const char *path, int flags, mode_t mode)</code></td>
+<td>Open relative to <code>dirfd</code></td>
+</tr>
+<tr>
+<td>66</td>
+<td><code>sys_close</code></td>
+<td><code>int sys_close(int fd)</code></td>
+<td>Close a file descriptor</td>
+</tr>
+<tr>
+<td>67</td>
+<td><code>sys_read</code></td>
+<td><code>ssize_t sys_read(int fd, void *buf, size_t len)</code></td>
+<td>Read from fd</td>
+</tr>
+<tr>
+<td>68</td>
+<td><code>sys_write</code></td>
+<td><code>ssize_t sys_write(int fd, const void *buf, size_t len)</code></td>
+<td>Write to fd</td>
+</tr>
+<tr>
+<td>69</td>
+<td><code>sys_lseek</code></td>
+<td><code>off_t sys_lseek(int fd, off_t offset, int whence)</code></td>
+<td>Change file offset</td>
+</tr>
+<tr>
+<td>70</td>
+<td><code>sys_pread</code></td>
+<td><code>ssize_t sys_pread(int fd, void *buf, size_t len, off_t offset)</code></td>
+<td>Read at offset (no f_pos change)</td>
+</tr>
+<tr>
+<td>71</td>
+<td><code>sys_pwrite</code></td>
+<td><code>ssize_t sys_pwrite(int fd, const void *buf, size_t len, off_t offset)</code></td>
+<td>Write at offset</td>
+</tr>
+<tr>
+<td>72</td>
+<td><code>sys_readv</code></td>
+<td><code>ssize_t sys_readv(int fd, const struct iovec *iov, int iovcnt)</code></td>
+<td>Scatter read</td>
+</tr>
+<tr>
+<td>73</td>
+<td><code>sys_writev</code></td>
+<td><code>ssize_t sys_writev(int fd, const struct iovec *iov, int iovcnt)</code></td>
+<td>Gather write</td>
+</tr>
+<tr>
+<td>74</td>
+<td><code>sys_stat</code></td>
+<td><code>int sys_stat(const char <em>path, struct stat </em>buf)</code></td>
+<td>Get file metadata</td>
+</tr>
+<tr>
+<td>75</td>
+<td><code>sys_fstat</code></td>
+<td><code>int sys_fstat(int fd, struct stat *buf)</code></td>
+<td>Get metadata by fd</td>
+</tr>
+<tr>
+<td>76</td>
+<td><code>sys_lstat</code></td>
+<td><code>int sys_lstat(const char <em>path, struct stat </em>buf)</code></td>
+<td>stat without following symlinks</td>
+</tr>
+<tr>
+<td>77</td>
+<td><code>sys_access</code></td>
+<td><code>int sys_access(const char *path, int mode)</code></td>
+<td>Check file access permission</td>
+</tr>
+<tr>
+<td>78</td>
+<td><code>sys_mkdir</code></td>
+<td><code>int sys_mkdir(const char *path, mode_t mode)</code></td>
+<td>Create directory</td>
+</tr>
+<tr>
+<td>79</td>
+<td><code>sys_rmdir</code></td>
+<td><code>int sys_rmdir(const char *path)</code></td>
+<td>Remove directory</td>
+</tr>
+<tr>
+<td>80</td>
+<td><code>sys_unlink</code></td>
+<td><code>int sys_unlink(const char *path)</code></td>
+<td>Remove file</td>
+</tr>
+<tr>
+<td>81</td>
+<td><code>sys_rename</code></td>
+<td><code>int sys_rename(const char <em>oldpath, const char </em>newpath)</code></td>
+<td>Rename file</td>
+</tr>
+<tr>
+<td>82</td>
+<td><code>sys_link</code></td>
+<td><code>int sys_link(const char <em>oldpath, const char </em>newpath)</code></td>
+<td>Create hard link</td>
+</tr>
+<tr>
+<td>83</td>
+<td><code>sys_symlink</code></td>
+<td><code>int sys_symlink(const char <em>target, const char </em>path)</code></td>
+<td>Create symbolic link</td>
+</tr>
+<tr>
+<td>84</td>
+<td><code>sys_readlink</code></td>
+<td><code>ssize_t sys_readlink(const char <em>path, char </em>buf, size_t len)</code></td>
+<td>Read symlink target</td>
+</tr>
+<tr>
+<td>85</td>
+<td><code>sys_chmod</code></td>
+<td><code>int sys_chmod(const char *path, mode_t mode)</code></td>
+<td>Change file permissions</td>
+</tr>
+<tr>
+<td>86</td>
+<td><code>sys_chown</code></td>
+<td><code>int sys_chown(const char *path, uid_t uid, gid_t gid)</code></td>
+<td>Change file owner</td>
+</tr>
+<tr>
+<td>87</td>
+<td><code>sys_fcntl</code></td>
+<td><code>int sys_fcntl(int fd, int cmd, ...)</code></td>
+<td>File control operations</td>
+</tr>
+<tr>
+<td>88</td>
+<td><code>sys_ioctl</code></td>
+<td><code>long sys_ioctl(int fd, unsigned int cmd, unsigned long arg)</code></td>
+<td>Device control</td>
+</tr>
+<tr>
+<td>89</td>
+<td><code>sys_fsync</code></td>
+<td><code>int sys_fsync(int fd)</code></td>
+<td>Flush file data and metadata to disk</td>
+</tr>
+<tr>
+<td>90</td>
+<td><code>sys_truncate</code></td>
+<td><code>int sys_truncate(const char *path, off_t length)</code></td>
+<td>Truncate file to <code>length</code></td>
+</tr>
+<tr>
+<td>91</td>
+<td><code>sys_mount</code></td>
+<td><code>int sys_mount(const char <em>src, const char </em>tgt, const char <em>type, uint64_t flags, const void </em>data)</code></td>
+<td>Mount filesystem</td>
+</tr>
+</tbody>
+</table>
+<h2><code>sys_open</code> Flags</h2>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>O_RDONLY</code> / <code>O_WRONLY</code> / <code>O_RDWR</code></td>
+<td>Open mode</td>
+</tr>
+<tr>
+<td><code>O_CREAT</code></td>
+<td>Create if not exists (requires <code>mode</code>)</td>
+</tr>
+<tr>
+<td><code>O_EXCL</code></td>
+<td>With <code>O_CREAT</code>: fail if exists</td>
+</tr>
+<tr>
+<td><code>O_TRUNC</code></td>
+<td>Truncate to zero on open</td>
+</tr>
+<tr>
+<td><code>O_APPEND</code></td>
+<td>All writes go to end of file</td>
+</tr>
+<tr>
+<td><code>O_NONBLOCK</code></td>
+<td>Non-blocking I/O</td>
+</tr>
+<tr>
+<td><code>O_CLOEXEC</code></td>
+<td>Set close-on-exec flag</td>
+</tr>
+<tr>
+<td><code>O_SYNC</code></td>
+<td>Each write is synced to disk before returning</td>
+</tr>
+<tr>
+<td><code>O_DIRECTORY</code></td>
+<td>Fail if not a directory</td>
+</tr>
+</tbody>
+</table>
+<h2><code>sys_fcntl</code> Commands</h2>
+<table>
+<thead>
+<tr>
+<th><code>cmd</code></th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>F_DUPFD</code></td>
+<td>Duplicate fd to next available ≥ arg</td>
+</tr>
+<tr>
+<td><code>F_GETFD</code> / <code>F_SETFD</code></td>
+<td>Get/set <code>FD_CLOEXEC</code> flag</td>
+</tr>
+<tr>
+<td><code>F_GETFL</code> / <code>F_SETFL</code></td>
+<td>Get/set file status flags (<code>O_NONBLOCK</code>, etc.)</td>
+</tr>
+<tr>
+<td><code>F_GETLK</code> / <code>F_SETLK</code> / <code>F_SETLKW</code></td>
+<td>POSIX advisory file locking</td>
+</tr>
+</tbody>
+</table>
+<h2>Common Error Returns</h2>
+<table>
+<thead>
+<tr>
+<th>Errno</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ENOENT</code></td>
+<td>Path component does not exist</td>
+</tr>
+<tr>
+<td><code>EACCES</code></td>
+<td>Permission denied</td>
+</tr>
+<tr>
+<td><code>EEXIST</code></td>
+<td>File already exists (<code>O_CREAT</td>
+</tr>
+<tr>
+<td><code>EISDIR</code></td>
+<td>Is a directory (cannot open directory with <code>O_WRONLY</code>)</td>
+</tr>
+<tr>
+<td><code>ENOTDIR</code></td>
+<td>Path component is not a directory</td>
+</tr>
+<tr>
+<td><code>EBADF</code></td>
+<td>Invalid fd</td>
+</tr>
+<tr>
+<td><code>EMFILE</code></td>
+<td>Per-process fd limit reached</td>
+</tr>
+<tr>
+<td><code>ENFILE</code></td>
+<td>System-wide fd limit reached</td>
+</tr>
+<tr>
+<td><code>ENOSPC</code></td>
+<td>No space left on device</td>
+</tr>
+<tr>
+<td><code>EIO</code></td>
+<td>I/O error (disk failure)</td>
+</tr>
+</tbody>
+</table>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="syscalls/overview.html">overview.md</a></li>
+<li><a href="syscalls/dispatch-path.html">dispatch-path.md</a></li>
+<li><a href="filesystem/vfs-api.html">filesystem/vfs-api.md</a></li>
+<li><a href="ipc/fd-abstraction.html">ipc/fd-abstraction.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="script.js" defer></script>
+</body>
+</html>
