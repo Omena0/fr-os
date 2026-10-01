@@ -205,46 +205,6 @@ stage2_enter_long_mode:
 
 .Lno_avx:
 
-	/*
-	 * Switch the gates to the 64-bit reporter and go, with nothing in
-	 * between.
-	 *
-	 * The table can only hold gates for one mode at a time. Pointed at the
-	 * 64-bit reporter, a fault taken while the CPU is still a 32-bit CPU
-	 * executes a 64-bit instruction stream in compatibility mode, where the
-	 * same bytes decode as a different -- still plausible, still silent --
-	 * instruction stream. The timer interrupt is enough to trigger this: it
-	 * fires at any point after the firmware round trips, and if it lands in
-	 * that window the machine walks into the reporter's own halt loop having
-	 * printed nothing at all.
-	 *
-	 * So interrupts are cleared first, the gates are rewritten second, and the
-	 * far jump is third. Nothing can be delivered into the mixed state, and
-	 * there is no window in which the table disagrees with the mode.
-	 *
-	 * Doing this here rather than from C is the point: boot_gdt_init() runs
-	 * before the page tables exist and long before the jump, so anything it
-	 * did to the table left every instruction in between exposed.
-	 */
-	cli
-
-	movl	$boot_idt, %edi
-	movl	$exc_stub_lo, %eax
-	movl	$exc_stub_hi, %edx
-	movl	$(256 * 16), %ecx
-2:	movb	%al, 0(%edi)
-	movb	%ah, 1(%edi)
-	movb	$0x08, 2(%edi)		/* selector: 64-bit code segment */
-	movb	$0x00, 3(%edi)
-	movb	$0x00, 4(%edi)		/* IST 0 */
-	movb	$0x8E, 5(%edi)		/* present, DPL 0, 64-bit interrupt gate */
-	movb	%dl, 6(%edi)
-	movb	%dh, 7(%edi)
-	movl	$0, 0x8(%edi)		/* offset[63:32] must be zero in long mode */
-	movl	$0, 0xC(%edi)
-	addl	$16, %edi
-	loop	2b
-
 	/* Far jump into long mode. The 64-bit segment has L=1, which clears
 	 * CS.L and switches the default operand size to 64 bits. */
 	ljmp	$0x08, $long_mode_entry

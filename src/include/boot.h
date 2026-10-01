@@ -41,6 +41,51 @@
 #define VMALLOC_AREA      0xFFFFC00000000000ULL
 #define KASLR_SLIDE_BITS  28
 
+/*
+ * Where stage2 put the kernel image, and how that relates to where it was
+ * linked. The two are not the same offset, and the difference is 1 MiB.
+ *
+ * INT 13h cannot address above 1 MiB, so the image is copied into the landing
+ * zone before paging exists, and the loader's higher-half tables map virtual
+ * KERNEL_VIRT_BASE there rather than at physical zero. Every higher-half
+ * address therefore translates as
+ *
+ *     phys = (virt - KERNEL_VIRT_BASE) + KERNEL_LANDING_ADDR
+ *
+ * Subtracting KERNEL_VIRT_BASE on its own looks right -- the window and the
+ * image do share a base, virtually -- and puts the result exactly 1 MiB below
+ * the truth. Declared here rather than in boot_layout.h because the kernel
+ * needs it for that translation too, and two copies of the number is one copy
+ * too many.
+ */
+#define KERNEL_LANDING_ADDR 0x00100000ULL
+
+/*
+ * 4-level page-table indices, plus the two the kernel's own link address walks
+ * through.
+ *
+ * The loader builds a higher-half mapping and the kernel replaces it with its
+ * own; both must fill exactly the same entries. The kernel used to write
+ * PDPT 511 where the loader wrote 510, which is not a crash at the write and
+ * not even a bad table: 511 names a real 1 TiB region, so every read-back
+ * check passes and the first high-half access faults instead.
+ *
+ * 0xFFFFFFFF80000000 is 2^63 - 2^31, so the PML4 index is 511 and the address
+ * starts the *second* 1 TiB region of the negative half, making the PDPT index
+ * 510. The two numbers that come to mind for "the higher half" are both wrong:
+ * 256 is the first address of the higher canonical half, 512 GiB below the
+ * kernel, and 508 is the 512 GiB region -- while the kernel is in the 1 TiB
+ * one, so 510. Deriving both indices from KERNEL_VIRT_BASE means the two
+ * halves of the boot chain cannot drift apart again.
+ */
+#define PML4_ENTRY_OF(addr)  (((addr) >> 39) & 0x1FF)
+#define PDPT_ENTRY_OF(addr)  (((addr) >> 30) & 0x1FF)
+#define PD_ENTRY_OF(addr)    (((addr) >> 21) & 0x1FF)
+#define PT_ENTRY_OF(addr)    (((addr) >> 12) & 0x1FF)
+
+#define KERNEL_PML4_IDX  PML4_ENTRY_OF(KERNEL_VIRT_BASE)
+#define KERNEL_PDPT_IDX  PDPT_ENTRY_OF(KERNEL_VIRT_BASE)
+
 /* E820 memory types. */
 #define E820_USABLE       1
 #define E820_RESERVED     2

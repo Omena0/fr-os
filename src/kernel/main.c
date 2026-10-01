@@ -130,11 +130,6 @@ void kmain(uint64_t bootinfo_phys)
 	/* Repoint at the kernel's own copies before anything reads them again. */
 	boot.e820_addr = (uint64_t)(uintptr_t)e820_copy;
 
-	/* Now that the framebuffer description is known, add that backend. */
-	console_init(&boot);
-
-	kmain_banner();
-	kmain_report_framebuffer();
 	klog_init();
 
 	/*
@@ -146,7 +141,6 @@ void kmain(uint64_t bootinfo_phys)
 	 */
 	percpu_setup(0);
 	cpu_features_init();
-	kmain_report_cpu();
 
 	/*
 	 * Virtual memory comes before physical memory, and that order is forced
@@ -177,8 +171,10 @@ void kmain(uint64_t bootinfo_phys)
 	 *
 	 * The address handed to pmm_init() is the *physical* address of the
 	 * kernel's own copy of the E820 array, not its virtual address. The array
-	 * is static storage in the kernel image and the kernel window is an
-	 * identity map, so the two differ by KERNEL_VIRT_BASE.
+	 * is static storage in the kernel image, and the kernel window is an
+	 * alias of the landing zone at KERNEL_LANDING_ADDR rather than an
+	 * identity map, so the two differ by that offset and not by
+	 * KERNEL_VIRT_BASE.
 	 *
 	 * It must be kernel_virt_to_phys(), not virt_to_phys_direct(). The
 	 * direct map and the kernel window are 8 exabytes apart; subtracting the
@@ -193,8 +189,8 @@ void kmain(uint64_t bootinfo_phys)
 	 * The low 1 MiB is reserved explicitly. The E820 map marks it usable,
 	 * which is correct as a statement about the firmware and wrong as a
 	 * statement about this kernel, which is still executing from inside it —
-	 * the MBR, stage2, the kernel landing zone, the bootstrap page tables and
-	 * the bootinfo all live here. Nothing else would catch the mistake: the
+	 * the MBR, stage2, the bounce window, the program-header scratch and the
+	 * bootinfo all live here. Nothing else would catch the mistake: the
 	 * first allocation landing there would succeed, and would then be
 	 * silently overwritten by the next instruction fetched from the image.
 	 */
@@ -207,6 +203,36 @@ void kmain(uint64_t bootinfo_phys)
 	 */
 	kmalloc_init();
 
+	/*
+	 * The framebuffer backend is attached here rather than with the bootinfo
+	 * copy above, and the reason is that attaching it allocates.
+	 *
+	 * console_fb_init() kmalloc()s the cell buffer behind the text grid, and
+	 * against an allocator that has not been initialised that call is not a
+	 * failed allocation: every cache is still zeroed BSS, so the partial list
+	 * tests empty against a freelist threaded through NULL, slab_new() runs
+	 * with c->per_slab == 0, and its free-list-threading loop — which walks
+	 * from c->per_slab - 1 down to 0 and indexes the slab at i - 1 — becomes
+	 * four billion iterations writing the same address. It is latent on
+	 * SeaBIOS only because SeaBIOS reports no linear framebuffer, so the
+	 * call is never made; on any firmware that reports one, this is the first
+	 * thing the kernel executes after the banner.
+	 *
+	 * kmalloc() is the only allocator-backed call on this path, so moving the
+	 * attachment below kmalloc_init() is the whole of the fix. The cost is
+	 * that the framebuffer comes up after the paging switch rather than
+	 * before it, which is why the VGA buffer and the framebuffer base are
+	 * both resolved through vmm_boot_ptr() rather than stored as pointers:
+	 * the low identity view they used to be reached through is gone by now.
+	 *
+	 * The serial-only console_init(NULL) above is untouched and still first,
+	 * so every failure between here and the framebuffer is still reported.
+	 */
+	console_init(&boot);
+
+	kmain_banner();
+	kmain_report_cpu();
+	kmain_report_framebuffer();
 	kmain_report_memory();
 
 	/*

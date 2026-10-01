@@ -40,7 +40,7 @@ void percpu_setup(uint32_t cpu_id)
 	 * userspace code could reach through a wild pointer, so the base points
 	 * at a dedicated per-CPU array rather than at anything user-mapped.
 	 */
-	wrmsr(MSR_KERNEL_GS_BASE, (uint64_t)(uintptr_t)p);
+	wrmsr(MSR_GS_BASE, (uint64_t)(uintptr_t)p);
 
 	/* Confirm the write took effect before anything trusts this_cpu(). */
 	struct percpu_data *check = this_cpu();

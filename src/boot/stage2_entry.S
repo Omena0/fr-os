@@ -733,9 +733,28 @@ gdtr:
 /* outb to COM1, clobbers nothing */
 	.set	COM1, 0x3F8
 
+/*
+ * Put one character on COM1. The character arrives in EDI.
+ *
+ * This used to be `movl %edi,%edx`, with a comment claiming EDI was the port.
+ * It is not: every caller passes the *character*, so the character went into DX
+ * and `outb %al,(%dx)` sent a byte to ports 0x0A-0xFF -- the PIC at 0x20 and
+ * 0x21, the 8042 at 0x60 and 0x61, the CMOS index port at 0x70, and so on.
+ *
+ * Nothing reached COM1, so the 32-bit reporter printed its hex fields and no
+ * message, which reads as "the reporter is broken" rather than "the reporter is
+ * aimed at the hardware". And every character of every exception report was
+ * written into real device state: into the PIC's mask registers, which is how a
+ * fault gets followed by a machine that will not take another interrupt, and
+ * into the CMOS index port, which is how it gets followed by a machine whose
+ * real-time clock and RAM configuration registers now hold ASCII.
+ *
+ * The port is a constant. No caller wants anywhere else.
+ */
 exc_putc:
-	movl	%edi, %edx		/* EDX = port; caller passes the byte in EDI */
+	movl	$COM1, %edx
 	movl	%edi, %eax
+	andl	$0xFF, %eax
 	outb	%al, (%dx)
 	ret
 
@@ -893,24 +912,6 @@ exc_stub64:
 	 * rejects BFD_RELOC_X86_64_32S outright. Building the address with a
 	 * 32-bit lea and pushing/popping it is the same instruction sequence the
 	 * assembler would have emitted. */
-	/*
-	 * TEMP: [rsp+48] is the error code for a fault that pushes one and the
-	 * RIP for one that does not (#UD, #DE, #BP, #OF). A code is small; a
-	 * kernel RIP is a top-half address. Print it, then dereference it when it
-	 * looks like code so the faulting bytes are visible.
-	 */
-	leaq	48(%rsp), %rax
-	movq	(%rax), %rax
-	call	exc_hex64
-
-	movq	48(%rsp), %rsi
-	movabs	$0xFFFF000000000000, %rcx
-	andq	%rcx, %rsi
-	jz	2f
-	movq	48(%rsp), %rsi
-	movl	(%rsi), %eax
-	call	exc_hex64
-2:
 
 	movq	%cr2, %rax
 	call	exc_hex64

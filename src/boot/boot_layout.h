@@ -85,8 +85,11 @@
  * extent, and the loader fails loudly rather than writing past the window.
  * INT 13h reads still land at 0x10000, so an address above 1 MiB is only ever
  * a destination the loader writes with ordinary stores.
+ *
+ * KERNEL_LANDING_ADDR itself now lives in boot.h, next to KERNEL_VIRT_BASE,
+ * because the kernel's own page tables have to describe the same mapping and
+ * must not be told where it is by a second copy of the number.
  */
-#define KERNEL_LANDING_ADDR   0x00100000u
 #define KERNEL_MAX_BYTES      0x001D0000u  /* 1.8125 MiB: see above */
 
 /* -------------------------------------------------- BIOS transfer window -- */

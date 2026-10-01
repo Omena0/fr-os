@@ -251,6 +251,18 @@ static inline u64 rdtscp(u32 *aux)
 #define MSR_LSTAR       0xC0000082
 #define MSR_SFMASK      0xC0000084
 #define MSR_FS_BASE     0xC0000100
+/*
+ * IA32_GS_BASE is the GS base in long mode at CPL 0, and the only one that
+ * percpu code reads through.
+ *
+ * IA32_KERNEL_GS_BASE (0xC0000102) is a different register: it is where the
+ * kernel's GS base is parked across a `swapgs`, and the CPU consults it only
+ * while executing at CPL 3. Writing a per-CPU base there from ring 0 has no
+ * effect on the GS base that GS-relative addressing actually uses, so the
+ * write succeeds, reads back whatever was there, and the per-CPU pointer is
+ * silently never updated.
+ */
+#define MSR_GS_BASE      0xC0000101
 #define MSR_KERNEL_GS_BASE 0xC0000102
 #define MSR_TSC_AUX     0xC0000103
 #define MSR_APIC_BASE   0x1B

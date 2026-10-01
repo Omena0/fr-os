@@ -17,6 +17,11 @@
  *
  * pmm_init() cannot come first. It places its bitmaps and its page array
  * through phys_to_virt(), and that does not resolve until the direct map exists.
+ *
+ * The kernel window these tables build is the same window the loader mapped, at
+ * the same place: virtual KERNEL_VIRT_BASE is an alias of KERNEL_LANDING_ADDR,
+ * not of physical zero. See map_kernel_window() for what that costs when it is
+ * assumed otherwise.
  */
 #include <vmm.h>
 
@@ -52,9 +57,10 @@ static phys_addr_t kernel_pgd;
 #define VMALLOC_CHUNK (2ULL << 20)
 
 /*
- * How much of the kernel window is identity-mapped up front: eight page tables
- * of 512 entries, so 16 MiB. link.ld asserts the image stays under 320 KiB, so
- * this is 50x the headroom the build already guarantees.
+ * How much of the kernel window is mapped up front: eight page tables of 512
+ * entries, so 16 MiB. The loaded image ends at _ebss, which is 0x1C8000, and
+ * __kernel_stack_top is that same address, so this is over 8x the headroom the
+ * current link needs.
  */
 #define KERNEL_WINDOW_PTS 8
 
@@ -76,15 +82,15 @@ static inline void *early_phys(phys_addr_t phys)
 }
 
 /*
- * The kernel window is an identity map of low physical memory, so the physical
- * address of anything linked into the kernel is its link address minus the
- * window base. This is the same fact as early_phys(), applied in the other
- * direction, and it is why the kernel image can be identity-mapped at all.
+ * The physical address of anything linked into the kernel is
+ * kernel_virt_to_phys() of its link address, which is vmm.h's
+ * KERNEL_LANDING_ADDR-offset translation and not an identity map of low
+ * memory. This file deliberately keeps no second copy of that rule: the two
+ * facts about the window -- which PDPT entry it is reached through and what
+ * physical address it is an alias of -- live with KERNEL_VIRT_BASE in boot.h,
+ * which the bootloader includes too, and are the only two that have to agree
+ * between the loader's tables and these.
  */
-static inline phys_addr_t kernel_link_to_phys(const void *p)
-{
-	return (phys_addr_t)(uintptr_t)p - KERNEL_VIRT_BASE;
-}
 
 /* ------------------------------------------------- bootstrap pool ---------- */
 
@@ -92,16 +98,28 @@ static inline phys_addr_t kernel_link_to_phys(const void *p)
  * The first PML4 and its tables, carved from the kernel image rather than from
  * the allocator, because there is no allocator yet.
  *
- * These pages are physically inside the image, which main.c reserves as part of
- * the low megabyte, so nothing can hand them out later. They stay reserved for
- * the life of the kernel: a page table that something might still be walking is
- * not worth reclaiming, and there are only a few dozen of them.
+ * These pages are physically inside the image: boot_pt_pool is at link offset
+ * 0x1AF000, so the pool is physical 0x2AF000-0x2BF000, well above the low
+ * megabyte that main.c reserves. They stay reserved for the life of the kernel:
+ * a page table that something might still be walking is not worth reclaiming,
+ * and there are only a few dozen of them. Nothing in this file can make that
+ * true -- it is a property of what pmm is told to reserve, not of these tables
+ * -- so the claim is recorded here as something the rest of the kernel has to
+ * honour rather than something achieved here.
  */
 #define BOOT_PT_POOL_PAGES 16
 static uint8_t boot_pt_pool[BOOT_PT_POOL_PAGES * PAGE_SIZE]
 	__attribute__((aligned(PAGE_SIZE)));
 
 static phys_addr_t pool_next;
+
+/* Set once the CR3 write in vmm_switch_to_kernel_pgd() has happened. */
+static bool direct_map_live;
+
+void *vmm_boot_ptr(phys_addr_t phys)
+{
+	return direct_map_live ? phys_to_virt(phys) : early_phys(phys);
+}
 
 /*
  * One zeroed page from the pool.
@@ -119,7 +137,8 @@ static phys_addr_t boot_table_alloc(void)
 	if (pool_next >= BOOT_PT_POOL_PAGES)
 		panic("vmm: bootstrap page table pool exhausted");
 
-	phys = kernel_link_to_phys(boot_pt_pool) + pool_next * PAGE_SIZE;
+	phys = kernel_virt_to_phys((virt_addr_t)(uintptr_t)boot_pt_pool) +
+	       pool_next * PAGE_SIZE;
 	pool_next++;
 
 	memset(early_phys(phys), 0, PAGE_SIZE);
@@ -220,47 +239,80 @@ static void map_direct_map(uint64_t *pml4)
 	klog(KLOG_INFO, "vmm: direct map 0-%u GiB, 2 MiB pages\n", gib);
 }
 
+/*
+ * The kernel window, at the same place and with the same shape stage2 put it.
+ *
+ * The window is not an identity map of low physical memory. stage2 copies the
+ * image to KERNEL_LANDING_ADDR because INT 13h cannot address above 1 MiB, and
+ * maps virtual KERNEL_VIRT_BASE there, so what the tables below describe is
+ *
+ *	virt KERNEL_VIRT_BASE + off	->	phys KERNEL_LANDING_ADDR + off
+ *
+ * Describing it as an identity map is not a simplification that happens to work;
+ * it is the failure that is hardest to see. The kernel's entry point is at link
+ * offset 0x180, so an identity window resolves it to physical 0x180 -- which is
+ * real-mode interrupt vector table, not code. The CPU then executes IVT entries
+ * and never faults, because every address in the window resolves to *something*,
+ * and the loader has already printed that it is entering long mode. The long
+ * comment in stage2.c on the same mapping says the same thing from the other
+ * side; that file used to have this bug, and it was the reason nothing printed
+ * at all.
+ *
+ * The page size is 4 KiB for the whole window, which is what stage2 has to use
+ * for its first 2 MiB (KERNEL_LANDING_ADDR is 1 MiB-aligned but not
+ * 2 MiB-aligned, so a large page cannot name it) and the right choice above
+ * that: 2 MiB pages here would make physical 1-17 MiB writable through the
+ * window, and pmm believes most of that is free.
+ *
+ * The window spans 16 MiB of link offset. The loaded image ends at 0x1C8000 and
+ * __kernel_stack_top is the same address, so that is over 8x what is reachable
+ * now. The further 3 GiB that stage2 additionally maps with large pages is
+ * deliberately not reproduced: nothing above the image is reached through the
+ * window, since vmalloc and kstack live at VMALLOC_AREA, and vmm_map_page()
+ * builds the PDPT entries for that range on first use.
+ */
 static void map_kernel_window(uint64_t *pml4)
 {
 	phys_addr_t pdpt = boot_table_alloc();
 	phys_addr_t pd = boot_table_alloc();
 	uint64_t *pd_entries = early_phys(pd);
 
-	/* PML4[511] covers the entire negative canonical half, which is where the
-	 * kernel window, vmalloc and kstack all live. */
-	pml4[511] = pdpt | PTE_PRESENT | PTE_WRITE;
-
-	/* PDPT[511] is 0xFFFFFFFF80000000, the kernel's link address. */
-	((uint64_t *)early_phys(pdpt))[511] = pd | PTE_PRESENT | PTE_WRITE;
+	/* PML4 511 covers the entire negative canonical half, which is where the
+	 * kernel window, vmalloc and kstack all live. Named, not written: stage2
+	 * fills the same entry from the same definition. */
+	pml4[KERNEL_PML4_IDX] = pdpt | PTE_PRESENT | PTE_WRITE;
 
 	/*
-	 * 4 KiB pages, identity, 16 MiB of window.
+	 * PDPT 510 is the 1 TiB region KERNEL_VIRT_BASE starts, and it is the
+	 * single entry that address walks through: PML4 511, PDPT 510, PD 0, PT 0.
 	 *
-	 * Identity because the bootloader put the image at a physical address the
-	 * kernel does not choose, and because the stage2 tables this replaces are
-	 * identity too, so nothing needs re-basing.
-	 *
-	 * 4 KiB rather than 2 MiB because the image shares 2 MiB boundaries with
-	 * ordinary allocatable memory. A 2 MiB mapping here would make physical
-	 * 1-16 MiB writable through the kernel window, and a stray store there
-	 * would corrupt a buddy block that pmm believes is free. 16 MiB of
-	 * identity window is more than link.ld's 320 KiB assert allows the image
-	 * to grow into.
+	 * Getting this wrong does not fault at the write. 511 names a real 1 TiB
+	 * region one step above the window, so the table reads back fine and every
+	 * diagnostic passes; the fault arrives on the instruction after the CR3
+	 * write, delivered through an IDT that has not been installed yet, which
+	 * makes it a triple fault and looks from the outside like QEMU exiting
+	 * without a word.
 	 */
+	((uint64_t *)early_phys(pdpt))[KERNEL_PDPT_IDX] = pd | PTE_PRESENT | PTE_WRITE;
+
 	for (unsigned i = 0; i < KERNEL_WINDOW_PTS; i++) {
 		phys_addr_t pt = boot_table_alloc();
 		uint64_t *pte = early_phys(pt);
 
 		for (unsigned j = 0; j < 512; j++)
-			pte[j] = ((phys_addr_t)i * (2ULL << 20) +
+			pte[j] = (KERNEL_LANDING_ADDR +
+				  (phys_addr_t)i * (2ULL << 20) +
 				  (phys_addr_t)j * PAGE_SIZE) |
 				 PTE_PRESENT | PTE_WRITE;
 		pd_entries[i] = pt | PTE_PRESENT | PTE_WRITE;
 	}
 
-	klog(KLOG_INFO, "vmm: kernel window %#lx-%#lx, identity, 4 KiB pages\n",
+	klog(KLOG_INFO, "vmm: kernel window %#lx-%#lx -> phys %#lx-%#lx, 4 KiB pages\n",
 	     (unsigned long)KERNEL_VIRT_BASE,
 	     (unsigned long)(KERNEL_VIRT_BASE +
+			     (phys_addr_t)KERNEL_WINDOW_PTS * (2ULL << 20)),
+	     (unsigned long)KERNEL_LANDING_ADDR,
+	     (unsigned long)(KERNEL_LANDING_ADDR +
 			     (phys_addr_t)KERNEL_WINDOW_PTS * (2ULL << 20)));
 }
 
@@ -268,7 +320,7 @@ static void map_kernel_window(uint64_t *pml4)
 
 void vmm_init(void)
 {
-	phys_addr_t pool_base = kernel_link_to_phys(boot_pt_pool);
+	phys_addr_t pool_base = kernel_virt_to_phys((virt_addr_t)(uintptr_t)boot_pt_pool);
 	uint64_t *pml4;
 
 	pool_next = 0;
@@ -305,6 +357,15 @@ void vmm_switch_to_kernel_pgd(void)
 
 	write_cr3(kernel_pgd);
 	cpu_barrier();
+
+	/*
+	 * The identity view is gone as of the CR3 write above, and this is the one
+	 * place that knows it. Anything that still holds a low physical address
+	 * across the switch -- the VGA text buffer, the framebuffer the firmware
+	 * reported -- has to start resolving it through vmm_boot_ptr(), and the
+	 * difference is a #PF on the next store rather than a wrong value.
+	 */
+	direct_map_live = true;
 
 	klog(KLOG_INFO, "vmm: CR3 = %#lx, direct map and kernel window live\n",
 	     (unsigned long)read_cr3());

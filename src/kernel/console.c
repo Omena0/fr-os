@@ -23,6 +23,10 @@
 
 /* ------------------------------------------------------------ VGA text ------ */
 
+/*
+ * The VGA text buffer. The low address is physical, and the kernel reaches it
+ * through vmm_boot_ptr() rather than as a pointer; see vga_mem() below.
+ */
 #define VGA_TEXT_BASE   0x000B8000ull
 #define VGA_COLS        80
 #define VGA_ROWS        25
@@ -36,8 +40,6 @@ struct vga_cell {
 	uint8_t ch;
 	uint8_t attr;
 } __packed;
-
-#define VGA_MEM ((volatile struct vga_cell *)(uintptr_t)VGA_TEXT_BASE)
 
 /* Hide the hardware cursor. The text console in this kernel has no readline
  * editing, so a blinking block at the end of the log is just noise. A terminal
@@ -60,7 +62,18 @@ struct fb_cell {
 
 struct fb_text {
 	struct framebuffer_info *info;
-	uint8_t *pixels;
+
+	/*
+	 * The framebuffer's physical base, as the firmware reported it. Kept as a
+	 * physical address and resolved per use for the same reason the VGA
+	 * buffer is: it is a low physical address, and the map that reaches it
+	 * changes when vmm_switch_to_kernel_pgd() replaces the bootloader's
+	 * identity view. VBE framebuffers are usually high (0xFD000000 on
+	 * SeaBIOS), so this is not even always inside the 4 GiB either map
+	 * covers.
+	 */
+	phys_addr_t phys;
+
 	uint32_t pitch;
 	uint32_t cols, rows;
 	uint32_t cursor_x, cursor_y;
@@ -73,6 +86,12 @@ struct fb_text {
 };
 
 static struct fb_text fb;
+
+/* Where the pixels are right now, which is not always the same address. */
+static inline uint8_t *fb_pixels(void)
+{
+	return (uint8_t *)vmm_boot_ptr(fb.phys);
+}
 
 extern const uint8_t font8x16[256][16];
 
@@ -163,11 +182,28 @@ static void console_release(u64 flags)
 
 /* ------------------------------------------------------------ rendering ---- */
 
+/*
+ * The VGA text buffer, resolved through whichever map is live.
+ *
+ * 0xB8000 is a fixed physical address, and the way to reach it changes
+ * underneath this file: vmm_switch_to_kernel_pgd() replaces the bootloader's
+ * identity view of the low 4 GiB, after which the only mapping of that page is
+ * through the direct map. So the address is recomputed on every access rather
+ * than cached -- console_init(NULL) enables this backend before the switch and
+ * the first character after it is a store, so a value remembered from the wrong
+ * regime is a #PF and nothing else.
+ */
+static inline volatile struct vga_cell *vga_mem(void)
+{
+	return (volatile struct vga_cell *)vmm_boot_ptr(VGA_TEXT_BASE);
+}
+
 static void vga_scroll(void)
 {
-	static volatile uint8_t *top = (volatile uint8_t *)(VGA_TEXT_BASE);
-	static volatile uint8_t *bottom = (volatile uint8_t *)
-		(VGA_TEXT_BASE + (VGA_ROWS - 1) * VGA_COLS * 2);
+	volatile struct vga_cell *mem = vga_mem();
+	volatile uint8_t *top = (volatile uint8_t *)&mem[0];
+	volatile uint8_t *bottom = (volatile uint8_t *)
+		&mem[(VGA_ROWS - 1) * VGA_COLS];
 
 	/* Copy every line up by one. The 0xB8000 buffer is in write-through
 	 * memory, so a volatile byte copy is correct and fast enough. */
@@ -175,32 +211,35 @@ static void vga_scroll(void)
 		*p = *(p + VGA_COLS * 2);
 
 	for (int i = 0; i < VGA_COLS; i++) {
-		VGA_MEM[(VGA_ROWS - 1) * VGA_COLS + i].ch = ' ';
-		VGA_MEM[(VGA_ROWS - 1) * VGA_COLS + i].attr = current_attr;
+		mem[(VGA_ROWS - 1) * VGA_COLS + i].ch = ' ';
+		mem[(VGA_ROWS - 1) * VGA_COLS + i].attr = current_attr;
 	}
 }
 
 static void vga_clear(void)
 {
+	volatile struct vga_cell *mem = vga_mem();
+
 	for (int i = 0; i < VGA_ROWS * VGA_COLS; i++) {
-		VGA_MEM[i].ch = ' ';
-		VGA_MEM[i].attr = current_attr;
+		mem[i].ch = ' ';
+		mem[i].attr = current_attr;
 	}
 }
 
 static inline void vga_putc_at(uint32_t x, uint32_t y, char c, uint8_t attr)
 {
+	volatile struct vga_cell *mem = vga_mem();
 	uint32_t i = y * VGA_COLS + x;
 
-	VGA_MEM[i].ch = (uint8_t)c;
-	VGA_MEM[i].attr = attr;
+	mem[i].ch = (uint8_t)c;
+	mem[i].attr = attr;
 }
 
 /* ------------------------------------------------------------- backends ---- */
 
 static bool console_fb_active(void)
 {
-	return fb.pixels != NULL;
+	return fb.phys != 0;
 }
 
 /*
@@ -222,11 +261,16 @@ static void fb_render_glyph(uint32_t col, uint32_t row, char c,
 	uint32_t px = col * fb.font_width;
 	uint32_t py = row * fb.font_height;
 	const uint8_t *glyph;
+	uint8_t *pixels;
 
 	if (px + fb.font_width > fb.info->width ||
 	    py + fb.font_height > fb.info->height)
 		return;
 
+	/* Resolved once per glyph rather than per pixel: the address is a
+	 * function of which map is live, so it cannot be hoisted out of the
+	 * function, but it does not change between the pixels of one glyph. */
+	pixels = fb_pixels();
 	glyph = fb.font[(uint8_t)c];
 
 	for (uint32_t gy = 0; gy < fb.font_height; gy++) {
@@ -252,7 +296,7 @@ static void fb_render_glyph(uint32_t col, uint32_t row, char c,
 					((uint32_t)g << 8) | b;
 			}
 
-			dst = fb.pixels + y * fb.pitch + x * (fb.info->bpp / 8);
+			dst = pixels + y * fb.pitch + x * (fb.info->bpp / 8);
 			if (fb.info->bpp == 32) {
 				*(uint32_t *)dst = value;
 			} else {
@@ -272,7 +316,7 @@ static void console_fb_init(struct framebuffer_info *info)
 		return;
 
 	fb.info = info;
-	fb.pixels = (uint8_t *)(uintptr_t)info->address;
+	fb.phys = info->address;
 	fb.pitch = info->pitch;
 	fb.font = font8x16;
 	fb.font_width = 8;
@@ -665,9 +709,14 @@ void console_init(struct bootinfo *bi)
 	/* The VGA text buffer is only usable if the firmware left us in a text
 	 * mode. Setting a graphics mode for the framebuffer would have
 	 * repurposed it, so the two backends are mutually exclusive in practice;
-	 * enabling both would corrupt the other's memory. */
-	if (!console_fb_active())
-		vga_enabled = true;
+	 * enabling both would corrupt the other's memory.
+	 *
+	 * An assignment, not a set, because this function is called twice: once
+	 * with no bootinfo to get serial output up before anything can fail, and
+	 * once with it to add the framebuffer. The first call has to enable VGA
+	 * because there is nothing else yet, and the second has to be able to
+	 * turn it back off again when a framebuffer turns out to be there. */
+	vga_enabled = !console_fb_active();
 
 	if (vga_enabled) {
 		vga_clear();

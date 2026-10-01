@@ -85,10 +85,9 @@
  * vmm_init() completes. It does not, at any level.
  */
 #define RECURSIVE_PML4_ENTRY  (VMM_RECURSE_PML4_INDEX * 512 + 511)
-#define PML4_ENTRY_OF(addr)   (((addr) >> 39) & 0x1FF)
-#define PDPT_ENTRY_OF(addr)   (((addr) >> 30) & 0x1FF)
-#define PD_ENTRY_OF(addr)     (((addr) >> 21) & 0x1FF)
-#define PT_ENTRY_OF(addr)     (((addr) >> 12) & 0x1FF)
+/* PML4_ENTRY_OF, PDPT_ENTRY_OF, PD_ENTRY_OF and PT_ENTRY_OF live in boot.h,
+ * next to KERNEL_VIRT_BASE: the loader fills the higher half with them and so
+ * does this file, and two copies of an index formula is one copy too many. */
 
 static inline void *rec_pml4(void)  { return (void *)(VMM_RECURSE_OFFSET + 0x0000ull); }
 static inline void *rec_pdpte(void) { return (void *)(VMM_RECURSE_OFFSET + 0x1000ull); }
@@ -193,18 +192,40 @@ static inline phys_addr_t virt_to_phys_direct(virt_addr_t virt)
 }
 
 /*
+ * A pointer to a fixed low physical address, in whichever map is live.
+ *
+ * Before vmm_switch_to_kernel_pgd() the bootloader's identity view of the low
+ * 4 GiB is still installed, so a physical address is already a usable virtual
+ * address. After the CR3 write that view is gone and the direct map is the
+ * only route to the same bytes. Nothing in the kernel holds a low physical
+ * address across the switch for long -- the VGA text buffer and the framebuffer
+ * the firmware reported are the two that do -- and using the wrong map is a
+ * #PF on the next store to it, and only on the next store.
+ */
+void *vmm_boot_ptr(phys_addr_t phys);
+
+/*
  * Convert a kernel *link* address to its physical address.
  *
  * This is not virt_to_phys_direct(), and using the wrong one is a silent
  * failure rather than a fault. The direct map starts at 0xFFFF800000000000 and
  * the kernel window at 0xFFFFFFFF80000000; the two are 8 exabytes apart, so
  * subtracting the wrong base yields a plausible-looking physical address that is
- * nowhere near the machine. Only the first 16 MiB of physical memory is aliased
- * by the kernel window, so this is valid for the kernel image and nothing else.
+ * nowhere near the machine. Only the physical range the kernel window covers is
+ * aliased by it, so this is valid for the kernel image and nothing else.
+ *
+ * The offset is KERNEL_LANDING_ADDR, not zero. The window is not an identity
+ * map of low memory: stage2 cannot address above 1 MiB with INT 13h, so the
+ * image is copied to KERNEL_LANDING_ADDR before paging exists, and virtual
+ * KERNEL_VIRT_BASE is mapped there. Subtracting KERNEL_VIRT_BASE on its own is
+ * exactly the assumption that the window and the image share a base, which they
+ * do virtually and not physically, and it puts every result 1 MiB below the page
+ * that holds it: the bootstrap page tables land 1 MiB low, and pmm_init() is
+ * handed the address of an E820 copy that is not where this kernel's copy is.
  */
 static inline phys_addr_t kernel_virt_to_phys(virt_addr_t virt)
 {
-	return virt - KERNEL_VIRT_BASE;
+	return (virt - KERNEL_VIRT_BASE) + KERNEL_LANDING_ADDR;
 }
 
 /* ------------------------------------------------------------- vmalloc ----- */

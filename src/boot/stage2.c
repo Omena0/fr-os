@@ -237,6 +237,43 @@ struct gdt_pointer {
 
 extern struct gdt_pointer gdtr64;
 
+/*
+ * The bootstrap IDT, and the 64-bit exception entry point.
+ *
+ * The table is built by stage2_entry.S with 16-byte entries because that is
+ * what long mode requires, but its gates point at the 32-bit reporter: until
+ * the far jump, the CPU is a 32-bit CPU and the 64-bit entry would decode as
+ * nonsense. The timer interrupt is the thing that exposes this -- it fires
+ * during the BIOS round trips, long after the last interrupt-enable
+ * instruction, and the very first delivery walks a 64-bit function's
+ * instruction stream in compatibility mode. The result is a jump into the
+ * middle of unrelated bytes and a halt with no output, which looks exactly
+ * like the loader deadlocking.
+ *
+ * So the gates are pointed at the 64-bit reporter at the last moment before
+ * the transition, while the CPU is still 32-bit and can do it safely.
+ */
+extern char boot_idt[];
+extern void exc_stub64(void);
+
+static void boot_idt_set_64bit(void)
+{
+	uint32_t off = (uint32_t)(uintptr_t)&exc_stub64;
+
+	for (unsigned vec = 0; vec < 256; vec++) {
+		uint8_t *g = (uint8_t *)boot_idt + (size_t)vec * 16u;
+
+		g[0] = (uint8_t)(off & 0xFF);
+		g[1] = (uint8_t)((off >> 8) & 0xFF);
+		g[2] = 0x08;			/* selector: 64-bit code segment */
+		g[3] = 0x00;
+		g[4] = 0x00;			/* IST 0 */
+		g[5] = 0x8E;			/* present, DPL 0, 64-bit interrupt gate */
+		g[6] = (uint8_t)((off >> 16) & 0xFF);
+		g[7] = (uint8_t)((off >> 24) & 0xFF);
+		/* bytes 8-15 stay zero: long mode requires offset[63:32] == 0 */
+	}
+}
 
 /* ------------------------------------------------------ BIOS call tracing --- */
 
@@ -779,7 +816,6 @@ static void copy_from_disk(uint64_t off, uint64_t dst, uint64_t len)
 {
 	uint8_t *out = (uint8_t *)(uintptr_t)dst;
 
-	serial_puts("[C]");
 	while (len > 0) {
 		uint32_t count_here = (uint32_t)((len + 511u) / 512u);
 		uint32_t sector = (uint32_t)(off / 512);
@@ -816,10 +852,6 @@ static void copy_from_disk(uint64_t off, uint64_t dst, uint64_t len)
 
 		if (!bios_read_bounce((uint64_t)KERNEL_LBA + sector, sectors))
 			fail("kernel payload read failed");
-		{
-			static uint32_t n;
-			if (n < 400) { n++; serial_puts("[R]"); }
-		}
 
 		uint8_t *src = (uint8_t *)(uintptr_t)BOUNCE_ADDR + in_sector;
 
@@ -1044,7 +1076,6 @@ static void load_kernel(void)
 
 	/* Program headers beyond the first sector were read into the landing
 	 * zone as scratch; leaving them there would corrupt .text. */
-	serial_puts("[Z]");
 	LOG("  kernel loaded, ");
 	serial_putdec(kernel_bytes_loaded);
 	serial_puts(" bytes\r\n");
@@ -1101,7 +1132,6 @@ static void boot_page_tables_init(void)
 	uint64_t *pd_high = (uint64_t *)(uintptr_t)(base + BOOT_PDH_OFF);
 	uint64_t *pt_high = (uint64_t *)(uintptr_t)(base + BOOT_PTP_OFF);
 
-	serial_puts("[Y]");
 	LOG("building bootstrap page tables...\r\n");
 
 	/* Zero the whole window. Paging is about to be enabled with CR3
@@ -1230,23 +1260,6 @@ static void boot_page_tables_init(void)
 
 	boot_pml4_phys = base + BOOT_PML4_OFF;
 
-	{
-		static const char *const nm[] = {
-			"pml4[0]=", "pml4[511]=", "pdpt[0]=", "pdpt[1]=",
-			"pdpt[510]=", "pd0[0]=", "pd0[1]=", "pdh[0]=", "pdh[1]=",
-		};
-		const uint64_t *const v[] = {
-			&pml4[0], &pml4[511], &pdpt[0], &pdpt[1],
-			&pdpt[510], &pd0[0], &pd0[1], &pd_high[0], &pd_high[1],
-		};
-		for (unsigned k = 0; k < 9; k++) {
-			serial_puts("  ");
-			serial_puts(nm[k]);
-			serial_puthex(*v[k]);
-			serial_puts("\r\n");
-		}
-	}
-
 	LOG("  PML4 at 0x");
 	serial_puthex(boot_pml4_phys);
 	serial_puts("\r\n");
@@ -1302,6 +1315,10 @@ static void boot_gdt_init(void)
 	gdtr64.limit = (uint16_t)(sizeof(gdt) - 1);
 	gdtr64.base = (uint32_t)(uintptr_t)gdt;
 
+	/* Last chance to install the 64-bit reporter: after this the far jump
+	 * makes every exception a long-mode delivery. */
+	boot_idt_set_64bit();
+
 	LOG("  GDT at 0x");
 	serial_puthex(gdtr64.base);
 	serial_puts("\r\n");
@@ -1322,6 +1339,47 @@ static void stage2_main(uint32_t entry_addr)
 	serial_init();
 
 	boot_drive = stage1_boot_drive;
+
+	/*
+	 * Mask both PICs before the first firmware call, and leave them masked.
+	 *
+	 * The 8259s come out of the BIOS identity-mapped with IRQ0 (the PIT)
+	 * *unmasked* -- IMR 0x21 reads 0xFE, one bit clear, and that bit is
+	 * IRQ0. Nothing is remapped until the kernel does it in pic_remap(), so
+	 * for the whole of stage2 a timer tick is vector 0x08.
+	 *
+	 * That vector is fatal here, and the reason is the trampoline rather than
+	 * the interrupt itself. The BIOS round trip runs in real mode with PE
+	 * clear but stage2's own IDT still installed (IDTR = 0xB178), and an
+	 * interrupt taken in real mode with a non-zero IDTR base is dispatched
+	 * through that IDT rather than through the real-mode IVT at physical
+	 * zero. Vector 8 therefore lands on stage2's gate at 0xB047, which is
+	 * the *32-bit* reporter exc_stub.
+	 *
+	 * exc_stub is 32-bit code and the CPU is now in real mode decoding 16-bit
+	 * instructions, so it executes as garbage: `50 53 51 52 56 57` becomes
+	 * six 16-bit pushes, `mov 0x18(%esp),%eax` becomes an addressing mode
+	 * that reads a different address, and the whole reporter -- including
+	 * its COM1 writes -- produces nothing legible. It then walks into
+	 * exc_halt64's `cli; hlt` and stops there for good.
+	 *
+	 * The symptom is that the log stops after an arbitrary `LOAD vaddr` line
+	 * with the loader apparently still running, because the PIT fires at
+	 * 18.2 Hz and the copy loop makes ~1400 sector reads: whether a given
+	 * boot dies on the 2nd or the 4th `LOAD` line is just where the first
+	 * tick happened to land. The `cli` after each bios_call (stage2_entry.S)
+	 * does not help -- it runs after the round trip has already returned,
+	 * and the tick arrives *during* the call, while the firmware has
+	 * interrupts enabled because the trampoline pushes flags with IF set so
+	 * the iret comes back with them.
+	 *
+	 * The loader is single-threaded and wants no interrupts at all, so
+	 * masking every line is both the cheapest and the correct answer. The
+	 * kernel remaps and unmasks the PIC itself (src/kernel/idt.c
+	 * pic_remap), so nothing is lost by leaving them masked here.
+	 */
+	outb(0x21, 0xFF);		/* master: all IRQs masked */
+	outb(0xA1, 0xFF);		/* slave:  all IRQs masked */
 
 	LOG("running at 0x");
 	serial_puthex(STAGE2_ADDR);
