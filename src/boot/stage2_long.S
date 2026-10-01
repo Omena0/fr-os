@@ -35,18 +35,12 @@
 /* CR4 bits. */
 #define CR4_PAE         (1 << 5)
 
-/* Poll LSR.THRE first. A byte written while the 16-entry FIFO still holds
- * an unsent one is dropped silently, and a burst of unpokked writes loses
- * exactly the characters that mark how far the CPU got. */
-#define TRACE(c) \
-	movl	$0x3FD, %edx;			\
-1:	inb	(%dx), %al;			\
-	testb	$0x20, %al;			\
-	jz	1b;				\
-	movl	$0x3F8, %edx;			\
-	movb	$(c), %al;			\
-	outb	%al, (%dx)
-
+/* The bootstrap gate table and both halves of both reporter addresses. The
+ * table is emitted by stage2_entry.S; the low/high split of a handler address
+ * is done by stage2.ld, which is the only place that knows where the sections
+ * ended up. */
+	.globl	boot_idt
+	.equ	BOOT_IDT_GATE_BYTES, 16
 
 	.globl stage2_enter_long_mode
 stage2_enter_long_mode:
@@ -65,25 +59,44 @@ stage2_enter_long_mode:
 	 * instruction fetch, and the loader stops a few characters after
 	 * announcing that it is entering long mode.
 	 *
-	 * Frame layout after `pushl %ebp; movl %esp,%ebp`:
+	 * Frame layout after `pushl %ebp; movl %esp,%ebp; pushl %ebx`:
 	 *   [ebp+0]  saved ebp
-	 *   [ebp+4]  saved ebx
+	 *   [ebp+4]  return address
 	 *   [ebp+8]  pml4_phys
 	 *   [ebp+12] entry
 	 *   [ebp+16] bootinfo_phys
+	 *
+	 * [ebp+4] is the return address, not a saved register: the `pushl %ebx`
+	 * has already consumed one word, so everything the caller pushed is at
+	 * +8 and above. Reading +4 as an argument is off by exactly one word and
+	 * produces a perfectly plausible value, because a return address into
+	 * stage2.c looks like nothing in particular.
 	 */
 	pushl	%ebp
 	movl	%esp, %ebp
 	pushl	%ebx
 
+	/*
+	 * Interrupts off for the whole transition.
+	 *
+	 * Between here and the far jump the CPU is a 32-bit CPU, so the gates have
+	 * to point at the 32-bit reporter -- but the gate table is shared with
+	 * long mode, which reads a 16-byte entry where the 32-bit reporter's
+	 * offsets only fill eight. The two halves of the sequence below are
+	 * therefore bracketed: 32-bit gates in, far jump, 64-bit gates in. An
+	 * interrupt landing in between would be delivered to whichever stub is
+	 * installed, decoded with the wrong operand size, and walk into
+	 * unrelated bytes -- a hang with no output, which is how this transition
+	 * looks when it fails.
+	 */
+	cli
+
 	/* Enable PAE. This must precede the LME write: the CPU interprets
 	 * EFER.LME only in the presence of PAE, and the paging format changes
 	 * from 2-level to 4-level at the same time. */
-	TRACE('a')
 	movl	%cr4, %eax
 	orl	$CR4_PAE, %eax
 	movl	%eax, %cr4
-	TRACE('b')
 
 	/*
 	 * Set EFER.LME, and NXE so the kernel's page tables may use the NX bit to
@@ -108,24 +121,19 @@ stage2_enter_long_mode:
 	orl	$EFER_LME, %eax
 	orl	$EFER_NXE, %eax
 	wrmsr
-	TRACE('c')
 
 	/* Load the bootstrap PML4. A NULL physical address would load the legacy
 	 * PCID-free CR3 form; ours is a real physical address. */
 	movl	8(%ebp), %eax		/* pml4_phys */
 	movl	%eax, %cr3
-	TRACE('d')
 
 	/* Turn on paging. */
 	movl	%cr0, %eax
 	orl	$(CR0_PG | CR0_PE), %eax
-	TRACE('e')
 	movl	%eax, %cr0
-	TRACE('f')
 
 	/* Reload the GDT so the far jump can pick up a 64-bit code descriptor. */
 	lgdt	(gdtr64)
-	TRACE('g')
 
 	/*
 	 * Enable SSE before handing the CPU to the kernel.
@@ -152,28 +160,37 @@ stage2_enter_long_mode:
 
 	movl	%cr4, %eax
 	orl	$0x00000200, %eax	/* set CR4.OSFXSR */
+	orl	$0x00010000, %eax	/* set CR4.FSGSBASE */
 	movl	%eax, %cr4
 
 	/*
-	 * Enable the AVX state, which is a separate thing from SSE and is what
-	 * the kernel's code actually uses.
+	 * CR4.FSGSBASE is set here rather than by the kernel because this is where
+	 * the rest of the CPU state the kernel depends on is established -- PAE,
+	 * OSFXSR, OSXSAVE, EFER and XCR0 are all handled above or nearby. The
+	 * kernel's first instruction asserts the bit and refuses to continue
+	 * without it, which is the right division: a control register it depends
+	 * on belongs to the handoff contract, not to code that mutates it behind
+	 * the loader's back.
 	 *
-	 * The kernel is compiled -mavx2 -mxsave, so GCC emits VEX-encoded
-	 * instructions -- vmovdqu for a 16-byte move, and so on. VEX is not SSE
-	 * with a different prefix: it implies the upper half of the YMM
+	 * The kernel needs it because WRGSBASE is the only way to install a
+	 * *visible* GS base from ring 0. WRMSR to IA32_GS_BASE updates the hidden
+	 * base only, so the per-CPU pointer written that way is not the one
+	 * GS-relative addressing uses, and on this machine it also raises #GP
+	 * under KVM. kmain.S asserts the bit and then issues WRGSBASE.
+	 */
+
+	/*
+	 * Enable the AVX state, which is a separate thing from SSE.
+	 *
+	 * VEX-encoded instructions -- vmovdqu and the rest of the AVX2 set -- are
+	 * not SSE with a different prefix: they imply the upper half of the YMM
 	 * registers, and those only exist if the OS has asked for them through
-	 * XSETBV. Until XCR0 says so, every VEX instruction raises #UD, even
-	 * with CR0.EM clear and CR4.OSFXSR set.
+	 * XSETBV. Until XCR0 says so, every VEX instruction raises #UD, even with
+	 * CR0.EM clear and CR4.OSFXSR set.
 	 *
-	 * The order is fixed and each step depends on the last. CPUID has to
-	 * report AVX and OSXSAVE before either is usable. CR4.OSXSAVE has to be
-	 * set before XGETBV itself will execute, since the instruction is #UD
-	 * until OSXSAVE is on. XCR0 must already have the XMM and YMM_Hi128 bits
-	 * set -- the BIOS may have set them, and if it did not then this CPU
-	 * cannot be asked to enable YMM and the kernel cannot run here at all.
-	 * Only then does XSETBV turn on the x87, SSE and AVX state together,
-	 * because enabling AVX while leaving x87 state off produces a CPU that
-	 * faults on the first FPU instruction instead.
+	 * The note on the XSETBV below explains the sequence's ordering; the short
+	 * version is that each step is a precondition for the next, and CPUID is
+	 * the one that gates all of them.
 	 */
 	movl	$1, %eax
 	movl	$0, %ecx
@@ -189,21 +206,91 @@ stage2_enter_long_mode:
 	movl	%eax, %cr4
 
 	/*
-	 * Read the current XCR0 and add the three states we need, rather than
-	 * insisting they are already there. Firmware sets XCR0 to 3 -- x87 and
-	 * SSE only -- and leaves the YMM_Hi128 bit clear, so a loader that
-	 * checks for the AVX state before setting it concludes the CPU cannot do
-	 * AVX and skips the whole sequence. The check is the wrong way round:
-	 * enabling that state is the loader's job, not the firmware's. Reading
-	 * XCR0 first and OR-ing into it keeps any state the firmware did set,
-	 * such as the LWP bit, instead of overwriting it.
+	 * The order above is fixed and each step depends on the last, and it is
+	 * correct as far as it goes: CPUID has to report AVX and OSXSAVE before
+	 * either is usable, CR4.OSXSAVE has to be set before XGETBV itself will
+	 * execute since the instruction is #UD until OSXSAVE is on, and XSETBV turns
+	 * on x87, SSE and AVX together because enabling AVX while leaving x87 state
+	 * off produces a CPU that faults on the first FPU instruction instead.
+	 *
+	 * What was missing is that XCR0 was OR-ed into blindly. XSETBV raises #GP
+	 * -- not #UD, so no amount of looking for a "not implemented" signature
+	 * finds it -- if the value being written has a bit set that the CPU does not
+	 * implement. Every bit the firmware happened to leave in XCR0 was therefore
+	 * passed straight through unchecked, and the failure lands on the XSETBV
+	 * itself: the loader stops between the "entering long mode" line and the
+	 * kernel's first, with nothing printed, because the instruction that faults
+	 * is the one that would have been the last chance to say so.
+	 *
+	 * Firmware that enables PKRU (XCR0 bit 9) without the CPU advertising
+	 * support for it in CPUID.0x0D is the realistic case, and it is a
+	 * firmware bug rather than ours -- but the alternative to honouring it is a
+	 * loader that cannot boot on it, and the mask costs one CPUID.
+	 *
+	 * CPUID leaf 0x0D, subleaf 0, returns in EAX the XCR0 states this CPU
+	 * supports, and that read is safe unconditionally *here* even though the
+	 * leaf is optional: XSAVE -- and therefore CPUID.0x0D -- exists on every
+	 * CPU that reports CPUID.1:ECX.OSXSAVE, and OSXSAVE has already been tested
+	 * two instructions above. So there is no state in which this path is taken
+	 * and the leaf is missing.
+	 *
+	 * The OR of 0x7 is applied after the mask and does not need one of its own:
+	 * the three states are x87, SSE and YMM_Hi128, and YMM_Hi128 is only
+	 * reachable on a CPU that reports AVX, which is the test above.
 	 */
 	movl	$0, %ecx
-	xgetbv
-	orl	$0x7, %eax			/* x87 | SSE | AVX */
+	xgetbv				/* EAX = XCR0 as the firmware left it */
+	movl	%eax, %esi
+	movl	$0x0D, %eax
+	movl	$0, %ecx
+	cpuid				/* EAX = XCR0 states this CPU supports */
+	andl	%esi, %eax		/* drop anything it does not */
+	orl	$0x7, %eax		/* x87 | SSE | AVX */
 	xsetbv
 
 .Lno_avx:
+
+	/*
+	 * Point the gates at the 32-bit reporter before the far jump.
+	 *
+	 * The static table that stage2_entry.S emits points every one of the 256
+	 * gates at exc_stub, the 32-bit reporter, and that is the right target for
+	 * everything up to and including this instruction. It has to be restored
+	 * here because boot_gdt_init() rewrites the table to the 64-bit reporter
+	 * earlier in the sequence, on the reasonable but wrong assumption that
+	 * nothing faults between that point and the transition. Things do fault in
+	 * between -- the CR0/CR4 and XGETBV/XSETBV writes above are privileged
+	 * instructions that raise #UD and #GP respectively when the CPU is not in
+	 * the state they require, which is exactly the state this code is in the
+	 * business of establishing.
+	 *
+	 * A 64-bit instruction stream executed in compatibility mode decodes as a
+	 * different, still-plausible stream: `pushq %rax` is not `pushl %eax`, the
+	 * stack offsets are halved, and the reporter walks into unrelated bytes and
+	 * ends up in its own halt loop. Nothing is printed, because the code that
+	 * would print is the code that could not be entered, and the loader simply
+	 * stops between two lines it has already printed.
+	 *
+	 * So the mode and the gates are kept in step on both sides of the jump:
+	 * 32-bit gates in here, 64-bit gates in at long_mode_entry. Interrupts are
+	 * off (see the cli at the top of this function) so no delivery can see a
+	 * half-rewritten table.
+	 */
+	movl	$boot_idt, %edi
+	movl	$exc_stub_lo, %eax
+	movl	$exc_stub_hi, %edx
+	movl	$256, %ecx
+.Lgates32:
+	movw	%ax, 0(%edi)			/* offset[15:0]  */
+	movw	$0x0008, 2(%edi)		/* selector: code */
+	movw	$0x8E00, 4(%edi)		/* IST 0, DPL 0, 32-bit interrupt gate */
+	movw	%dx, 6(%edi)			/* offset[31:16] */
+	movl	$0, 8(%edi)			/* the other half of a
+						 * long-mode entry, which a
+						 * 32-bit one ignores */
+	movl	$0, 12(%edi)
+	addl	$BOOT_IDT_GATE_BYTES, %edi
+	loop	.Lgates32
 
 	/* Far jump into long mode. The 64-bit segment has L=1, which clears
 	 * CS.L and switches the default operand size to 64 bits. */
@@ -214,9 +301,42 @@ long_mode_entry:
 	movw	$0x10, %ax
 	movw	%ax, %ds
 	movw	%ax, %es
+	movw	$0x10, %ax
 	movw	%ax, %fs
 	movw	%ax, %gs
+	movw	$0x10, %ax
 	movw	%ax, %ss
+
+	/*
+	 * Point the gates at the 64-bit reporter, now that the CPU can execute it.
+	 *
+	 * Doing it here rather than before the far jump is what makes the pairing
+	 * airtight: from the first instruction of long mode, every gate names a
+	 * 64-bit stub, and until the instruction before the far jump every gate
+	 * named a 32-bit one. There is no instruction in the whole sequence that
+	 * can fault against a gate for the other mode.
+	 *
+	 * The gate layout is the same sixteen bytes the static table has, and it is
+	 * the same sixteen bytes a long-mode CPU reads: offset[15:0], selector,
+	 * type/IST, offset[31:16], and then eight bytes that must be zero. Those
+	 * last eight are not padding -- a non-zero bit anywhere in offset[63:32]
+	 * raises #GP before the handler is ever entered, so a gate built by
+	 * striding eight bytes is undeliverable. Both halves of the upper word are
+	 * therefore written, not left holding whatever the 32-bit table had.
+	 */
+	movl	$boot_idt, %edi
+	movl	$exc_stub64_lo, %eax
+	movl	$exc_stub64_hi, %edx
+	movl	$256, %ecx
+.Lgates64:
+	movw	%ax, 0(%edi)
+	movw	$0x0008, 2(%edi)
+	movw	$0x8E00, 4(%edi)
+	movw	%dx, 6(%edi)
+	movl	$0, 8(%edi)
+	movl	$0, 12(%edi)
+	addl	$BOOT_IDT_GATE_BYTES, %edi
+	loop	.Lgates64
 
 	/* EFER.LMA is set by hardware once long mode is genuinely active. Reading
 	 * it back is the only way to confirm the transition really happened. */
@@ -281,32 +401,82 @@ long_mode_entry:
 	movslq	%eax, %rax		/* -> 0xffffffff80000180 */
 	movl	16(%rbp), %edx		/* bootinfo_phys */
 	movq	%rdx, %rdi		/* SysV: first argument in RDI */
+
+	/*
+	 * Give the caller its EBX back. This is an ordinary cdecl function as far
+	 * as stage2.c is concerned -- it is declared and called like one, and
+	 * GCC is entitled to keep a live value in EBX across the call -- but the
+	 * body never returns to it: it ends in `jmp *%rax` into the kernel. Without
+	 * this pop the kernel starts with EBX holding whatever the CPUID above left
+	 * there, which is ECX's AVX/OSXSAVE bits rather than anything of the
+	 * caller's.
+	 *
+	 * `popq`, not `popl`: the push was a 32-bit push in the prologue and this
+	 * is 64-bit code, but the width has to match -- a `popl` would pop four
+	 * bytes and leave the stack pointer eight short of where the frame started.
+	 */
+	popq	%rbx
 	jmp	*%rax
 
 .LMA_missing:
 	/* Getting here means the CPU accepted LME but is not reporting long mode
-	 * as active. There is nothing useful left to do; halt so the failure is
-	 * visible on the serial console rather than executing garbage. */
-	movw	$msg_lma, %si
+	 * as active. There is nothing useful left to do; print why and halt, so
+	 * the failure is visible on the serial console rather than the machine
+	 * executing garbage. */
+	movl	$msg_lma, %edi
 	call	hang_puts
-1:	cli
-	hlt
+	cli
+1:	hlt
 	jmp	1b
 
-	/* Reached only on a failed transition. */
+/*
+ * Reached only on a failed transition, so it is the one piece of code whose
+ * entire job is to explain what went wrong.
+ *
+ * It had the exact bug its neighbour in stage2_entry.S documents as already
+ * fixed. The poll read the line status into AL -- which is the only register an
+ * `in` can target -- and then transmitted AL, so what went out was the status
+ * byte rather than the character. The status byte has LSR.THRE set, so it is
+ * 0x60, and the message came out as an unbounded stream of backticks and
+ * nothing else: a console that looks busy while saying nothing, on the one path
+ * whose purpose is to say something.
+ *
+ * Two further faults in the same six instructions. The poll read port 0x3F8,
+ * which is the receive buffer register and never has bit 5 set, instead of the
+ * line status register at 0x3FD -- so the spin could not have terminated even
+ * with the right register. And the `movb %al, %al` on the way out is a no-op
+ * that reads like it was meant to move the character somewhere safe.
+ *
+ * So: the character travels in DIL and never touches AL, the status register is
+ * 0x3FD, and the spin is bounded. The bound is the part that matters most --
+ * this runs after a transition has already failed, and a diagnostic that can
+ * itself hang forever is worse than no diagnostic, because it converts a
+ * readable failure into a silent stop.
+ */
+	.globl hang_putc64
+hang_putc64:
+	movl	$0x3FD, %edx		/* line status, not the data register */
+	movl	$0x40000, %ecx		/* spin budget: ~260k iterations */
+1:	inb	(%dx), %al
+	testb	$0x20, %al		/* LSR_THRE */
+	jnz	2f
+	loop	1b
+	movl	$'?', %edi		/* UART wedged: say so and carry on */
+2:	movl	$0x3F8, %edx
+	movzbl	%dil, %eax		/* the character, not the status */
+	outb	%al, (%dx)
+	ret
+
+	.globl hang_puts
 hang_puts:
-	movl	$0x3f8, %edx
-	lodsb
+	movq	%rdi, %rsi
+1:	lodsb
 	testb	%al, %al
 	jz	2f
-1:	inb	%dx, %al
-	testb	$0x20, %al
-	jnz	2f
+	movzbl	%al, %edi
+	call	hang_putc64
 	jmp	1b
-2:	movl	$0x3f8, %edx
-	movb	%al, %al
-	outb	%al, %dx
-	jmp	hang_puts
+2:	ret
 
 	.section .data
 	.align	4

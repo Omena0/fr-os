@@ -22,6 +22,13 @@ struct fmt_state {
 };
 
 /*
+ * A number needs at most 64 digits, and that is only for base 2; the buffer is
+ * sized for the worst case rather than for hex so that %b of a 64-bit value is
+ * not silently truncated. Every conversion buffer in this file is this size.
+ */
+#define FMT_NUMBUF 66
+
+/*
  * Build a formatted representation of `value` in `base` into `buf`, returning
  * its length. Digits are produced least-significant first and reversed here, so
  * the conversion loop is a straight division with no lookahead.
@@ -32,7 +39,7 @@ static size_t utoa(char *buf, size_t size, unsigned long long value,
 	static const char lower_digits[] = "0123456789abcdef";
 	static const char upper_digits[] = "0123456789ABCDEF";
 	const char *digits = upper ? upper_digits : lower_digits;
-	char tmp[24];
+	char tmp[FMT_NUMBUF];
 	size_t n = 0;
 	size_t i;
 
@@ -68,47 +75,81 @@ static size_t itoa(char *buf, size_t size, long long value,
 }
 
 /*
- * Emit `body` with the requested width, honouring precision (minimum digits,
- * zero-filled for numbers; maximum characters for strings) and the left-justify
- * flag.
+ * Emit `body` with the requested width, honouring precision and the '-'
+ * left-justify flag.
+ *
+ * The rules are the ones in C99 7.21.6.1, and each of them has to be kept or
+ * the output stops being usable as a fixed-column log:
+ *
+ *   - A precision on an integer is a floor on the *digit count*, zero filled
+ *     whatever the flags say, and it applies even when the field is being
+ *     left-justified: "%.5d" of 42 is "00042" and "%-8.5d" of 42 is
+ *     "00042   ". For a string, precision is a maximum length instead, which
+ *     handle_string applies before calling in here (it passes has_precision
+ *     false), so the two never collide.
+ *   - A '0' flag fills the *width* pad with zeros instead of spaces, but only
+ *     if no precision was given, and only if '-' was not: C99 7.19.6.1p7 says
+ *     the flag is ignored in both of those cases. That is why "%08.5d" of 42 is
+ *     "   00042" and not "00000042".
+ *   - Space padding goes outside the sign and '0' padding inside it, so "%5d"
+ *     of -42 is "  -42" and "%05d" of -42 is "-0042".
+ *
+ * The digit floor and the width are kept separate because they add:
+ * "%10.5d" of 42 is "     00042", five digits inside a ten-wide field.
  */
 static void emit_padded(struct fmt_state *st, const char *body, size_t len,
 			size_t precision, bool has_precision, int width,
 			bool left_align, bool zero_pad, const char *sign)
 {
 	size_t sign_len = sign ? strlen(sign) : 0;
-	size_t total = len + sign_len;
-	size_t pad;
+	size_t digit_pad;
+	size_t width_pad;
+	size_t zeros;
+	bool zero_fill;
+	size_t i;
 
-	if (has_precision && precision > total)
-		total = precision;
+	digit_pad = (has_precision && precision > len) ? precision - len : 0;
 
-	if (width > 0 && (size_t)width > total)
-		pad = (size_t)width - total;
+	zero_fill = zero_pad && !left_align && !has_precision;
+
+	if (width > 0 && (size_t)width > len + sign_len + digit_pad)
+		width_pad = (size_t)width - (len + sign_len + digit_pad);
 	else
-		pad = 0;
+		width_pad = 0;
 
-	if (sign && !left_align && zero_pad) {
-		/* Zero padding goes inside the sign: -00042, not 000-42. */
-		for (size_t i = 0; i < sign_len; i++)
+	zeros = digit_pad + (zero_fill ? width_pad : 0);
+
+	if (!left_align && !zero_fill)
+		for (i = 0; i < width_pad; i++)
+			st->sink(' ', st->arg);
+
+	if (sign)
+		for (i = 0; i < sign_len; i++)
 			st->sink(sign[i], st->arg);
-		for (size_t i = 0; i < pad; i++)
-			st->sink('0', st->arg);
-	} else {
-		if (!left_align)
-			for (size_t i = 0; i < pad; i++)
-				st->sink(' ', st->arg);
-		if (sign)
-			for (size_t i = 0; i < sign_len; i++)
-				st->sink(sign[i], st->arg);
-	}
 
-	for (size_t i = 0; i < len; i++)
+	for (i = 0; i < zeros; i++)
+		st->sink('0', st->arg);
+
+	for (i = 0; i < len; i++)
 		st->sink(body[i], st->arg);
 
 	if (left_align)
-		for (size_t i = 0; i < pad; i++)
+		for (i = 0; i < width_pad; i++)
 			st->sink(' ', st->arg);
+}
+
+/*
+ * Apply the one precision rule that is about the value rather than the field:
+ * C99 7.19.6.1p5 -- converting a zero value with a precision of zero produces
+ * no characters at all, not "0". Anything else with a precision is handled by
+ * emit_padded's digit floor.
+ */
+static size_t apply_zero_precision(char *buf, size_t len, int precision,
+				   bool has_precision)
+{
+	if (has_precision && precision == 0 && len == 1 && buf[0] == '0')
+		return 0;
+	return len;
 }
 
 static void handle_string(struct fmt_state *st, int width, bool left_align,
@@ -129,23 +170,29 @@ static void handle_unsigned(struct fmt_state *st, unsigned long long value,
 			    unsigned base, bool upper, int width, bool left_align,
 			    bool zero_pad, int precision, bool has_precision)
 {
-	char buf[24];
+	char buf[FMT_NUMBUF];
 	size_t len = utoa(buf, sizeof(buf), value, base, upper);
 
+	len = apply_zero_precision(buf, len, precision, has_precision);
 	emit_padded(st, buf, len, (size_t)precision, has_precision, width,
 		    left_align, zero_pad, NULL);
 }
 
 static void handle_signed(struct fmt_state *st, long long value, unsigned base,
 			  int width, bool left_align, bool zero_pad,
-			  int precision, bool has_precision)
+			  int precision, bool has_precision, bool plus, bool blank)
 {
-	char buf[24];
+	char buf[FMT_NUMBUF];
 	bool negative = false;
 	size_t len = itoa(buf, sizeof(buf), value, base, false, &negative);
+	/* A negative value prints its own minus; '+' and ' ' only decorate a
+	 * non-negative one, and neither is in the output if the value has a
+	 * sign already. */
+	const char *sign = negative ? "-" : (plus ? "+" : (blank ? " " : NULL));
 
+	len = apply_zero_precision(buf, len, precision, has_precision);
 	emit_padded(st, buf, len, (size_t)precision, has_precision, width,
-		    left_align, zero_pad, negative ? "-" : NULL);
+		    left_align, zero_pad, sign);
 }
 
 void kvprintf(kvprintf_sink_t sink, void *arg, const char *fmt, va_list ap)
@@ -168,9 +215,9 @@ void kvprintf(kvprintf_sink_t sink, void *arg, const char *fmt, va_list ap)
 	while (*p) {
 		bool left_align = false, zero_pad = false;
 		bool has_precision = false;
+		bool plus = false, blank = false;
 		int width = 0, precision = 0;
 		int longness = 0;   /* 0 = int, 1 = long, 2 = long long, -1 = short */
-		bool is_signed = true;
 
 		if (*p != '%') {
 			st.sink(*p++, st.arg);
@@ -178,8 +225,11 @@ void kvprintf(kvprintf_sink_t sink, void *arg, const char *fmt, va_list ap)
 		}
 		p++;
 
-		/* Flags. A '-' must be checked before '0' because '-' also
-		 * terminates the flag loop. */
+		/*
+		 * Flags, in any order and any number of times. Which one wins if
+		 * both '-' and '0' are given is decided in emit_padded, which is
+		 * the only place that knows what a sign is.
+		 */
 		for (;;) {
 			if (*p == '-') {
 				left_align = true;
@@ -187,10 +237,14 @@ void kvprintf(kvprintf_sink_t sink, void *arg, const char *fmt, va_list ap)
 			} else if (*p == '0') {
 				zero_pad = true;
 				p++;
-			} else if (*p == '+' || *p == ' ') {
-				p++;   /* accepted and ignored: no sign decoration */
+			} else if (*p == '+') {
+				plus = true;
+				p++;
+			} else if (*p == ' ') {
+				blank = true;
+				p++;
 			} else if (*p == '#') {
-				p++;   /* accepted and ignored */
+				p++;   /* accepted and ignored: no alternate form */
 			} else {
 				break;
 			}
@@ -251,7 +305,7 @@ void kvprintf(kvprintf_sink_t sink, void *arg, const char *fmt, va_list ap)
 			else
 				v = va_arg(st.ap, int);
 			handle_signed(&st, v, 10, width, left_align, zero_pad,
-				      precision, has_precision);
+				      precision, has_precision, plus, blank);
 			break;
 		}
 		case 'u':
@@ -293,21 +347,34 @@ void kvprintf(kvprintf_sink_t sink, void *arg, const char *fmt, va_list ap)
 			break;
 		case 'p': {
 			unsigned long long v = va_arg(st.ap, unsigned long long);
-			char buf[24];
+			char buf[FMT_NUMBUF];
 			size_t len = utoa(buf, sizeof(buf), v, 16, false);
-
 			/* Pointers are always 0x-prefixed and at least 16 hex
 			 * digits, because an abbreviated kernel address is a
 			 * debugging trap. */
-			size_t total = len + 2;
-			size_t pad = total < 18 ? 18 - total : 0;
+			size_t zpad = len + 2 < 18 ? 18 - (len + 2) : 0;
+			size_t spaces = 0;
+			size_t i;
 
+			/* An explicit width can widen the field but never
+			 * narrow it below the 16 digits, and it fills with
+			 * spaces: a '0' flag cannot make a pointer field
+			 * start with a run of zeros before the 0x. */
+			if (width > 0 && (size_t)width > len + 2 + zpad)
+				spaces = (size_t)width - (len + 2 + zpad);
+
+			if (!left_align)
+				for (i = 0; i < spaces; i++)
+					st.sink(' ', st.arg);
 			st.sink('0', st.arg);
 			st.sink('x', st.arg);
-			for (size_t i = 0; i < pad; i++)
+			for (i = 0; i < zpad; i++)
 				st.sink('0', st.arg);
-			for (size_t i = 0; i < len; i++)
+			for (i = 0; i < len; i++)
 				st.sink(buf[i], st.arg);
+			if (left_align)
+				for (i = 0; i < spaces; i++)
+					st.sink(' ', st.arg);
 			break;
 		}
 		case '%':

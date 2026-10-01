@@ -1,0 +1,23 @@
+# DEPRECATED -- replaced by tools/ownership.py
+#
+# File ownership is no longer tracked here. The old format was a plain text
+# table with no locking, no expiry and no way to tell a live claim from one an
+# agent left behind when it was killed mid-turn. That cost real time: an agent
+# was killed holding three files, its claims stayed, and three others found
+# files mysteriously unavailable.
+#
+# Use:
+#
+#   ./tools/ownership.py claim  <file> --agent <your-name>
+#   ./tools/ownership.py view
+#   ./tools/ownership.py check <file> --agent <your-name>   # 0 free, 1 held, 2 yours
+#   ./tools/ownership.py release <file> --agent <your-name>
+#   ./tools/ownership.py prune                             # drop expired
+#
+# Claims expire (3h by default) and an expired claim is treated as free
+# everywhere, so a dead agent cannot block work forever. Concurrent claims are
+# serialised with flock, and exactly one of several racing claims on the same
+# file wins. The tool tells you who holds a file and for how long; if you
+# believe they are gone, --force takes it and says so on stderr.
+#
+# State lives in ownership.json.

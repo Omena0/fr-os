@@ -24,6 +24,7 @@
 #define PERCPU_H
 
 #include <types.h>
+#include <io.h>
 
 /*
  * Maximum CPUs. The per-CPU area is a statically reserved array so the GS base
@@ -69,14 +70,51 @@ extern struct percpu_data percpu_data[MAX_CPUS];
 
 /*
  * The per-CPU base. Written once per CPU at bring-up; after that it lives in
- * MSR_GS_BASE and is read with a single instruction.
+ * IA32_GS_BASE.
+ *
+ * This is read with RDMSR, and that is not a stylistic choice -- it is the only
+ * read of GS.base that is both correct and available here. Three candidates
+ * were measured on the running kernel with the GS base set to
+ * &percpu_data[0] = 0xffffffff8016d300:
+ *
+ *     rdmsr 0xC0000101          -> 0xffffffff8016d300   correct
+ *     rdgsbase                  -> 0xffffffff8016d300   correct (not on Intel)
+ *     48 8c /r  (mov %gs,%rax)  -> 0x10                 WRONG
+ *
+ * Three wrong ways to do this have been live in this file at various points,
+ * and each of them fails silently:
+ *
+ *  1. `movq %%gs:0, %0` loads the eight bytes the GS base points *at* --
+ *     percpu_data[0].cpu_id, which is 0 -- and returns it as the pointer.
+ *  2. `movq %%gs, %0` looks like the fix and is worse. GAS ignores the `q` and
+ *     emits the legacy 32-bit MOV r/m32, Sreg form (8c /r, no REX.W), so what
+ *     the compiler emitted was `mov %gs,%eax`, which loads the GS *selector*:
+ *     0x10 on this machine. Verified against the assembles this file is built
+ *     with: `movq %gs,%rax` assembles to `8c e8`, and objdump renders that as
+ *     `mov %gs,%eax`.
+ *  3. Hand-writing `48 8c e8` to force REX.W is the third attempt, and QEMU TCG
+ *     ignores REX.W for opcode 8C as well: it returned the same selector, 0x10.
+ *     This is why kmain.S's read-back, which uses exactly those bytes, has to
+ *     change too -- it aborts every boot with "GS base did not take" on a
+ *     correctly installed base.
+ *
+ * None of the three faults. The value returned is not a pointer into a hole:
+ * 0x10 is inside the bootloader's identity window, mapped and writable, so
+ * there is no #PF to point at the mistake. It surfaces much later as an
+ * allocator returning NULL for every request and a kernel triple-faulting on
+ * the first dereference of the result, which is why this took a day to find.
+ *
+ * RDMSR is serialising, which is a real cost on the interrupt path. It buys
+ * correctness on every CPU, cannot raise an unimplemented-instruction fault,
+ * and adds no contention -- which is the property this design actually exists
+ * for. RDGSBASE is the cheap alternative and does work under QEMU (measured
+ * above), but it is an AMD extension with no CPUID bit of its own on Intel
+ * parts, so using it means carrying a runtime capability flag and a second code
+ * path for a saving that has not been measured to matter.
  */
 static inline struct percpu_data *this_cpu(void)
 {
-	struct percpu_data *p;
-
-	__asm__ volatile("movq %%gs:0, %0" : "=r"(p));
-	return p;
+	return (struct percpu_data *)(uintptr_t)rdmsr(MSR_GS_BASE);
 }
 
 #define this_cpu_id()      (this_cpu()->cpu_id)
@@ -93,7 +131,10 @@ static inline struct percpu_data *this_cpu(void)
 
 /*
  * Set the GS base so this_cpu() resolves to `cpu`. Called exactly once per CPU
- * before any subsystem is initialised.
+ * before any subsystem is initialised. Panics if the base cannot be installed
+ * or does not read back: there is no correct way to continue, because every
+ * per-CPU access would resolve to whatever happened to be mapped at the
+ * address this_cpu() returned.
  */
 void percpu_setup(uint32_t cpu_id);
 

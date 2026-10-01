@@ -193,6 +193,29 @@ read_geometry:
 	movb	$1, %al
 .geo_spt_ok:
 	movb	%al, sectors_per_track
+
+	/*
+	 * AH has to be cleared before AX goes into bx_spt.
+	 *
+	 * `movb $0x08, %ah` above put the function number there and nothing since
+	 * has overwritten it -- the interrupt is *supposed* to clobber AH with a
+	 * status byte, and on success it returns 0, which is the only reason this
+	 * has ever worked. A BIOS that answers a successful AH=08h with a non-zero
+	 * status leaves that status in AH, and the word stored here becomes
+	 * 0x0800 | spt: 2111 instead of 63, with the sectors-per-track byte
+	 * alongside it still holding the correct 63. Nothing disagrees, so nothing
+	 * complains.
+	 *
+	 * Every LBA->CHS division in chs_read then divides by the wrong number.
+	 * `divw bx_spt` succeeds, the carry comes back clear, and the BIOS accepts
+	 * the resulting sector number -- so stage1 reads the wrong sectors and
+	 * carries on. The failure is a stage2 image assembled out of unrelated disk
+	 * sectors, which presents as a far jump into memory with no GDT in it.
+	 *
+	 * The head count below already gets this right with `xorb %ah, %ah`, which
+	 * is why only one of the two divisors was ever wrong.
+	 */
+	xorb	%ah, %ah
 	movw	%ax, bx_spt
 
 	/* Head count. DH is the highest head number, so the count is one more.
@@ -351,61 +374,88 @@ chs_read:
  * 115200 Hz / 1 = divisor 1. The modem control and FIFO control registers are
  * programmed explicitly so a state left behind by the BIOS cannot leave the
  * transmitter disabled or the FIFO holding stale bytes.
+ *
+ * Every register is named by its own address, because the two that are easy to
+ * confuse here are the two the register file is full of: the interrupt enable
+ * register and the divisor latch are the same port (0x3F9), and which one you
+ * are writing is decided by a bit in the *line control* register at 0x3FB. This
+ * used to keep DX at 0x3F8 across the first two writes, so both the "interrupts
+ * off" byte and the DLAB byte went out of the *transmitter* instead of to the
+ * IER and the LCR.
+ *
+ * The consequences were, in order of how much they mattered:
+ *
+ *   - DLAB was never set, so the two divisor writes that followed went to the
+ *     interrupt enable register rather than to the divisor latch. The baud rate
+ *     was therefore whatever the firmware left behind, and the one number in this
+ *     routine that the comment above states as a fact was never actually
+ *     programmed. stage2 programs its own divisor (3, not 1), so the rate also
+ *     changed partway through every boot.
+ *   - IER was programmed with 1 and then with 0 by the code that thought it was
+ *     writing the divisor, so interrupts ended up off by accident rather than by
+ *     decision.
+ *   - Two bytes were transmitted to the serial port on every boot: the NUL from
+ *     the IER write and the 0x80 from the DLAB write. That is the `00 80` at
+ *     the very front of every boot log, ahead of anything stage1 prints, and it
+ *     is why the first line of the log has two bytes of junk in it.
+ *
+ * Rewritten to address each register directly it is the same length, because
+ * writing 0x03 to the LCR clears DLAB and sets 8N1 in the same byte -- the
+ * separate "DLAB off" write at the end was redundant even when it reached the
+ * right port.
  * --------------------------------------------------------------------------- */
 serial_init:
 	pushw	%ax
 	pushw	%dx
-	movw	$com1, %dx
+	movw	$com1 + 1, %dx		/* IER */
 	xorb	%al, %al			/* interrupts off */
 	outb	%al, %dx
+	movw	$com1 + 3, %dx		/* LCR */
 	movb	$0x80, %al		/* DLAB on: divisor latch accessible */
 	outb	%al, %dx
-	movw	$com1 + 1, %dx
+	movw	$com1, %dx		/* divisor latch low */
 	movb	$0x01, %al		/* divisor low  = 1 */
 	outb	%al, %dx
 	movb	$0, %al			/* divisor high = 0 */
 	outb	%al, %dx
-	movw	$com1 + 3, %dx
-	movb	$0x03, %al		/* 8 data bits, no parity, 1 stop bit */
+	movw	$com1 + 3, %dx		/* LCR */
+	movb	$0x03, %al		/* 8 data bits, no parity, 1 stop bit,
+					 * and bit 7 clear: DLAB off */
 	outb	%al, %dx
-	movb	$0x00, %al		/* DLAB off */
-	outb	%al, %dx
-	movw	$com1 + 2, %dx
+	movw	$com1 + 2, %dx		/* FCR */
 	movb	$0xc7, %al		/* FIFO enabled, cleared, 14-byte trigger */
 	outb	%al, %dx
-	movw	$com1 + 4, %dx
+	movw	$com1 + 4, %dx		/* MCR */
 	movb	$0x0b, %al		/* DTR | RTS | OUT2 */
 	outb	%al, %dx
 	popw	%dx
 	popw	%ax
 	ret
 
-/* ---------------------------------------------------------------------------
- * putc — write the character in AL to COM1.
- *
- * Polls the line status register for THR-empty. The bounded spin is deliberate:
- * at 115200 baud a byte takes about 87 us to shift out, so the full 16-bit
- * budget is roughly a second of slack. If the UART never becomes ready the
- * character is dropped and booting continues, because wedging the machine with
- * no way to report anything is strictly worse than a garbled log line.
- * --------------------------------------------------------------------------- */
+/*
+ * putc -- write AL to COM1, polling LSR.THRE. The spin is bounded; if the UART
+ * never becomes ready the character is dropped, because wedging the machine
+ * with no way to report anything is worse than a garbled log line.
+ */
 putc:
 	pushw	%ax
 	pushw	%dx
+	pushw	%cx
 	movb	%al, %ah			/* the spin below clobbers AL */
-	movw	$0xffff, %dx		/* spin budget */
+	movw	$com1 + 5, %dx		/* LSR -- NOT the spin counter */
+	movw	$0x2000, %cx
 .put_wait:
 	inb	%dx, %al
 	testb	$0x20, %al		/* LSR_THRE */
 	jnz	.put_ready
-	decw	%dx
-	jnz	.put_wait
+	loop	.put_wait
 	jmp	.put_done			/* UART wedged: discard and continue */
 .put_ready:
 	movw	$com1, %dx
 	movb	%ah, %al
 	outb	%al, %dx
 .put_done:
+	popw	%cx
 	popw	%dx
 	popw	%ax
 	ret

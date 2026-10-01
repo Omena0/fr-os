@@ -27,16 +27,28 @@ kernel_main(struct BootInfo *boot_info) {
 
 ```c
     early_serial_init();   // COM1 at 115200 8N1, direct port I/O
+                           // (stage 2 used 38400 on the same wire)
     early_printk("[early] Kernel started\n");
 ```
 
 ### Step 3 — Physical Memory Manager
 
 ```c
-    pmm_init(&boot_info->memory_map, boot_info->memory_map_count);
+    pmm_init(phys_of(boot.e820_addr), boot.e820_count);
 ```
 
-The PMM parses the E820 map, builds the buddy allocator free lists, and makes memory available for allocation. The kernel image pages, boot page table pages, and the `BootInfo` structure are marked reserved before anything else.
+There is no `memory_map` array inside `struct bootinfo`. The struct carries the
+E820 map's *physical address* and entry count and nothing else about memory —
+`boot.h` defines it, and the kernel copies it out of the loader's memory before
+touching anything.
+
+`pmm_init()` parses the map, reserves its own metadata arena and the kernel image
+(`KERNEL_LANDING_ADDR .. phys(_ebss)`), builds the buddy free lists, and makes
+memory available. `main.c` then reserves `[0, 1 MiB)` separately, because the
+bootloader is still executing out of it.
+
+Stage 2's own bootstrap page tables at `0x2D0000` are **not** reserved by anyone,
+despite sitting just above the image. Finding #30.
 
 ### Step 4 — Virtual Memory Manager
 
@@ -58,7 +70,7 @@ Registers default slab caches for common kernel objects (`task_struct`, `file`, 
 
 ```c
     klog_init();
-    klog_info("kernel %s booting on %d CPUs", KERNEL_VERSION, boot_info->cpu_count);
+    klog_info("%s booting on %d CPUs", KERNEL_VERSION_STRING, cpu_features.logical_processors);
 ```
 
 The ring buffer, serial sink, and (later) framebuffer sink are activated. `early_printk` is replaced by `klog`.

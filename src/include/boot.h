@@ -105,10 +105,24 @@ struct e820_entry {
 } __attribute__((packed));
 
 /*
- * Framebuffer description. The shift values are byte offsets into a pixel, not
- * bit positions, because every framebuffer this runs against packs 32-bit
- * pixels; the kernel converts to bit shifts itself. Keeping the raw VBE mask
- * positions here as well would invite the two to disagree.
+ * Framebuffer description.
+ *
+ * `red_shift`, `green_shift` and `blue_shift` are *bit positions* of each
+ * channel within a 32-bit pixel, taken verbatim from the VBE mode info
+ * Red/Green/BlueMaskPosition fields (mode info offsets 0x34, 0x35 and 0x36,
+ * already shifted down by 3 as VBE specifies). The kernel uses them directly
+ * as shift amounts when extracting a pixel component and never converts.
+ *
+ * This comment previously said they were byte offsets that the kernel
+ * converted, which was wrong in a way that mattered: the bootloader was
+ * filling them from the RedMaskSize/GreenMaskSize/BlueMaskSize fields
+ * (offsets 0x31/0x32) instead of the positions, so a plain 32bpp mode came
+ * out as red=2 green=0 blue=1 rather than 16/8/0, and every pixel had its
+ * channels transposed. Size and position are different fields and reading one
+ * where the other belongs produces a plausible-looking wrong answer.
+ *
+ * The kernel assumes 32bpp throughout; a mode with a different pixel format
+ * is not accepted.
  */
 struct framebuffer_info {
 	uint64_t address;

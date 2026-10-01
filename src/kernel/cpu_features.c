@@ -36,6 +36,23 @@ static inline void cpuid_raw(uint32_t leaf, uint32_t sub,
 }
 
 /*
+ * Set one feature ID if the named CPUID register has the named bit set.
+ *
+ * The register and the bit are written out at every call site rather than being
+ * implied by the constant. That is the whole point: a constant that also carries
+ * its CPUID position invites exactly the bug this file had, where the constant
+ * said one register and the code read another, and nothing complained because
+ * both happened to be a plausible-looking `1u << n`.
+ */
+static inline void feat_set(uint64_t *f, uint32_t reg, uint32_t bit, uint64_t id)
+{
+	if (reg & (1u << bit))
+		*f |= id;
+}
+
+#define FEAT(reg, bit, id) feat_set(&f, (reg), (bit), (id))
+
+/*
  * Discover what the processor supports. Runs first in kernel_main, before any
  * subsystem is initialised, so every later decision (NX, SMEP, SMAP, TSC
  * deadline interrupts, 1 GiB pages) is based on what the machine reports
@@ -45,7 +62,6 @@ void cpu_features_init(void)
 {
 	uint32_t a, b, c, d;
 	uint32_t max_leaf, max_ext;
-	uint32_t cpuid_leaf, cpuid_sub;
 
 	cpuid_raw(CPUID_MAX_LEAF, 0, &max_leaf, &b, &c, &d);
 	cpu_features.max_leaf = max_leaf;
@@ -75,7 +91,18 @@ void cpu_features_init(void)
 		cpu_features.family = ((a >> 8) & 0xF) + ((a >> 20) & 0xF);
 		cpu_features.model = ((a >> 4) & 0xF) | ((a >> 16) & 0xF);
 		cpu_features.stepping = a & 0xF;
+		/*
+		 * EBX[23:16] is only defined when the hyper-threading bit
+		 * (EDX 28) is set; on a machine without it the field is reserved
+		 * and reads 0. Normalising here rather than at the print site is
+		 * deliberate: there are two printers of this field — this file and
+		 * main.c — and a `?: 1` fallback in only one of them is how two
+		 * prints of one field came to disagree within a single boot.
+		 */
 		cpu_features.logical_cpus = (b >> 16) & 0xFF;
+
+		if (!cpu_features.logical_cpus)
+			cpu_features.logical_cpus = 1;
 	}
 
 	cpuid_raw(CPUID_MAX_EXT_LEAF, 0, &max_ext, &b, &c, &d);
@@ -85,25 +112,44 @@ void cpu_features_init(void)
 		cpuid_raw(CPUID_EXT_FEATURES, 0, &a, &b, &c, &d);
 		cpu_features.extended_ecx = c;
 		cpu_features.extended_edx = d;
+	}
+
+	/*
+	 * Invariant TSC is CPUID.0x80000007 EDX bit 8.
+	 *
+	 * It is not CPUID.0x80000001 EDX bit 8, which is reserved and reads zero
+	 * — that is where this used to be read from, so `invariant_tsc` was
+	 * permanently false. It was invisible because the only print of it is
+	 * inside the `if (tsc_khz)` branch below, and tsc_khz was itself always
+	 * zero, so no boot had ever reached it.
+	 */
+	if (max_ext >= 0x80000007u) {
+		cpuid_raw(0x80000007u, 0, &a, &b, &c, &d);
 		cpu_features.invariant_tsc = (d >> 8) & 1;
 	}
 
 	/* Structured extended features. Leaf 7 subleaf 0 reports the maximum
 	 * input value for the leaf in EAX, so the subleaf walk has to be bounded
-	 * rather than trusting a fixed count. */
+	 * rather than trusting a fixed count. Only subleaf 0 is kept; the walk
+	 * exists to learn the bound, and the features below are all subleaf 0. */
 	if (max_leaf >= 7) {
 		uint32_t sub = 0;
 		uint32_t max_sub;
 
 		cpuid_raw(7, 0, &max_sub, &b, &c, &d);
-		while (sub <= max_sub) {
-			cpuid_raw(7, sub, &a, &b, &c, &d);
-			if (sub == 0) {
-				cpu_features.leaf7_ebx = b;
-				cpu_features.leaf7_ecx = c;
-				cpu_features.leaf7_edx = d;
+
+		if (max_sub > 0) {
+			uint32_t max_clamped = max_sub > 8 ? 8 : max_sub;
+
+			while (sub <= max_clamped) {
+				cpuid_raw(7, sub, &a, &b, &c, &d);
+				if (sub == 0) {
+					cpu_features.leaf7_ebx = b;
+					cpu_features.leaf7_ecx = c;
+					cpu_features.leaf7_edx = d;
+				}
+				sub++;
 			}
-			sub++;
 		}
 	}
 
@@ -136,69 +182,135 @@ void cpu_features_init(void)
 		}
 	}
 
-	/* TSC frequency. CPUID 0x15 reports a crystal ratio where available; fall
-	 * back to CPUID 0x16 (processor frequency in MHz) and finally to
-	 * calibration against the PIT. */
+	/* TSC frequency. CPUID 0x15 reports a crystal ratio where available. The comment
+	 * used to promise a fallback "to CPUID 0x16 and finally to calibration
+	 * against the PIT" that did not exist in the code; 0x16 reports a base
+	 * frequency, not the TSC, and a PIT calibration needs a delay loop that
+	 * has no place in code that runs before the scheduler exists. So there is
+	 * one source, and tsc_khz is 0 when it does not answer — which klog
+	 * already handles by printing no timestamp rather than dividing by it. */
 	cpu_features.tsc_khz = 0;
 	if (max_leaf >= CPUID_TSC) {
-		uint32_t denom = 0, numer = 0, crystal = 0;
+		uint32_t denom = 0, numer = 0, ecx = 0;
 
-		cpuid_raw(CPUID_TSC, 0, &a, &denom, &numer, &crystal);
-		if (denom && numer) {
-			/* Leaf 0x15 EAX is the crystal clock, EBX the denominator,
-			 * ECX the numerator. The ratio only describes the TSC when
-			 * EAX is non-zero. */
-			if (a != 0)
-				cpu_features.tsc_khz = (uint64_t)crystal * numer / denom;
-		}
+		cpuid_raw(CPUID_TSC, 0, &a, &denom, &numer, &ecx);
+		/*
+		 * Leaf 0x15: EAX is the crystal clock in Hz, EBX the denominator
+		 * and ECX the numerator of the TSC ratio.
+		 *
+		 * The old code read the multiplier from EDX, which this leaf does
+		 * not define and which comes back 0, so tsc_khz was 0 on every
+		 * machine and every klog timestamp read [    0.000 ...].
+		 */
+		if (a != 0 && denom != 0 && numer != 0)
+			cpu_features.tsc_khz = (uint64_t)a * numer / denom;
 	}
 
 	cpu_features.hypervisor = (cpu_features.basic_ecx >> 31) & 1;
 	cpu_features.apic = (cpu_features.basic_edx >> 9) & 1;
-	cpu_features.tsc_deadline_timer = (cpu_features.basic_edx >> 24) & 1;
+	cpu_features.tsc_deadline_timer = (cpu_features.basic_ecx >> 24) & 1;
+	/*
+	 * 1 GiB pages live at 0x80000001 EDX bit 26. vmm.c reads
+	 * has_1gb_pages before mapping a PDPT entry with PS=1, and nothing ever
+	 * set the field, so the 1 GiB path was dead on every machine and main.c
+	 * printed has_1gb_pages=0 as though the CPU had been asked.
+	 */
+	cpu_features.has_1gb_pages = (cpu_features.extended_edx >> 26) & 1;
 
-	/* Assemble the feature mask the rest of the kernel queries. */
+	/*
+	 * The feature mask: one bit per feature ID, grouped by the CPUID leaf
+	 * register the feature comes from. Each line below names the register and
+	 * the CPUID bit explicitly rather than letting a constant imply them —
+	 * the old code folded four leaves into one bit namespace by reusing the
+	 * CPUID bit number as the mask bit, so nine bit positions carried two or
+	 * three different meanings and a feature from one leaf answered for a
+	 * feature from another. Seven of the old constants also named a register
+	 * the code never read (AVX, SSE, SSE2, ERMS, ERMS2, FSRM, SHA), so those
+	 * bits were reporting whatever unrelated feature happened to occupy the
+	 * same position. See the block comment in cpu_features.h.
+	 */
 	uint64_t f = 0;
 
-	if (cpu_features.basic_edx & CPU_FEATURE_FPU) f |= CPU_FEATURE_FPU;
-	if (cpu_features.basic_edx & CPU_FEATURE_TSC) f |= CPU_FEATURE_TSC;
-	if (cpu_features.basic_edx & CPU_FEATURE_MSR) f |= CPU_FEATURE_MSR;
-	if (cpu_features.basic_edx & CPU_FEATURE_PAE) f |= CPU_FEATURE_PAE;
-	if (cpu_features.basic_edx & CPU_FEATURE_CX8) f |= CPU_FEATURE_CX8;
-	if (cpu_features.basic_edx & CPU_FEATURE_APIC) f |= CPU_FEATURE_APIC;
-	if (cpu_features.basic_edx & CPU_FEATURE_PGE) f |= CPU_FEATURE_PGE;
-	if (cpu_features.basic_edx & CPU_FEATURE_PAT) f |= CPU_FEATURE_PAT;
-	if (cpu_features.basic_edx & CPU_FEATURE_NX) f |= CPU_FEATURE_NX;
-	if (cpu_features.basic_edx & CPU_FEATURE_TSD_DEADLINE)
-		f |= CPU_FEATURE_TSD_DEADLINE;
-	if (cpu_features.basic_ecx & CPU_FEATURE_SSE) f |= CPU_FEATURE_SSE;
-	if (cpu_features.basic_ecx & CPU_FEATURE_SSE2) f |= CPU_FEATURE_SSE2;
-	if (cpu_features.extended_ecx & CPU_FEATURE_ERMS) f |= CPU_FEATURE_ERMS;
-	if (cpu_features.extended_ecx & CPU_FEATURE_FSRM) f |= CPU_FEATURE_FSRM;
-	if (cpu_features.extended_ecx & CPU_FEATURE_POPCNT) f |= CPU_FEATURE_POPCNT;
-	if (cpu_features.extended_ecx & CPU_FEATURE_LZCNT) f |= CPU_FEATURE_LZCNT;
-	if (cpu_features.leaf7_ebx & CPU_FEATURE_AVX) f |= CPU_FEATURE_AVX;
-	if (cpu_features.leaf7_ebx & CPU_FEATURE_BMI1) f |= CPU_FEATURE_BMI1;
-	if (cpu_features.leaf7_ebx & CPU_FEATURE_AVX2) f |= CPU_FEATURE_AVX2;
-	if (cpu_features.leaf7_ebx & CPU_FEATURE_BMI2) f |= CPU_FEATURE_BMI2;
-	if (cpu_features.leaf7_ebx & CPU_FEATURE_ERMS2) f |= CPU_FEATURE_ERMS2;
-	if (cpu_features.leaf7_ebx & CPU_FEATURE_AVX512F) f |= CPU_FEATURE_AVX512F;
-	if (cpu_features.leaf7_ebx & CPU_FEATURE_AVX512DQ) f |= CPU_FEATURE_AVX512DQ;
-	if (cpu_features.leaf7_ebx & CPU_FEATURE_AVX512BW) f |= CPU_FEATURE_AVX512BW;
-	if (cpu_features.leaf7_ebx & CPU_FEATURE_AVX512VL) f |= CPU_FEATURE_AVX512VL;
-	if (cpu_features.leaf7_ebx & CPU_FEATURE_CLFLUSHOPT)
-		f |= CPU_FEATURE_CLFLUSHOPT;
-	if (cpu_features.leaf7_ebx & CPU_FEATURE_CLWB) f |= CPU_FEATURE_CLWB;
-	if (cpu_features.leaf7_ecx & CPU_FEATURE_RDPID) f |= CPU_FEATURE_RDPID;
-	if (cpu_features.leaf7_ecx & CPU_FEATURE_AVX_VNNI) f |= CPU_FEATURE_AVX_VNNI;
-	if (cpu_features.leaf7_edx & CPU_FEATURE_SHA) f |= CPU_FEATURE_SHA;
+	/* CPUID leaf 1, EDX */
+	FEAT(cpu_features.basic_edx, 0, CPU_FEATURE_FPU);
+	FEAT(cpu_features.basic_edx, 4, CPU_FEATURE_TSC);
+	FEAT(cpu_features.basic_edx, 5, CPU_FEATURE_MSR);
+	FEAT(cpu_features.basic_edx, 6, CPU_FEATURE_PAE);
+	FEAT(cpu_features.basic_edx, 7, CPU_FEATURE_MCE);
+	FEAT(cpu_features.basic_edx, 8, CPU_FEATURE_CX8);
+	FEAT(cpu_features.basic_edx, 9, CPU_FEATURE_APIC);
+	FEAT(cpu_features.basic_edx, 11, CPU_FEATURE_SEP);
+	FEAT(cpu_features.basic_edx, 12, CPU_FEATURE_MTRR);
+	FEAT(cpu_features.basic_edx, 13, CPU_FEATURE_PGE);
+	FEAT(cpu_features.basic_edx, 16, CPU_FEATURE_PAT);
+	FEAT(cpu_features.basic_edx, 19, CPU_FEATURE_CLFLUSH);
+	FEAT(cpu_features.basic_edx, 24, CPU_FEATURE_FXSR);
+	FEAT(cpu_features.basic_edx, 25, CPU_FEATURE_SSE);
+	FEAT(cpu_features.basic_edx, 26, CPU_FEATURE_SSE2);
+	FEAT(cpu_features.basic_edx, 28, CPU_FEATURE_HT);
+
+	/* CPUID leaf 1, ECX */
+	FEAT(cpu_features.basic_ecx, 0, CPU_FEATURE_SSE3);
+	FEAT(cpu_features.basic_ecx, 13, CPU_FEATURE_CX16);
+	FEAT(cpu_features.basic_ecx, 23, CPU_FEATURE_POPCNT);
+	FEAT(cpu_features.basic_ecx, 24, CPU_FEATURE_TSC_DEADLINE);
+	FEAT(cpu_features.basic_ecx, 26, CPU_FEATURE_XSAVE);
+	FEAT(cpu_features.basic_ecx, 27, CPU_FEATURE_OSXSAVE);
+	FEAT(cpu_features.basic_ecx, 28, CPU_FEATURE_AVX);
+	FEAT(cpu_features.basic_ecx, 31, CPU_FEATURE_HYPERVISOR);
+
+	/* CPUID 0x80000001, ECX */
+	FEAT(cpu_features.extended_ecx, 0, CPU_FEATURE_LAHF_LAM);
+	FEAT(cpu_features.extended_ecx, 5, CPU_FEATURE_ABM);
+	FEAT(cpu_features.extended_ecx, 6, CPU_FEATURE_SSE4A);
+	FEAT(cpu_features.extended_ecx, 9, CPU_FEATURE_OSVW);
+
+	/*
+	 * CPUID 0x80000001, EDX. NX is bit 20 of THIS register. Testing bit 20 of
+	 * leaf 1 EDX instead — which is reserved and reads 0 on every part ever
+	 * made — is what made the kernel print "no NX support" on machines plainly
+	 * running with EFER.NXE set.
+	 */
+	FEAT(cpu_features.extended_edx, 11, CPU_FEATURE_SYSCALL);
+	FEAT(cpu_features.extended_edx, 19, CPU_FEATURE_MP);
+	FEAT(cpu_features.extended_edx, 20, CPU_FEATURE_NX);
+	FEAT(cpu_features.extended_edx, 22, CPU_FEATURE_MMXEXT);
+	FEAT(cpu_features.extended_edx, 25, CPU_FEATURE_FXSR_OPT);
+	FEAT(cpu_features.extended_edx, 26, CPU_FEATURE_GBPAGES);
+	FEAT(cpu_features.extended_edx, 27, CPU_FEATURE_RDTSCP);
+	FEAT(cpu_features.extended_edx, 29, CPU_FEATURE_LM);
+
+	/* CPUID leaf 7 subleaf 0, EBX */
+	FEAT(cpu_features.leaf7_ebx, 0, CPU_FEATURE_FSGSBASE);
+	FEAT(cpu_features.leaf7_ebx, 3, CPU_FEATURE_BMI1);
+	FEAT(cpu_features.leaf7_ebx, 4, CPU_FEATURE_HLE);
+	FEAT(cpu_features.leaf7_ebx, 5, CPU_FEATURE_AVX2);
+	FEAT(cpu_features.leaf7_ebx, 7, CPU_FEATURE_SMEP);
+	FEAT(cpu_features.leaf7_ebx, 8, CPU_FEATURE_BMI2);
+	FEAT(cpu_features.leaf7_ebx, 9, CPU_FEATURE_ERMS);
+	FEAT(cpu_features.leaf7_ebx, 10, CPU_FEATURE_INVPCID);
+	FEAT(cpu_features.leaf7_ebx, 11, CPU_FEATURE_RTM);
+	FEAT(cpu_features.leaf7_ebx, 16, CPU_FEATURE_AVX512F);
+	FEAT(cpu_features.leaf7_ebx, 17, CPU_FEATURE_AVX512DQ);
+	FEAT(cpu_features.leaf7_ebx, 23, CPU_FEATURE_CLFLUSHOPT);
+	FEAT(cpu_features.leaf7_ebx, 24, CPU_FEATURE_CLWB);
+	FEAT(cpu_features.leaf7_ebx, 29, CPU_FEATURE_SHA);
+	FEAT(cpu_features.leaf7_ebx, 30, CPU_FEATURE_AVX512BW);
+	FEAT(cpu_features.leaf7_ebx, 31, CPU_FEATURE_AVX512VL);
+
+	/* CPUID leaf 7 subleaf 0, ECX */
+	FEAT(cpu_features.leaf7_ecx, 16, CPU_FEATURE_LA57);
+	FEAT(cpu_features.leaf7_ecx, 22, CPU_FEATURE_RDPID);
+
+	/* CPUID leaf 7 subleaf 0, EDX */
+	FEAT(cpu_features.leaf7_edx, 4, CPU_FEATURE_FSRM);
+	FEAT(cpu_features.leaf7_edx, 14, CPU_FEATURE_SERIALIZE);
 
 	cpu_features.feature_mask = f;
 
 	klog(KLOG_INFO, "cpu: family %u model %u stepping %u, %u logical processors, %u numa nodes\n",
 	     cpu_features.family, cpu_features.model, cpu_features.stepping,
-	     cpu_features.logical_cpus ? cpu_features.logical_cpus : 1,
-	     cpu_features.numa_nodes);
+	     cpu_features.logical_cpus, cpu_features.numa_nodes);
 
 	if (cpu_features.hypervisor)
 		klog(KLOG_DEBUG, "cpu: running under a hypervisor\n");

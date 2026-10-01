@@ -53,5 +53,6 @@
 #define ECONNRESET      104
 #define ENOBUFS         105
 #define EADDRINUSE      98
+#define EOVERFLOW       75
 
 #endif /* UAPI_ERRNO_H */

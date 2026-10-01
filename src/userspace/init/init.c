@@ -1,10 +1,23 @@
 /*
- * init.c — PID 1, the interactive REPL.
+ * init.c — Fr Init, PID 1, the interactive REPL and the system bring-up.
  *
  * There is no login, no shell and no init in this kernel yet, so init has to
  * be all three: it announces itself, then reads commands from stdin forever
- * until that stream reaches EOF. Every byte it emits is tagged with "init: "
- * so a multiplexed console log still says which process said what.
+ * until that stream reaches EOF. Every byte it emits is tagged "Fr Init: " so
+ * a multiplexed console log still says which process said what.
+ *
+ * The name hierarchy, as the banners below use it:
+ *
+ *   Fr OS          the project -- Fr Init is one of its components
+ *     Fr Core      the kernel this process is executing on
+ *     Fr Init      this process: PID 1 and the system's bring-up
+ *     Fr Userland  the programs that run on top of Fr Init
+ *     Fr Libc      the C runtime both of the above are built with
+ *
+ * So init calls *itself* Fr Init, reports the project as Fr OS, and names the
+ * kernel as Fr Core. Printing KERNEL_VERSION_STRING -- which expands to "Fr
+ * Core 0.1.0" -- as this process's own identity is how userspace used to
+ * introduce itself as the kernel.
  *
  * Input-layer assumption (see echo_line below): getline() reads and returns a
  * line but performs no terminal echo of its own. Everything typed therefore
@@ -23,25 +36,7 @@
 #include <sys/auxv.h>
 #include <uapi/syscall.h>
 
-/*
- * time.h declares clock_gettime() and clockid_t but no clock id constants, and
- * unistd.h declares sysconf() but no _SC_* selectors. They are spelled out
- * here behind #ifndef so that this file keeps compiling until the libc agent
- * adds them to time.h/unistd.h, at which point the libc definitions win and
- * these fall away. The values are the POSIX ones and match Linux, which is
- * what the kernel's SYS_clock_gettime handler expects.
- */
-#ifndef CLOCK_REALTIME
-#define CLOCK_REALTIME  0
-#endif
-#ifndef CLOCK_MONOTONIC
-#define CLOCK_MONOTONIC 1
-#endif
-#ifndef _SC_NPROCESSORS_ONLN
-#define _SC_NPROCESSORS_ONLN 84
-#endif
-
-#define TAG "init: "
+#define TAG FR_INIT_NAME ": "
 
 #define MEM_SLOTS 512
 #define MEM_ROUNDS 200000UL
@@ -80,6 +75,13 @@ static void say(const char *fmt, ...)
  * and rewriting with "\b \b" is the only way to actually remove a glyph from
  * a terminal — a bare backspace just moves the cursor and leaves the old
  * character behind.
+ *
+ * The DEL and backspace cases are not hypothetical here. There is no line
+ * discipline on the input path, so the raw byte the keyboard or serial line
+ * produced is what getline() sees: a user who presses Backspace really does put
+ * 0x7f in the buffer, and this is the code that turns it back into a visible
+ * erase. It would be unreachable only if something upstream had already
+ * interpreted and consumed the key, and nothing does.
  */
 static void echo_line(const char *s)
 {
@@ -96,9 +98,12 @@ static void echo_line(const char *s)
 }
 
 /*
- * Split in place on runs of spaces and tabs. strtok() is not part of the libc
- * this kernel ships, and a shell needs argv-style splitting rather than the
- * token-at-a-time semantics strtok offers anyway.
+ * Split in place on runs of spaces and tabs into an argv-style vector.
+ *
+ * A shell needs argv splitting, not strtok's token-at-a-time interface, and it
+ * needs a bound on the argument count so a 32-slot vector on the stack cannot
+ * be overrun by a long line. strtok(3) does exist in this libc (string.c, over
+ * strtok_r) -- it is the shape that does not fit here, not its absence.
  */
 static int split(char *s, char **argv, int max)
 {
@@ -313,7 +318,8 @@ static void cmd_help(void)
 	say("commands:");
 	say("  help                 this list");
 	say("  echo <args...>       print the arguments, joined by single spaces");
-	say("  version              kernel version and git revision");
+	say("  version              %s, %s, and the %s it runs on",
+	    FR_INIT_NAME, FR_PROJECT_NAME, FR_CORE_NAME);
 	say("  mem                  %lu-round allocator benchmark", MEM_ROUNDS);
 	say("  time                 wall clock, monotonic clock and boot time");
 	say("  uptime               time since this process started");
@@ -326,6 +332,7 @@ static void cmd_help(void)
 static void cmd_lscpu(void)
 {
 	long abi, pagesz, nprocs;
+	unsigned cpu = 0, node = 0;
 
 	pagesz = getpagesize();
 	say("page size       %ld bytes", pagesz);
@@ -336,13 +343,12 @@ static void cmd_lscpu(void)
 	else
 		say("cpus online     unknown (sysconf returned %ld)", nprocs);
 
-	/*
-	 * getcpu(3) is deliberately not called: unistd.h does not declare it,
-	 * and the kernel-side syscall exists (SYS_getcpu) with no libc wrapper
-	 * exported. Calling it would mean declaring the prototype here, which
-	 * this program is not allowed to do.
-	 */
-	say("getcpu          unavailable, no libc wrapper is declared");
+	/* getcpu(3) is the one answer that comes from the kernel rather than
+	 * from a constant, so it is the one worth reporting here. */
+	if (getcpu(&cpu, &node) == 0)
+		say("running on      cpu %u, node %u", cpu, node);
+	else
+		say("running on      unknown (getcpu failed)");
 
 	abi = getauxval(AT_ABI_VERSION);
 	pagesz = getauxval(AT_PAGESZ);
@@ -395,8 +401,20 @@ static int dispatch(int argc, char **argv)
 			printf("%s%s", (i > 2) ? " " : "", argv[i]);
 		putchar('\n');
 	} else if (strcmp(argv[1], "version") == 0) {
-		say("%s (build %s, rev %s)", KERNEL_VERSION_STRING,
+		/*
+		 * Three names, in the order the hierarchy runs: this process, the
+		 * project it belongs to, and the kernel underneath both. The
+		 * kernel's own string is KERNEL_VERSION_STRING, which expands to
+		 * "Fr Core <version>" -- printing it as though it were this
+		 * process's identity is how userspace used to announce itself as
+		 * the kernel.
+		 */
+		say("%s %s (build %s, rev %s)", FR_INIT_NAME, KERNEL_VERSION,
 		    KERNEL_BUILD_STAMP, KERNEL_GIT_REV);
+		say("%s %s, running on %s", FR_PROJECT_NAME, KERNEL_VERSION,
+		    KERNEL_VERSION_STRING);
+		say("userspace       %s (pid 1), programs run as %s",
+		    FR_INIT_NAME, FR_USERLAND_NAME);
 	} else if (strcmp(argv[1], "mem") == 0) {
 		bench_mem();
 	} else if (strcmp(argv[1], "time") == 0) {
@@ -429,18 +447,22 @@ int main(void)
 	size_t cap = 0;
 	int rc;
 
-	printf("%s\n", TAG);
-	printf("%s%s (build %s, rev %s)\n", TAG, KERNEL_VERSION_STRING,
-	       KERNEL_BUILD_STAMP, KERNEL_GIT_REV);
-	printf("%spid %ld, page size %d bytes\n", TAG, (long)getpid(),
+	printf("%s%s %s (build %s, rev %s)\n", TAG, FR_INIT_NAME,
+	       KERNEL_VERSION, KERNEL_BUILD_STAMP, KERNEL_GIT_REV);
+	printf("%s%s %s -- pid %ld, page size %d bytes\n", TAG,
+	       FR_PROJECT_NAME, "system bring-up", (long)getpid(),
 	       getpagesize());
+	printf("%srunning on %s\n", TAG, KERNEL_VERSION_STRING);
 	printf("%stype 'help' for the command list, EOF to stop\n", TAG);
 
 	for (;;) {
 		int argc;
 		char *argv[32];
 
-		fputs("init> ", stdout);
+		/* The prompt is derived from FR_INIT_NAME rather than spelled
+		 * "init>", so it names the component the same way every other
+		 * line this process prints does. */
+		fputs(FR_INIT_NAME "> ", stdout);
 
 		rc = getline(&line, &cap, stdin);
 		if (rc < 0)

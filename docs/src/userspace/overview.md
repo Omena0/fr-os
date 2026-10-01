@@ -1,5 +1,12 @@
 # Userspace Overview
 
+> Three components live here, and the distinction matters: **Fr Init** is the
+> first userspace process and the system bring-up; **Fr Libc** is the C runtime
+> shared by the kernel and userland; **Fr Userland** is the set of programs that
+> run on top of Fr Init. All three are userspace. None of them currently starts
+> — see the "Not Implemented" section below and finding #121 in
+> [`../../../MEGA_AUDIT.md`](../../../MEGA_AUDIT.md).
+
 ## What "Userspace" Covers
 
 This section documents everything that runs in ring-3 as part of the OS distribution — the runtime libraries, process model, dynamic linker, C library, threading, and GUI stack.

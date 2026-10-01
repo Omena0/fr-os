@@ -29,8 +29,9 @@ In 64-bit mode, segment base/limit values are ignored (flat model). GDT entries 
 
 The table above is normative, not illustrative. Two of its rows look redundant and are not:
 
-- **Index 3 is a 32-bit descriptor that is never used to execute user code.** It exists because `SYSRET` derives CS and SS arithmetically from `STAR`, and the arithmetic only lands on the right pair if the ring-3 code base sits at index 3. See "Selector Arithmetic" below.
-- **Index 5 is the only user code descriptor actually executed.** `SYSRET` adds 16 to the `STAR` base, landing on index 5, which is 64-bit. `IRETQ`, which does no arithmetic and takes its selectors from the stack, is given index 5 explicitly.
+- **Index 3 is a 32-bit descriptor that is never used to execute user code *on the SYSRET path*.** It exists because `SYSRET` derives CS and SS arithmetically from `STAR`, and the arithmetic only lands on the right pair if the ring-3 code base sits at index 3. See "Selector Arithmetic" below.
+  **It is used on the SYSCALL path, and that is a live bug.** `SYSCALL` loads CS from `STAR[47:32] + 16`, which with `KERNEL_CODE_SELECTOR == 0x08` is `0x18` — index 3, a 32-bit descriptor — and loading a non-long code segment while `EFER.LMA = 1` raises `#GP`. Linux uses the same `STAR` value only because its index 3 is a 64-bit DPL-3 descriptor. Ours is not. See finding #58 in [`../../../MEGA_AUDIT.md`](../../../MEGA_AUDIT.md).
+- **Index 5 is the user code descriptor `SYSRET` and `IRETQ` actually execute.** `SYSRET` adds 16 to the `STAR` base, landing on index 5, which is 64-bit. `IRETQ`, which does no arithmetic and takes its selectors from the stack, is given index 5 explicitly.
 
 ### Selector Arithmetic
 
@@ -135,9 +136,18 @@ Page table entries carry a `U/S` (User/Supervisor) bit:
 - **U=0 (Supervisor)**: Page accessible only in ring 0. All kernel memory uses this.
 - **U=1 (User)**: Page accessible from ring 3.
 
-SMAP (Supervisor Mode Access Prevention) is enabled if the CPU supports it. SMAP causes a #GP fault if ring-0 code accesses a user page without first setting `AC` in RFLAGS (done only within explicit `copy_from_user`/`copy_to_user` wrappers).
+**Neither SMAP nor SMEP is enabled.** Both bits are defined
+(`CR4_SMEP`, `CR4_SMAP` in `src/kernel/include/cpu_features.h`) and neither is
+ever written to CR4. Until they are, a ring-3 process can read and write the
+kernel's per-CPU area: `MSR_GS_BASE` is programmed to `percpu_data`, a
+`GS`-relative access resolves through that MSR regardless of CPL, and both the
+kernel GS-base MSRs are set to the same value, which makes the syscall path's
+`swapgs` a no-op. So `movq %gs:0x0, %rax; movq 0x10(%rax), %rbx` in ring 3 reads
+`percpu_data[0].current` and writes it. This is a direct ring-3 → ring-0
+kernel-pointer-write primitive. See finding #61.
 
-SMEP (Supervisor Mode Execution Prevention) is enabled. SMEP prevents ring-0 code from executing pages marked as user-accessible. This blocks kernel-mode execution of userspace payloads.
+The kernel's own boot log reports it:
+`percpu: gs base verification failed`.
 
 ## Related Documents
 

@@ -23,8 +23,34 @@
 #define KERNEL_GIT_REV "unknown"
 #endif
 
+/*
+ * Branding.
+ *
+ * Fr OS is the project. It is assembled from six components, each named here
+ * once so that a banner, a panic, a sysconf or an init message can never drift
+ * from the others:
+ *
+ *   Fr OS         the project as a whole
+ *   Fr Core       the kernel
+ *   Fr Boot       the bootloader, which hands control to Fr Core
+ *   Fr Init       the first userspace process and the system bring-up
+ *   Fr Libc       the C runtime the kernel and Fr Userland share
+ *   Fr Userland   the programs that run on top of Fr Init
+ *
+ * The kernel's own name is FR_CORE_NAME: the thing that prints "Fr Core" is
+ * Fr Core, and the thing that prints "Fr OS" is the project, not a component.
+ * Keeping them separate is the point -- a kernel panic saying "Fr OS" would
+ * claim the whole system on fire when only one component is.
+ */
+#define FR_PROJECT_NAME  "Fr OS"
+#define FR_CORE_NAME     "Fr Core"
+#define FR_BOOT_NAME     "Fr Boot"
+#define FR_INIT_NAME     "Fr Init"
+#define FR_LIBC_NAME     "Fr Libc"
+#define FR_USERLAND_NAME "Fr Userland"
+
 /* The name the kernel knows itself by in panic output and the version
  * syscall. Deliberately a macro so a symbol table search finds every use. */
-#define KERNEL_VERSION_STRING KERNEL_VERSION
+#define KERNEL_VERSION_STRING FR_CORE_NAME " " KERNEL_VERSION
 
 #endif /* VERSION_H */

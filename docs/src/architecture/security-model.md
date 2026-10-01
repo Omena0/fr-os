@@ -53,11 +53,25 @@ Filters are inherited by child processes. A filter may only be made more restric
 
 ## Memory Protections
 
-- **ASLR**: Applied to executable, stack, and mmap regions. See [architecture/memory-layout.md](memory-layout.md).
-- **NX (No-Execute)**: All non-text pages are marked non-executable via page table NX bits.
-- **Stack canaries**: Compiler-inserted canary values protect stack frame return addresses.
-- **Guard pages**: Every thread stack has an unmapped guard page below its base; stack overflow triggers a fault rather than silent corruption.
-- **Hardened allocator**: The kernel heap allocator places guard regions between allocations and zeroes freed memory.
+None of the following is implemented. They are listed here because the rest of
+this document assumes them.
+
+- **ASLR**: not implemented — not for the executable load base, not for the stack,
+  not for `mmap`, and there is no KASLR. Every one of those is at a fixed address.
+  See [architecture/memory-layout.md](memory-layout.md).
+- **NX (No-Execute)**: no page table NX bit is set on any of the kernel's own
+  mappings. The direct map, the kernel window and the boot tables are all RWX, so
+  every `phys_to_virt()` alias of physical memory — including the frames backing
+  user VMAs — is executable. The kernel's own boot log says
+  `cpu: no NX support`. `vmm_map_page()` derives `PTE_NX` correctly from `VM_EXEC`;
+  nothing in the kernel asks for it.
+- **SMEP / SMAP**: not enabled. See [kernel/privilege-levels.md](../kernel/privilege-levels.md).
+- **Stack canaries**: the kernel is built `-fno-stack-protector`.
+- **Guard pages**: `kstack_alloc()` returns `base + PAGE_SIZE` from a
+  `size + PAGE_SIZE` allocation, so the "guard" is an ordinary mapped, writable
+  page. A kernel-stack overflow scribbles into the neighbouring vmalloc block.
+- **Hardened allocator**: `kmalloc` has no guard regions between allocations and
+  does not zero freed memory.
 
 ## User and Group Model
 

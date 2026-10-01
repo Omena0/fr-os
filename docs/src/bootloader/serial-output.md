@@ -9,11 +9,23 @@ The bootloader emits diagnostic messages to the serial port (COM1, `0x3F8`) duri
 Stage 2 initializes COM1 before emitting any output:
 
 ```
-Baud rate: 115200
+Baud rate: see below — it is not the same on every stage
 Data bits: 8
 Stop bits: 1
 Parity:    None
 FIFO:      Enabled (trigger level 14 bytes)
+
+| Component | Divisor | Baud |
+|---|---|---|
+| Fr Boot stage 1 | 1 | 115200 |
+| Fr Boot stage 2 | 3 | 38400 |
+| Fr Core serial driver | 1 | 115200 |
+
+All three drive COM1 on the same wire at three different speeds, so a real serial
+capture is a mixture of two baud rates. QEMU's `-chardev file` ignores the rate
+entirely, which is why nobody has noticed. Fixing it means picking one rate and
+using it everywhere; the kernel should keep 115200 because that is what stage 1
+already established.
 ```
 
 Initialization sequence (direct port I/O):

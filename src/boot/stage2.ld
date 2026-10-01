@@ -20,9 +20,16 @@ ENTRY(stage2_entry)
  * the two copies disagreeing would still be wrong -- so the asserts are
  * written to catch a layout change in either file.
  *
- * BOUNCE_ADDR is 0x20000 and the stack occupies 0xC800-0x20000. The stage2
- * image shares the low gap with nothing, so it can grow to 0xC800 without
- * meeting the stack, and the stack has 72 KiB rather than 10. */
+ * The numbers below, and what they mean:
+ *
+ *   0x008000  stage2 image (.text, .trampoline, .rodata, .data, .bss)
+ *   0x00E000  STACK32_ADDR: the bottom of the 32-bit loader stack
+ *   0x020000  STACK32_TOP == BOUNCE_ADDR: the top of that stack, and the
+ *             start of the window the firmware reads each sector into
+ *
+ * So the stack is 0x12000 = 72 KiB, and the image gets the 24 KiB below it.
+ * stack32_top landing exactly on BOUNCE_ADDR is deliberate and is the only
+ * safe arrangement at the top end -- see the ASSERT further down. */
 BOUNCE_ADDR = 0x20000;
 STACK32_ADDR = 0xE000;
 STACK32_TOP = 0x20000;
@@ -121,17 +128,29 @@ SECTIONS
 	ASSERT(stack32 > __bss_end,
 	       "loader stack overlaps the stage2 image")
 	/*
-	 * The gap, not the ceiling. stack32_top landing exactly on BOUNCE_ADDR
-	 * satisfies a "<=" test and is still wrong: the first push writes at
-	 * stack32_top - 4, which is inside the bounce window, and the loader
-	 * destroys the sector the firmware just read before anything looks at
-	 * it. Every sector the ELF parser sees is then whatever the last call
-	 * frame left behind -- an E820 map of zeroes, phdrs that parse as
-	 * "no loadable segments". The check has to leave a gap, not merely
-	 * avoid an overlap.
+	 * The gap, not the ceiling -- and equality is what is wanted here, not a
+	 * gap. The stack grows *down*, so stack32_top is its highest address and
+	 * the first push writes at stack32_top - 4, which is inside the stack
+	 * region and nowhere near the bounce window that begins at
+	 * stack32_top. `stack32_top == BOUNCE_ADDR` is therefore exactly right:
+	 * the stack uses every byte below the bounce buffer and not one byte
+	 * above it. It is the `<=` test below that would let the stack overlap
+	 * the bounce buffer if it were ever read the other way round, and the
+	 * comment that used to stand here argued the opposite -- that landing on
+	 * BOUNCE_ADDR put the first push "inside the bounce window", which is
+	 * what a stack growing *up* would do.
+	 *
+	 * The real hazard at this boundary is a *raised* top, not an equal one,
+	 * and that is what the test rejects: STACK32_TOP above BOUNCE_ADDR means
+	 * stack32 sits in the middle of the window the firmware reads each sector
+	 * into, so a sector is transferred correctly and then overwritten by the
+	 * loader's own call frame before anything looks at it. Every sector the
+	 * ELF parser sees is then whatever the last frame left behind -- an E820
+	 * map of zeroes, program headers that parse as "no loadable segments" --
+	 * and nothing anywhere reports an error.
 	 */
 	ASSERT(stack32_top <= BOUNCE_ADDR,
-	       "loader stack leaves no room below the BIOS bounce buffer")
+	       "loader stack overlaps the BIOS bounce buffer")
 	ASSERT(BOUNCE_ADDR == 0x20000,
 	       "BOUNCE_ADDR here disagrees with boot_layout.h")
 	ASSERT(STACK32_TOP == 0x20000,
@@ -197,6 +216,49 @@ SECTIONS
 	ASSERT(0x00005000 < 0x00007C00,
 	       "BIOS_VECTOR_ADDR overlaps stage1 or the real-mode stack")
 
+	/*
+	 * The real-mode half of the trampoline runs on a 16-bit stack, and the
+	 * two ends of that window are both owned by something else.
+	 *
+	 * At the top: stage1's image, 0x7C00-0x7DFF. bios_rm_stack_top has to be
+	 * *below* it, because the stack grows down from there and the trampoline
+	 * unconditionally writes at top-2 and top-4 before the firmware has done
+	 * anything at all. 0x7DFC is STAGE1_DRIVE_ADDR, so a top inside the MBR
+	 * destroys the boot-drive handover byte on the first BIOS call of every
+	 * boot -- and nothing notices, because stage2 has already copied the
+	 * drive into its own .bss by then.
+	 *
+	 * At the bottom: the BIOS_VECTOR_ADDR / BIOS_IVT_PTR slot at 0x5000-0x5007,
+	 * which is written immediately before every trip through the trampoline
+	 * and read by the 16-bit side. Overwriting it corrupts the vector and the
+	 * handler address for the call that is about to be made.
+	 */
+	ASSERT(bios_rm_stack_top <= 0x7C00,
+	       "trampoline real-mode stack grows down into the MBR")
+	ASSERT(bios_rm_stack_top >= 0x00005008,
+	       "trampoline real-mode stack reaches the BIOS vector slot")
+	ASSERT(bios_rm_stack_top < 0x10000,
+	       "trampoline real-mode stack must be nameable as SS:SP")
+
+	/*
+	 * The GDTR is loaded from 16-bit code with `lgdt (%si)` -- the GDT has to
+	 * be installed before the far jump that resolves CS through it, so it
+	 * cannot wait for the 32-bit side the way the IDT does -- and a 16-bit
+	 * register can only name an address below 64 KiB. %si therefore holds
+	 * stage2_gdt's address truncated to 16 bits, which is correct only while
+	 * the table really is in the low 64 KiB.
+	 *
+	 * Nothing else in this script establishes that: __bss_end is bounded
+	 * against the 0x10000 transfer window, but .rodata sits below .bss with
+	 * no bound of its own, and it is in .rodata that the GDT lives. A table
+	 * above 64 KiB is not a fault -- LGDT reads a 16-bit base and the CPU
+	 * fetches from it -- so this has to be a link error.
+	 */
+	ASSERT(stage2_gdt < 0x10000,
+	       "stage2_gdt must be below 64 KiB: it is loaded by lgdt (%si) from 16-bit code")
+	ASSERT(stage2_gdt + 32 <= 0x10000,
+	       "stage2_gdt must be below 64 KiB: it is loaded by lgdt (%si) from 16-bit code")
+
 	/DISCARD/ : {
 		*(.comment)
 		*(.note*)
@@ -237,3 +299,24 @@ bss_end   = __bss_end;
  */
 exc_stub_lo = exc_stub & 0xFFFF;
 exc_stub_hi = (exc_stub >> 16) & 0xFFFF;
+
+/*
+ * The same split for the 64-bit reporter.
+ *
+ * Needed because the two reporters cannot serve each other's mode. A 64-bit
+ * instruction stream decoded in compatibility mode is still a valid stream --
+ * `pushq %rax` reads as some other instruction entirely -- so a 64-bit gate
+ * installed while the CPU is 32-bit produces a fault that is walked into
+ * unrelated code and ends in the reporter's own halt loop, printing nothing.
+ * stage2_long.S therefore installs the 32-bit gates on its way up to the far
+ * jump and the 64-bit ones immediately after it, so that at every instant at
+ * which a fault can be taken, the gates name the stub that can run in the mode
+ * the CPU is in.
+ *
+ * boot_idt_set_64bit() in stage2.c does the same rewrite from C, and earlier
+ * rather than later; the assembly loops around the far jump are what make the
+ * pairing exact, because they bracket the transition instead of jumping the
+ * whole of it.
+ */
+exc_stub64_lo = exc_stub64 & 0xFFFF;
+exc_stub64_hi = (exc_stub64 >> 16) & 0xFFFF;

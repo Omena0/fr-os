@@ -7,16 +7,18 @@
  * geteuid, getgid, getegid, fchdir, truncate, getcwd, dup, dup2.
  *
  * getauxval searches the saved auxv (__libc_auxv set by crt1) for the type.
- * The kernel provides AT_PHDR, AT_PHNUM, AT_PAGESZ, AT_BASE, AT_ENTRY,
- * AT_UID, AT_EUID, AT_GID, AT_EGID, AT_ABI_VERSION, AT_NULL. No AT_RANDOM.
+ * The kernel publishes AT_PHDR, AT_PHNUM, AT_PAGESZ, AT_BASE, AT_ENTRY,
+ * AT_UID, AT_EUID, AT_GID, AT_RANDOM and AT_ABI_VERSION, terminated by
+ * AT_NULL (process.c build_user_stack). There is no AT_EGID.
  * sysconf handles _SC_PAGESIZE, _SC_NPROCESSORS_ONLN, _SC_PID_MAX,
  * _SC_USER_PROCESSES; others return -1/ENOSYS.
  * fork calls sys_fork (declared extern, kernel-side concurrent) and resets
- * allocator state and stdio in the child, then runs post-fork atexit handlers.
- * execve calls sys_execve (declared extern, not defined here).
+ * allocator state in the child.
+ * execve calls sys_execve (declared extern, defined in syscall.c).
  * sleep/usleep via sys_nanosleep with EINTR retry. pause is one nanosleep on
- * infinite request (documented simplification).
- * getcwd, unlink, rmdir, access, chdir, truncate return -1/ENOSYS (honest absences).
+ * an effectively infinite request (documented simplification).
+ * getcwd, unlink, rmdir, access, chdir, truncate, ftruncate return -1/ENOSYS
+ * (honest absences): there is no filesystem and no writable file behind an fd.
  */
 #include <unistd.h>
 #include <stdint.h>
@@ -32,7 +34,6 @@
 typedef uint32_t uid_t;
 typedef uint32_t gid_t;
 
-/* __MORE__ */
 
 /* Internal syscall wrappers (from syscall.c) */
 extern int sys_write(int fd, const void *buf, size_t count);
@@ -58,9 +59,26 @@ extern uid_t sys_getuid(void);
 extern uid_t sys_geteuid(void);
 extern gid_t sys_getgid(void);
 extern gid_t sys_getegid(void);
+extern int sys_getcpu(unsigned *cpu, void *cache);
+extern int sys_ioctl(int fd, unsigned long request, ...);
 
-/* Forward declarations */
-extern void *__libc_auxv;
+/* sys_mmap / sys_munmap / sys_mprotect live in syscall.c, which owns the ABI
+ * wrappers; they are redeclared here because sys/mman.h exposes only the public
+ * mmap/munmap/mprotect spellings. */
+extern void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd,
+		      off_t offset);
+extern int sys_munmap(void *addr, size_t length);
+extern int sys_mprotect(void *addr, size_t len, int prot);
+
+/* sys_exit terminates one task; sys_exit_group the process. _exit(2) is
+ * specified to do the first. */
+extern void sys_exit(int status) __attribute__((noreturn));
+
+/* crt1.c owns the process vector. The type here has to match its definition
+ * exactly: declaring it as `void *` compiled and linked, and was still a
+ * constraint violation (C11 6.2.7) that happened to be harmless because both
+ * are pointers. */
+extern unsigned long *__libc_auxv;
 extern void __libc_init(void);
 
 /* Reset allocator state after fork */
@@ -123,7 +141,6 @@ int ftruncate(int fd, off_t length)
 	return -1;
 }
 
-/* __MORE__ */
 
 int isatty(int fd)
 {
@@ -195,18 +212,33 @@ pid_t wait4(pid_t pid, int *wstatus, int options, void *rusage)
 
 void _exit(int status)
 {
-	sys_exit_group(status);
+	/*
+	 * SYS_exit, not SYS_exit_group: _exit(2) terminates the calling thread
+	 * and leaves the rest of the process alone. Reaching for exit_group
+	 * here is indistinguishable from exit() in every program that has one
+	 * thread -- which is all of them today -- and wrong in the first
+	 * program that has two.
+	 */
+	sys_exit(status);
 }
 
-/* __MORE__ */
 
 /* ------------------------------- time/sleep -------------------------------- */
 
+/*
+ * sleep returns the number of seconds left unslept, which is 0 when the sleep
+ * completed. The kernel only writes *rem on -EINTR, so the "did it finish?"
+ * question cannot be answered by reading rem afterwards -- that read an
+ * uninitialised stack frame. It is answered by whether nanosleep returned 0.
+ */
 int sleep(unsigned int seconds)
 {
 	struct timespec req = { .tv_sec = seconds, .tv_nsec = 0 };
-	struct timespec rem;
-	while (nanosleep(&req, &rem) == -1 && __errno == EINTR) {
+	struct timespec rem = { .tv_sec = 0, .tv_nsec = 0 };
+
+	while (nanosleep(&req, &rem) == -1) {
+		if (__errno != EINTR)
+			break;
 		req = rem;
 	}
 	return (int)rem.tv_sec;
@@ -215,7 +247,8 @@ int sleep(unsigned int seconds)
 int usleep(useconds_t usec)
 {
 	struct timespec req = { .tv_sec = usec / 1000000, .tv_nsec = (usec % 1000000) * 1000 };
-	struct timespec rem;
+	struct timespec rem = { .tv_sec = 0, .tv_nsec = 0 };
+
 	while (nanosleep(&req, &rem) == -1 && __errno == EINTR) {
 		req = rem;
 	}
@@ -239,16 +272,25 @@ int pause(void)
 
 /* -------------------------------- sysconf ---------------------------------- */
 
+/*
+ * _SC_PAGESIZE and the cpu count are answers, not queries: there is no
+ * scheduler interface on this target to ask, so _SC_NPROCESSORS_ONLN reports
+ * what the kernel was built for rather than what the machine has. Naming the
+ * selectors instead of repeating their numbers matters because the header's
+ * values are the POSIX ones, not an internal enumeration, and a program that
+ * passes _SC_NPROCESSORS_CONF must not silently get _SC_NPROCESSORS_ONLN.
+ */
 long sysconf(int name)
 {
 	switch (name) {
-	case 0:  /* _SC_PAGESIZE */
-		return 4096;
-	case 1:  /* _SC_NPROCESSORS_ONLN */
+	case _SC_PAGESIZE:
+		return (long)getpagesize();
+	case _SC_NPROCESSORS_ONLN:
+	case _SC_NPROCESSORS_CONF:
 		return 8;
-	case 5:  /* _SC_PID_MAX */
+	case _SC_PID_MAX:
 		return 32768;
-	case 4:  /* _SC_USER_PROCESSES */
+	case _SC_USER_PROCESSES:
 		return 64;
 	default:
 		__errno = ENOSYS;
@@ -258,7 +300,60 @@ long sysconf(int name)
 
 int getpagesize(void)
 {
-	return 4096;
+	/* AT_PAGESZ when the kernel published it, the build's page size
+	 * otherwise. It always publishes it, but a program that runs before
+	 * the auxv is walked should still get the right answer. */
+	long aux_pagesz = getauxval(AT_PAGESZ);
+
+	return aux_pagesz > 0 ? (int)aux_pagesz : 4096;
+}
+
+/* ----------------------------- cpu identity -------------------------------- */
+
+int getcpu(unsigned *cpu, unsigned *node)
+{
+	unsigned pair = 0;
+	int ret;
+
+	ret = sys_getcpu(&pair, NULL);
+	if (ret < 0)
+		return -1;
+	if (cpu)
+		*cpu = pair;
+	if (node)
+		*node = 0;   /* one NUMA node is the whole topology here */
+	return 0;
+}
+
+/* --------------------------- memory mapping -------------------------------- */
+
+void *mmap(void *addr, size_t length, int prot, int flags, int fd,
+	   off_t offset)
+{
+	return sys_mmap(addr, length, prot, flags, fd, offset);
+}
+
+int munmap(void *addr, size_t length)
+{
+	return sys_munmap(addr, length);
+}
+
+int mprotect(void *addr, size_t len, int prot)
+{
+	return sys_mprotect(addr, len, prot);
+}
+
+int ioctl(int fd, unsigned long request, ...)
+{
+	va_list ap;
+	void *argp;
+	int ret;
+
+	va_start(ap, request);
+	argp = va_arg(ap, void *);
+	va_end(ap);
+	ret = sys_ioctl(fd, request, argp);
+	return ret;
 }
 
 /* -------------------------------- getauxval -------------------------------- */

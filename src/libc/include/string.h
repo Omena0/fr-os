@@ -32,14 +32,14 @@ size_t strlcpy(char *dst, const char *src, size_t size);
 size_t strlcat(char *dst, const char *src, size_t size);
 int    strcasecmp(const char *a, const char *b);
 int    strncasecmp(const char *a, const char *b, size_t n);
+size_t strspn(const char *s, const char *accept);
+size_t strcspn(const char *s, const char *reject);
+char  *strtok(char *s, const char *delim);
+char  *strtok_r(char *s, const char *delim, char **save);
+char  *strerror(int errnum);
 
 #ifdef __cplusplus
 }
 #endif
-
-extern size_t strcspn(const char *s, const char *reject);
-extern size_t strspn(const char *s, const char *accept);
-extern char *strtok_r(char *s, const char *delim, char **save);
-extern char *strerror(int errnum);
 
 #endif /* STRING_H */

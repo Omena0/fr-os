@@ -445,7 +445,12 @@ static void console_newline(void)
 	cursor_y++;
 	scrollback++;
 
-	if (cursor_y >= vga_enabled ? VGA_ROWS : fb.rows) {
+	/* Parenthesis matters: "cursor_y >= vga_enabled ? A : B" parses as
+	 * "(cursor_y >= vga_enabled) ? A : B", which is a scroll on every
+	 * single line once the cursor is past column zero. */
+	uint32_t rows = vga_enabled ? VGA_ROWS : fb.rows;
+
+	if (cursor_y >= rows) {
 		if (vga_enabled)
 			vga_scroll();
 		if (console_fb_active())
@@ -463,31 +468,42 @@ static void console_newline(void)
 
 /* ------------------------------------------------------------- escapes ----- */
 
-static void handle_escape(char c)
+/*
+ * Feed one character to the escape parser.
+ *
+ * Returns true if the character was part of an escape sequence and must not
+ * also be printed. That distinction has to live in the return value: a CSI is
+ * delivered to this function one byte at a time, and every byte of it has
+ * already been handed to console_putc_attr by a caller that only looks at the
+ * state, which prints a literal "[2J" for console_clear().
+ */
+static bool handle_escape(char c)
 {
 	switch (esc_state) {
 	case ESC_NONE:
-		if (c == 0x1B)
+		if (c == 0x1B) {
 			esc_state = ESC_SEEN;
-		return;
+			return true;
+		}
+		return false;
 
 	case ESC_SEEN:
 		if (c == '[') {
 			esc_state = ESC_CSI;
 			esc_param_count = 0;
-			return;
+			return true;
 		}
 		/* ESC followed by anything else is a two-byte sequence we do not
 		 * implement. Drop it rather than printing the second byte. */
 		esc_state = ESC_NONE;
-		return;
+		return true;
 
 	case ESC_CSI:
 		if (c >= '0' && c <= '9') {
 			if (esc_param_count < sizeof(esc_params))
 				esc_params[esc_param_count] = c;
 			esc_param_count++;
-			return;
+			return true;
 		}
 		if (c == ';') {
 			/* Only the first parameter is used; a second one would be a
@@ -495,7 +511,7 @@ static void handle_escape(char c)
 			if (esc_param_count < sizeof(esc_params))
 				esc_params[esc_param_count] = 0;
 			esc_param_count++;
-			return;
+			return true;
 		}
 
 		esc_state = ESC_NONE;
@@ -528,7 +544,7 @@ static void handle_escape(char c)
 			}
 			if (console_fb_active())
 				console_fb_move(cursor_x, cursor_y);
-			return;
+			return true;
 			}
 		case 'J':       /* erase display */
 			if (vga_enabled)
@@ -537,17 +553,23 @@ static void handle_escape(char c)
 				console_fb_clear();
 			cursor_x = 0;
 			cursor_y = 0;
-			return;
+			return true;
 		case 'K':       /* erase line */
 			for (uint32_t x = cursor_x; x < VGA_COLS; x++)
 				vga_putc_at(x, cursor_y, ' ', current_attr);
-			return;
+			return true;
 		case 'm':       /* colour: ignore, the console has one attribute */
-			return;
+			return true;
 		default:
-			return;
+			/* An unknown final byte still ends a sequence, so it is
+			 * consumed rather than printed. */
+			return true;
 		}
 	}
+
+	/* Not reachable: every branch above returns. Present so the function has
+	 * a return on every path the compiler can see. */
+	return false;
 }
 
 /* ------------------------------------------------------------- public ------ */
@@ -556,12 +578,24 @@ void console_putc_attr(char c, uint8_t attr)
 {
 	if (c == '\n') {
 		console_newline();
+		/*
+		 * The screen backends get their line break from the cursor
+		 * movement above, but the serial port only ever sees the bytes
+		 * that are written to it. Consuming the newline without sending
+		 * it is what made the entire kernel log arrive as one
+		 * unbroken line, with the next message appended to the
+		 * previous one.
+		 */
+		if (serial_enabled)
+			serial_putc_blocking('\n');
 		return;
 	}
 	if (c == '\r') {
 		cursor_x = 0;
 		if (console_fb_active())
 			console_fb_move(0, cursor_y);
+		if (serial_enabled)
+			serial_putc_blocking('\r');
 		return;
 	}
 	if (c == '\t') {
@@ -576,6 +610,8 @@ void console_putc_attr(char c, uint8_t attr)
 			cursor_x--;
 		if (console_fb_active())
 			console_fb_move(cursor_x, cursor_y);
+		if (serial_enabled)
+			serial_putc_blocking('\b');
 		return;
 	}
 
@@ -603,11 +639,11 @@ void console_write(const char *s)
 	u64 flags = console_acquire();
 
 	for (; *s; s++) {
-		if (*s == 0x1B) {
-			handle_escape(*s);
+		/* The escape parser owns every byte it recognises. Printing
+		 * them as well is how console_clear() ends up writing a
+		 * literal "[2J" onto the screen it just cleared. */
+		if (handle_escape(*s))
 			continue;
-		}
-		handle_escape(*s);
 		console_putc_attr(*s, current_attr);
 	}
 
@@ -631,18 +667,19 @@ void kprintf(const char *fmt, ...)
 	__builtin_va_list ap;
 
 	__builtin_va_start(ap, fmt);
-
-	/* Format into a per-CPU buffer while the lock is held. This keeps the
-	 * lock region small (a memcpy of the finished text) instead of holding
-	 * it across the whole conversion, and avoids interleaving mid-line if two
-	 * CPUs print at once. */
-	char buf[1024];
-
 	kvprintf_to_console(fmt, ap);
 	__builtin_va_end(ap);
-	(void)buf;
 }
 
+/*
+ * Format and hand the finished text to the console.
+ *
+ * The conversion happens into a stack buffer first and console_write() takes
+ * the lock only for the write of that finished text, so the lock is never held
+ * across a conversion and two CPUs cannot interleave mid-line. The cost is a
+ * bounded one: a line longer than the buffer is truncated at the buffer size
+ * rather than overflowing, which is visible in the log instead of fatal.
+ */
 void kvprintf_to_console(const char *fmt, __builtin_va_list ap)
 {
 	char stack_buf[512];

@@ -508,6 +508,13 @@ struct vmalloc_block {
 	virt_addr_t start;
 	virt_addr_t end;
 	bool used;
+	/*
+	 * The physical run backing this block, and the buddy order it was
+	 * allocated at, so vfree() can hand it back. Only meaningful while
+	 * `used`.
+	 */
+	phys_addr_t frame;
+	unsigned order;
 };
 
 #define VMALLOC_MAX_BLOCKS 2048
@@ -546,29 +553,81 @@ static bool vmalloc_grow(size_t size)
 {
 	virt_addr_t start = vmalloc_brk;
 	unsigned at = vmalloc_block_count;
+	struct page *run = NULL;
+	phys_addr_t run_base = 0;
+	unsigned run_order = 0;
 
 	if (start + size > VMM_VMALLOC_END)
 		return false;
 
-	for (size_t off = 0; off < size; off += PAGE_SIZE) {
-		if (vmm_map_page(kernel_pgd, start + off, start + off,
-				 VM_READ | VM_WRITE)) {
-			/* Unwind. A partial mapping left behind would make the
-			 * next attempt collide with pages the array believes are
-			 * still free. */
-			while (off) {
-				off -= PAGE_SIZE;
-				vmm_unmap_page(kernel_pgd, start + off);
-			}
+	/*
+	 * One contiguous physical run, not a page at a time.
+	 *
+	 * This used to map `start + off` -- the *virtual* address -- as the
+	 * physical frame, with no allocator involved at all. VMM_VMALLOC_BASE is
+	 * 0xFFFFC00000000000, so 0xFFFFC00000000000 & 0x000FFFFFFFFFF000 is
+	 * 0x000FC00000000000: roughly 4 PiB, which is not RAM and is nowhere
+	 * near the 4 GiB direct map. Every byte vmalloc returned was backed by
+	 * nothing.
+	 *
+	 * Nothing faulted, which is why it survived. A vmalloc'd pointer is only
+	 * written through the direct map if something else happens to have put
+	 * it there, so the failure is silent and shows up elsewhere as unrelated
+	 * corruption. In practice it was pmm: unable to find a suitable run for
+	 * its own bitmaps, it fell back to vmalloc_raw and wrote its metadata into
+	 * whatever RAM occupied that address. The write succeeded, and took out
+	 * something else.
+	 *
+	 * A single buddy run also makes the error path honest. Allocating page by
+	 * page means an unwind has to recover every earlier frame from a mapping
+	 * that has not been written yet, which needs a PTE reader this code has no
+	 * business depending on. One run is one pmm_free_pages() call.
+	 */
+	{
+		size_t pages = (size + PAGE_SIZE - 1u) / PAGE_SIZE;
+		unsigned order = 0;
+		struct page *pg;
+		phys_addr_t base;
+
+		while (((size_t)1u << order) < pages)
+			order++;
+
+		pg = pmm_alloc_pages(order, GFP_KERNEL);
+		if (!pg)
 			return false;
+
+		base = page_to_phys(pg);
+		run = pg;
+		run_base = base;
+		run_order = order;
+
+		for (size_t off = 0; off < size; off += PAGE_SIZE) {
+			if (vmm_map_page(kernel_pgd, start + off,
+					 base + off, VM_READ | VM_WRITE)) {
+				/* Give the frames back. A partial mapping left
+				 * behind would collide with the next attempt's idea
+				 * of what is free. */
+				while (off) {
+					off -= PAGE_SIZE;
+					vmm_unmap_page(kernel_pgd, start + off);
+				}
+				pmm_free_pages(run, run_order);
+				return false;
+			}
 		}
+
 	}
 
 	if (block_insert(at, start, start + size, false)) {
 		for (size_t off = 0; off < size; off += PAGE_SIZE)
 			vmm_unmap_page(kernel_pgd, start + off);
+		pmm_free_pages(run, run_order);
 		return false;
 	}
+
+	/* block_insert() shifts the array, so these are written after it. */
+	vmalloc_blocks[at].frame = run_base;
+	vmalloc_blocks[at].order = run_order;
 
 	vmalloc_brk += size;
 	return true;
@@ -700,24 +759,46 @@ void vfree(void *addr)
 	if (!addr)
 		return;
 
+	unsigned i;
+	unsigned order = 0;
+	phys_addr_t frame = 0;
+	size_t span = 0;
+	int hit = 0;
+
 	flags = spinlock_irqsave(&vmalloc_lock);
-	for (unsigned i = 0; i < vmalloc_block_count; i++) {
+	for (i = 0; i < vmalloc_block_count; i++) {
 		if (vmalloc_blocks[i].used && vmalloc_blocks[i].start == virt) {
+			frame = vmalloc_blocks[i].frame;
+			order = vmalloc_blocks[i].order;
+			span = vmalloc_blocks[i].end - vmalloc_blocks[i].start;
 			vmalloc_blocks[i].used = false;
+			hit = 1;
 			break;
 		}
 	}
 	spinlock_unlock_irqrestore(&vmalloc_lock, flags);
 
 	/*
-	 * The mapping is left in place and the frames are not returned to pmm.
-	 * vmalloc serves long-lived objects, so the normal case is an allocation
-	 * that lives until exit; reclaiming would mean walking every PT covering
-	 * the range on every free, and a stale pointer would then read reused
-	 * memory instead of faulting. The cost is that a freed range stays
-	 * reserved, which is recorded here so the tradeoff is not rediscovered as
-	 * a leak.
+	 * Unmap and hand the frames back.
+	 *
+	 * This used to leave the mapping in place and return nothing to pmm, on
+	 * the reasoning that vmalloc serves long-lived objects so reclaiming costs
+	 * more than it saves. That reasoning was sound when the mapping was built
+	 * from the virtual address and there were no real frames to give back.
+	 * There are now: one contiguous buddy run per block, recorded in the block
+	 * itself. Keeping it would make vmalloc a permanent leak, and a stale
+	 * pointer into a freed range would read whatever got mapped next rather
+	 * than faulting -- which is the failure mode a guard is supposed to
+	 * prevent.
 	 */
+	if (!hit)
+		return;
+
+	for (size_t off = 0; off < span; off += PAGE_SIZE)
+		vmm_unmap_page(kernel_pgd, virt + off);
+
+	if (frame)
+		pmm_free_pages(phys_to_page(frame), order);
 }
 
 /* ------------------------------------------------- kernel stacks ----------- */

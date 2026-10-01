@@ -1,26 +1,79 @@
 
-# OS — Project Documentation
+# Fr OS — Project Documentation
 
-A POSIX-compatible, Linux-like operating system designed for QEMU, implementing a complete kernel, userspace environment, and system services from scratch.
+**Fr OS** is a POSIX-oriented, Linux-shaped hobby operating system for QEMU,
+written from scratch: a bootloader, a kernel, a C runtime and a userspace.
+
+The project is assembled from six named components. The names are macros in
+`src/include/version.h`, so no banner, panic message or init line can drift from
+another:
+
+| Component | What it is |
+|---|---|
+| **Fr OS** | The project as a whole |
+| **Fr Core** | The kernel |
+| **Fr Boot** | The bootloader, which hands control to Fr Core |
+| **Fr Init** | The first userspace process, and system bring-up |
+| **Fr Libc** | The C runtime the kernel and Fr Userland share |
+| **Fr Userland** | The programs that run on top of Fr Init |
+
+**Fr OS is the project; Fr Core is the kernel.** They are not interchangeable. A
+panic that says "Fr OS" would claim the whole system is down when only the kernel
+is, so the kernel's banner and panic path print Fr Core. `KERNEL_VERSION_STRING`
+is `FR_CORE_NAME " " KERNEL_VERSION`.
+
+## Read this before you trust a page
+
+This documentation tree describes three different things, mixed together:
+
+1. **What the code does.** Trustworthy.
+2. **What the code is meant to do.** Worth reading; the gap matters.
+3. **What a fully-featured operating system would do.** Several subsystems —
+   filesystems, networking, a GUI, ASLR, containers, compaction — are documented
+   in the present tense with no code behind them at all.
+
+Pages that describe category 3 say so. Where they do not, check
+[`../../MEGA_AUDIT.md`](../../MEGA_AUDIT.md) before writing code against a claim.
+It is a 177-finding source audit, and every finding carries a status line saying
+whether it is still open.
+
+The kernel boots; the system does not yet reach userspace. The audit's summary
+lists what blocks it, in order.
 
 ---
 
 ## Quick Start (QEMU)
 
 ```bash
-make all
+make clean && make -j8
 ./run.sh
 ```
 
-See [build/qemu-setup.md](build/qemu-setup.md) for full QEMU configuration details.
+`make clean` is not optional hygiene here. The dependency tracking in this tree
+has failed to rebuild an object after a header edit, and a stale object once
+looked like a memory-management bug for hours.
+
+See [build/qemu-setup.md](build/qemu-setup.md) for full QEMU configuration.
 
 ---
 
 ## System Overview
 
-The OS is structured as a monolithic kernel with optional loadable modules, a hybrid device driver architecture (minimal kernel-space core + userspace drivers), a full POSIX userspace, and an in-tree init system. All subsystems define an explicit fast path, a fallback path, and a concurrency strategy.
+Fr Core is a monolithic kernel. Target: x86-64, single core today, booted under
+QEMU with 4 GB of RAM.
 
-Target: x86-64, multi-core (tested on QEMU with KVM, 18 vCPUs, 4 GB RAM).
+Implemented and working: the boot chain, a 4 GiB direct map with 2 MiB pages, a
+higher-half kernel window, a buddy physical allocator, a SLAB allocator with
+per-CPU magazines, `vmalloc`, VMA management, the ELF loader, GDT/TSS/IDT, a
+panic path, a console with VGA and serial backends, a libc, and a userspace
+binary.
+
+Designed but not working: the scheduler's context switch and syscall return path
+(both have offset bugs the audit records), timers, `mmap`/`brk`, signals, and
+init.
+
+Not present at all: filesystems, networking, device drivers beyond serial, ASLR,
+NX on the kernel's own mappings, modules, security primitives.
 
 ---
 
@@ -29,8 +82,8 @@ Target: x86-64, multi-core (tested on QEMU with KVM, 18 vCPUs, 4 GB RAM).
 | Directory | Description |
 |---|---|
 | [architecture/](architecture/overview.md) | Top-level system design, subsystem relationships, ABI contracts, POSIX compliance scope, and the performance mandate |
-| [bootloader/](bootloader/overview.md) | Two-stage bootloader: stage1 (MBR/BIOS), stage2 (protected mode, kernel load, handoff) |
-| [kernel/](kernel/overview.md) | Core kernel: interrupt handling, context switching, privilege levels, module system, panic, logging |
+| [bootloader/](bootloader/overview.md) | Fr Boot: stage1 (MBR/BIOS), stage2 (protected mode, kernel load, handoff) |
+| [kernel/](kernel/overview.md) | Fr Core: interrupt handling, context switching, privilege levels, module system, panic, logging |
 | [scheduling/](scheduling/overview.md) | CPU scheduler: MLFQ (priority queues, aging, CPU accounting), real-time class, multicore load balancing, work-stealing |
 | [memory/](memory/overview.md) | Allocator hierarchy: buddy allocator → SLAB → virtual memory → userspace malloc; NUMA, huge pages, reclamation |
 | [filesystem/](filesystem/overview.md) | VFS abstraction layer, ext4-compatible implementation (journaling, extents), page/inode/dentry caches |
@@ -39,7 +92,7 @@ Target: x86-64, multi-core (tested on QEMU with KVM, 18 vCPUs, 4 GB RAM).
 | [security/](security/overview.md) | User/group model, capabilities, syscall filtering, ASLR, NX, stack canaries, namespaces |
 | [networking/](networking/overview.md) | IPv4/TCP stack, BSD socket API, raw sockets, low-copy buffering, userspace networking offload |
 | [syscalls/](syscalls/overview.md) | Stable versioned ABI, low-latency dispatch path, per-domain syscall tables (process, memory, file, IPC, socket, scheduling) |
-| [userspace/](userspace/overview.md) | Init system, service lifecycle, POSIX libc (IO, memory, threading), GUI program |
+| [userspace/](userspace/overview.md) | Fr Init, Fr Libc (IO, memory, threading), GUI program |
 | [debugging/](debugging/overview.md) | Kernel tracing, event logging, performance counters, serial diagnostics, observability API |
 | [build/](build/overview.md) | Toolchain setup, Makefile structure, QEMU configuration, cross-compilation, testing |
 
@@ -47,41 +100,37 @@ Target: x86-64, multi-core (tested on QEMU with KVM, 18 vCPUs, 4 GB RAM).
 
 ## Key Design Decisions
 
-- **Language**: Kernel and bootloader in C (C11) + x86-64 assembly. Userspace in C with POSIX libc.
-- **ABI**: Syscall ABI is versioned and stable; userspace code never needs to be rebuilt for kernel updates within a major version.
-- **Scheduler**: Unified scheduling model — kernel threads and user threads are scheduled identically by the MLFQ. Real-time threads occupy a separate priority class above all MLFQ queues.
-- **Memory**: Physical → virtual boundary is strictly enforced. Userspace never addresses physical memory directly.
-- **Drivers**: Userspace drivers communicate with the kernel via shared memory regions and event queues mapped through a stable driver ABI. A crash in a userspace driver does not panic the kernel.
-- **Security**: Default-deny capability model. All processes start with a minimal capability set; privileges are explicitly granted, never inherited implicitly.
-- **Networking**: The TCP/IP stack lives in kernel space but exposes a userspace networking offload interface for high-performance applications.
+- **Language**: Fr Core and Fr Boot in C (C11) + x86-64 assembly. Fr Userland in
+  C with Fr Libc.
+- **ABI**: the syscall ABI is *intended* to be versioned and stable. It is not
+  yet: there is no version negotiation at entry, no compat layer, and no userspace
+  binary built against the shipped header can run on the shipped kernel — the
+  libc needs a thread pointer the kernel never sets up.
+- **Memory**: physical and virtual are kept strictly separate except for DMA
+  allocations. The direct map covers 4 GiB.
+- **Serial-first diagnostics**: the serial port is the primary observation
+  channel. Every failure path before the framebuffer is reported over it.
 
 ---
 
 ## Component Dependency Map
 
-```tree
+```
 Hardware
-  └─ Bootloader (stage1 → stage2)
-       └─ Kernel (ELF loaded by stage2)
-            ├─ Memory Management (buddy → SLAB → VM → malloc)
-            ├─ Scheduler (MLFQ + RT + multicore)
+  └─ Fr Boot (stage1 → stage2)
+       └─ Fr Core (ELF loaded by Fr Boot, entered at its link address)
+            ├─ Memory Management (buddy → SLAB → vmalloc → VMA)
+            ├─ Scheduler (MLFQ + RT)
             ├─ Interrupt Handling → Context Switching
             ├─ Syscall Dispatch → POSIX ABI
-            ├─ VFS → ext4 → page cache
-            ├─ IPC (pipes, shared memory)
-            ├─ Device Driver Framework → drivers (display, input, storage)
-            ├─ Networking (IPv4/TCP/socket)
-            └─ Init (PID 1) → userspace services → GUI
+            ├─ Fr Libc (linked into the kernel and into userspace)
+            └─ Fr Init (PID 1) → Fr Userland
 ```
-
----
-
-## POSIX Compliance Scope
-
-Full compliance targets: process model (`fork`, `exec`, `wait`, `clone`), file descriptor abstraction, signal semantics, POSIX IO, POSIX threads (pthreads), and socket API. See [architecture/posix-compliance.md](architecture/posix-compliance.md) for the full conformance table.
 
 ---
 
 ## Performance Mandate
 
-Every subsystem documents a **fast path**, a **degraded path**, and a **concurrency strategy**. See [architecture/performance-mandate.md](architecture/performance-mandate.md) for the system-wide performance requirements and per-subsystem targets.
+Every subsystem is supposed to document a **fast path**, a **degraded path** and a
+**concurrency strategy**. See [architecture/performance-mandate.md](architecture/performance-mandate.md).
+The honesty of those documents varies; see the audit.

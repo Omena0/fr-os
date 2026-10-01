@@ -29,17 +29,14 @@ extern long __syscall5(long number, long a1, long a2, long a3, long a4, long a5)
 extern long __syscall6(long number, long a1, long a2, long a3, long a4, long a5,
 		       long a6);
 
-/* Convert a kernel return into a libc return. */
-static long check(long ret)
-{
-	if (ret < 0) {
-		__errno = (int)(-ret);
-		return -1;
-	}
-	return ret;
-}
-
-/* Like check but for value-returning syscalls where 0 is a valid result. */
+/*
+ * Convert a kernel return into a libc return.
+ *
+ * sys_brk is the one wrapper that does not come through here: brk(0) reports
+ * the current break and brk(addr) reports the *old* break on failure, so the
+ * caller has to see the raw value to tell those apart from "0" and from an
+ * error.
+ */
 static long check0(long ret)
 {
 	if (ret < 0) {
@@ -163,16 +160,34 @@ int sys_pipe(int pipefd[2])
 	return (int)check0(__syscall1(SYS_pipe, (long)pipefd));
 }
 
+/*
+ * Both of these are noreturn, and it has to be visible to callers rather than
+ * only true: exit(), _Exit() and abort() are declared _Noreturn, and a
+ * _Noreturn function that reaches its closing brace is undefined behaviour --
+ * the compiler is entitled to assume the end of the function is unreachable
+ * and to delete whatever it thinks only runs after the process is gone.
+ *
+ * SYS_exit terminates one task and SYS_exit_group terminates the process. Both
+ * are wired in the kernel's dispatch table. If either ever returns, the right
+ * answer is to stop here rather than fall back into the caller: continuing past
+ * exit() would run atexit handlers and stdio flushing twice, or, for _exit(),
+ * re-enter the caller's shutdown path.
+ */
+void sys_exit(int status) __attribute__((noreturn));
+void sys_exit_group(int status) __attribute__((noreturn));
+
 void sys_exit(int status)
 {
 	__syscall1(SYS_exit, status);
-	__builtin_unreachable();
+	for (;;)
+		__asm__ __volatile__("hlt");
 }
 
 void sys_exit_group(int status)
 {
 	__syscall1(SYS_exit_group, status);
-	__builtin_unreachable();
+	for (;;)
+		__asm__ __volatile__("hlt");
 }
 
 int sys_dup(int oldfd)
@@ -201,11 +216,16 @@ int sys_dup2(int oldfd, int newfd)
 
 int sys_execve(const char *path, char *const argv[], char *const envp[])
 {
-	/* execve only returns on failure; on success the process is replaced. */
-	int ret = (int)check0(__syscall3(SYS_execve, (long)path, (long)argv,
-					 (long)envp));
-	__builtin_unreachable();
-	return ret;
+	/*
+	 * Reached only when execve *failed*, which is the only way an exec can
+	 * return. It used to end in __builtin_unreachable(), which told the
+	 * compiler the branch was impossible -- so execve() of a path that does
+	 * not exist, a case the kernel reaches every time (it only accepts
+	 * /init, /bin/init and /sbin/init), was undefined behaviour with the
+	 * errno it had just set as the only evidence.
+	 */
+	return (int)check0(__syscall3(SYS_execve, (long)path, (long)argv,
+				     (long)envp));
 }
 
 pid_t sys_fork(void)

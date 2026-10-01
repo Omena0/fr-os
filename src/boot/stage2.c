@@ -54,11 +54,16 @@ static inline uint8_t inb(uint16_t port)
 }
 
 /*
- * The 8259 recognises a command only after four full bus cycles, and the
- * datasheet's recommended way to produce them is an I/O write to an unused
- * port. Without this, an outb to the UART immediately after a PIC command is
- * occasionally swallowed, and the symptom is an interrupt that is masked or
- * unmasked at random.
+ * Four full bus cycles, produced by an I/O write to a port nothing is attached
+ * to.
+ *
+ * Both legacy interrupt controllers need this and the 8042 needs it for the
+ * same reason: the 8259 recognises a command only after four cycles, and the
+ * keyboard controller latches its command on the trailing edge of the write
+ * that carries it. Without the settling time, the byte is occasionally ignored
+ * and the symptom is an interrupt -- or an A20 bit -- that changed state at
+ * random. This used to sit in this file with no caller; the A20 sequence below
+ * is what it is for.
  */
 static inline void io_wait(void)
 {
@@ -162,45 +167,7 @@ static void serial_putdec(uint64_t v)
 
 #define LOG(...) do { serial_puts("[boot2] " __VA_ARGS__); } while (0)
 
-/*
- * There is nowhere to return to. `fail` reports and halts rather than
- * returning, so every caller can treat it as noreturn and the compiler will
- * not keep values alive across it that are about to become meaningless.
- */
-static void fail(const char *what)
-{
-	serial_puts("[boot2] FATAL: ");
-	serial_puts(what);
-	serial_puts("\r\n");
-	stage2_halt();
-}
-
-/* ------------------------------------------------------------------ A20 ------ */
-
-/*
- * Enable the A20 gate.
- *
- * The 8042 path is the correct one, but it is also the one that can fail
- * silently, and the failure is not a crash: without A20 the CPU still runs
- * and only address lines above 20 are wrong, so the first symptom is a BIOS
- * call that returns a plausible-looking answer built from the wrong memory.
- * The polling loop below therefore has a bounded retry and reports rather
- * than waiting forever, which is what the original did.
- */
-static void a20_enable(void)
-{
-	/* 8042 command 0xD1: set the A20 bit in the port 0x92 value. */
-	outb(0x64, 0xAD);		/* disable keyboard */
-	outb(0x64, 0xD0);		/* read output port */
-	uint8_t status = inb(0x60);
-	outb(0x64, 0xD1);		/* write output port */
-	outb(0x60, status | 0x02);	/* A20 = bit 1 */
-	outb(0x64, 0xAE);		/* re-enable keyboard */
-
-	LOG("A20 enabled via 8042\r\n");
-}
-
-/* ------------------------------------------------------- BIOS trampoline ----- */
+/* ------------------------------------------------- BIOS call tripwires ------- */
 
 /*
  * Every firmware call goes through the trampoline in stage2_entry.S, which
@@ -214,11 +181,342 @@ static void a20_enable(void)
  * believing those registers were intact across a BIOS call that destroys every
  * one of them. An ordinary call states the truth: everything caller-saved is
  * destroyed.
+ *
+ * It hands back the firmware's EBX:EAX in EDX:EAX, which matters to every
+ * caller that has to know which register a result came in -- see e820_call().
  */
 extern uint64_t bios_call(uint32_t vector, uint32_t a, uint32_t b, uint32_t c,
 			  uint32_t d, uint32_t si, uint32_t di, uint32_t es);
 
-/* INT 13h/AH=08h answers the geometry in ECX and EDX rather than in a buffer,
+/* The name of the firmware service most recently entered. */
+static const char *diag_site;
+
+/* How many firmware round trips have been made. */
+static uint32_t diag_n;
+
+/* Clear the tripwire and count the call about to be made. */
+static inline void diag_tick(void)
+{
+	diag_n++;
+}
+
+/*
+ * There is nowhere to return to. `fail` reports and halts rather than
+ * returning, so every caller can treat it as noreturn and the compiler will
+ * not keep values alive across it that are about to become meaningless.
+ *
+ * The two extra lines it prints are the loader's only record of how far it got.
+ * Every firmware call in stage2 goes through a round trip that leaves real mode
+ * and comes back, and the failure mode of that round trip is silence: the log
+ * stops at the last line before the call and nothing says which service was
+ * being asked for. Naming the last service entered, and how many of them there
+ * have been, turns "the loader stopped" into a specific claim that can be
+ * checked -- and it costs two words and one counter.
+ */
+static void fail(const char *what)
+{
+	serial_puts("[boot2] FATAL: ");
+	serial_puts(what);
+	serial_puts("\r\n");
+	serial_puts("[boot2] last BIOS call: ");
+	serial_puts(diag_site ? diag_site : "(none)");
+	serial_puts(", call #");
+	serial_putdec(diag_n);
+	serial_puts("\r\n");
+	stage2_halt();
+}
+
+/* ------------------------------------------------------------------ A20 ------ */
+
+/*
+ * The three ways to open the A20 gate, and how to find out whether any of them
+ * worked.
+ *
+ * Nothing about a closed gate is a crash. The CPU keeps running, only address
+ * line 20 is held low, and every access between 1 MiB and 1 MiB + 1 MiB folds
+ * back down to the bottom of memory. Nothing faults, because every address
+ * involved resolves to something: the kernel copy lands on top of the real-mode
+ * IVT at physical zero, and the far jump afterwards lands in the middle of
+ * interrupt-vector bytes. So the only way to keep this from being a silent
+ * catastrophe is to ask, and the asking has to be a real test rather than "the
+ * outb returned".
+ */
+
+/* 8042 status/command and data ports. */
+#define PS2_STATUS 0x64
+#define PS2_DATA   0x60
+#define PS2_CMD_READ_OUTPUT_PORT  0xD0
+#define PS2_CMD_WRITE_OUTPUT_PORT 0xD1
+#define PS2_CMD_DISABLE_KEYBOARD  0xAD
+#define PS2_CMD_ENABLE_KEYBOARD   0xAE
+
+/* The fast A20 gate, system control port A. */
+#define PS2_FAST_GATE 0x92
+
+/* INT 15h proper. boot_layout.h only names the three services the rest of the
+ * loader asks for, and AH=2401 is the fourth; 0x15 is BIOS_INT_E820's vector
+ * too, but calling it by that name here would read as a copy-paste error. */
+#define BIOS_INT_MISC 0x15u
+
+/* 8042 status register bits, port 0x64. */
+#define PS2_STATUS_OBF 0x01	/* output buffer full: a byte is waiting */
+#define PS2_STATUS_IBF 0x02	/* input buffer full: a command is pending */
+
+static const uint32_t ps2_timeout = 100000u;
+
+/*
+ * Wait for the 8042 input buffer to drain, which is the only condition under
+ * which a command byte is accepted.
+ *
+ * Bounded, and bounded deliberately: a wedged 8042 is a machine with no
+ * keyboard controller rather than a loader that will never return, and the
+ * other two A20 methods still work on such a machine.
+ */
+static bool ps2_wait_input(void)
+{
+	for (uint32_t i = 0; i < ps2_timeout; i++)
+		if (!(inb(PS2_STATUS) & PS2_STATUS_IBF))
+			return true;
+	return false;
+}
+
+/* Write one command byte and wait for the controller to take it. */
+static bool ps2_command(uint8_t cmd)
+{
+	if (!ps2_wait_input())
+		return false;
+	outb(PS2_STATUS, cmd);
+	/* The controller latches the command on the trailing edge, so a bus
+	 * cycle has to pass before the input buffer empties. */
+	io_wait();
+	return ps2_wait_input();
+}
+
+/* Wait for a reply byte, and hand it back. False if none arrives. */
+static bool ps2_read_data(uint8_t *out)
+{
+	for (uint32_t i = 0; i < ps2_timeout; i++) {
+		if (inb(PS2_STATUS) & PS2_STATUS_OBF) {
+			*out = inb(PS2_DATA);
+			return true;
+		}
+	}
+	return false;
+}
+
+static bool ps2_write_data(uint8_t val)
+{
+	if (!ps2_wait_input())
+		return false;
+	outb(PS2_DATA, val);
+	io_wait();
+	return ps2_wait_input();
+}
+
+/*
+ * A byte at a fixed physical address, through inline asm rather than a
+ * dereferenced pointer.
+ *
+ * The addresses below are absolute and low, and GCC reads a dereference of a
+ * constant address like 0x500 as a null pointer: -Warray-bounds reports
+ * "array subscript 0 is outside array bounds of 'volatile uint8_t[0]'" and
+ * "source object is likely at address zero". The access is deliberate and the
+ * compiler has nothing to contribute to deciding it, so it is written as the
+ * instruction it is.
+ */
+static inline uint8_t phys_read8(uint32_t addr)
+{
+	uint8_t v;
+
+	__asm__ volatile("movb (%1), %0" : "=q"(v) : "r"(addr) : "memory");
+	return v;
+}
+
+static inline void phys_write8(uint32_t addr, uint8_t val)
+{
+	__asm__ volatile("movb %0, (%1)" : : "q"(val), "r"(addr) : "memory");
+}
+
+#define A20_TEST_LO 0x00000500u		/* below 1 MiB: the alias target */
+#define A20_TEST_HI 0x00100500u		/* 1 MiB + 0x500: the same byte
+					 * when the gate is closed */
+
+/*
+ * Is the gate actually open?
+ *
+ * 0x500 and 0x100500 are the same address while A20 is closed: the high one is
+ * 1 MiB + 0x500, and forcing address line 20 low turns it into 0x500. Both are
+ * ordinary RAM that stage2 owns nothing in, and the kernel image that later
+ * covers 0x100500 is not written yet, so the test is three writes and three
+ * reads with no lasting effect. A machine that cannot answer it has no memory
+ * above 1 MiB, which this loader could not use anyway -- the image lands at
+ * KERNEL_LANDING_ADDR -- so an inconclusive test is a real failure here rather
+ * than one to shrug at.
+ */
+static bool a20_is_open(void)
+{
+	/* Zero the high byte first: the two tests below are only conclusive if
+	 * the low write cannot be confused with data that was already there. */
+	phys_write8(A20_TEST_HI, 0x00);
+	phys_write8(A20_TEST_LO, 0x5A);
+	if (phys_read8(A20_TEST_HI) == 0x5A)
+		return false;	/* the low write showed up 1 MiB up: aliased */
+
+	phys_write8(A20_TEST_HI, 0xA5);
+	if (phys_read8(A20_TEST_LO) != 0x5A)
+		return false;	/* the high write showed up 1 MiB down: aliased */
+
+	return true;
+}
+
+/*
+ * Method one: the keyboard controller's output port.
+ *
+ * Bit 0 of that register is the system reset line, and its polarity is the
+ * opposite way round from the same bit in port 0x92. Here 1 means "running" and
+ * 0 means "reset the machine" -- an 8042 output port read on a machine that has
+ * finished booting has bit 0 set, and writing it back clear resets the CPU
+ * before the kernel exists. QEMU models it exactly this way
+ * (hw/input/pckbd.c: outport_write() calls qemu_system_reset_request() when
+ * !(val & 1)), and its default outport is 0xCF = reset-inactive | A20 | 0xCC.
+ *
+ * So bit 0 is not merely preserved, it is forced on, and everything else in
+ * the register is passed through untouched: those bits are the firmware's, and
+ * the two that matter to a different device -- bits 4 and 5 mirror the output
+ * buffer flags -- would corrupt the keyboard if they were rewritten.
+ *
+ * The keyboard is re-enabled on every path out of here, including the ones that
+ * gave up, so a refused A20 does not cost a working keyboard.
+ */
+static bool a20_enable_8042(void)
+{
+	uint8_t status = 0;
+	uint8_t verify = 0;
+	uint8_t want;
+	bool ok;
+
+	ps2_command(PS2_CMD_DISABLE_KEYBOARD);
+
+	ok = ps2_command(PS2_CMD_READ_OUTPUT_PORT) && ps2_read_data(&status);
+
+	/*
+	 * A second half of the same test as the OBF poll: the reply has to look
+	 * like an output port, and the one bit that says so is bit 0, because a
+	 * genuine read of a running machine's output port always has the reset
+	 * line inactive. No scancode byte has that property, so a controller
+	 * that answered with a keyboard byte instead of the register -- or with
+	 * nothing at all, in which case 0x60 returns the last byte read -- is
+	 * caught here rather than written back to the register.
+	 */
+	if (ok && (status & 0x01u) == 0) {
+		ok = false;
+		LOG("  8042 output port read back as 0x");
+		serial_puthex(status);
+		serial_puts("; not a port value\r\n");
+	}
+
+	if (ok) {
+		want = (uint8_t)(status | 0x02u);
+		ok = ps2_command(PS2_CMD_WRITE_OUTPUT_PORT) &&
+		     ps2_write_data(want);
+
+		/* Read the register back rather than believing the write. The
+		 * latch is shared with port 0x92, and which of the two doors a
+		 * chipset actually wires to the A20 line is not knowable from
+		 * out here -- so the 0x92 read below is a second witness. */
+		if (ok)
+			ok = ps2_command(PS2_CMD_READ_OUTPUT_PORT) &&
+			     ps2_read_data(&verify) && (verify & 0x02u) != 0;
+	}
+
+	ps2_command(PS2_CMD_ENABLE_KEYBOARD);
+
+	return ok && a20_is_open();
+}
+
+/*
+ * Method two: the fast gate.
+ *
+ * Bit 0 here is the *opposite* control to the 8042's: in port 0x92 a 1 is the
+ * CPU reset request and a 0 is normal, so this read-modify-write clears bit 0
+ * and sets bit 1. Copying the 8042's polarity here would reboot the machine
+ * instead of enabling A20.
+ */
+static bool a20_enable_fast_gate(void)
+{
+	uint8_t v = inb(PS2_FAST_GATE);
+
+	outb(PS2_FAST_GATE, (uint8_t)((v & (uint8_t)~0x01u) | 0x02u));
+
+	return (inb(PS2_FAST_GATE) & 0x02u) != 0;
+}
+
+/*
+ * Method three: INT 15h/AH=2401.
+ *
+ * bios_call hands back EBX:EAX and drops the carry flag, so the status the
+ * firmware puts in AH cannot be read from out here. The call is therefore
+ * only worth making as a last resort, and it is judged by the same alias test
+ * as the other two. BX selects which gate the firmware should use: 0 is the
+ * keyboard controller and 1 is port 92h, and which of the two a given BIOS
+ * honours is not knowable from here, so both are tried.
+ */
+static bool a20_enable_int15(void)
+{
+	for (uint32_t which = 0; which < 2u; which++) {
+		diag_site = "a20-int15";
+		diag_tick();
+
+		(void)bios_call(BIOS_INT_MISC, 0x2401u, which, 0u, 0u, 0, 0, 0);
+
+		if (a20_is_open())
+			return true;
+	}
+
+	return false;
+}
+
+static void a20_enable(void)
+{
+	if (a20_enable_8042()) {
+		LOG("A20 enabled via 8042\r\n");
+		return;
+	}
+
+	if (a20_enable_fast_gate()) {
+		LOG("A20 enabled via port 0x92 fast gate\r\n");
+		return;
+	}
+
+	if (a20_enable_int15()) {
+		LOG("A20 enabled via INT 15h/AH=2401\r\n");
+		return;
+	}
+
+	/*
+	 * Last word goes to the hardware rather than to the return values: some
+	 * chipsets only answer the alias test once the gate is open through
+	 * whatever mechanism the firmware used before stage2 ran.
+	 */
+	if (a20_is_open() || (inb(PS2_FAST_GATE) & 0x02u)) {
+		LOG("A20 already enabled by firmware\r\n");
+		return;
+	}
+
+	/*
+	 * Failing here is the point. A machine whose A20 gate will not open
+	 * cannot run this loader, and the alternative -- carrying on -- produces
+	 * a kernel image written over the interrupt vector table and a far jump
+	 * into it, with every access in between landing somewhere valid and
+	 * nothing reporting anything at all.
+	 */
+	fail("cannot enable the A20 address line");
+}
+
+/* ------------------------------------------------------- BIOS trampoline ----- */
+
+/* bios_call() itself is declared above, with the tripwires it is counted by.
+ * INT 13h/AH=08h answers the geometry in ECX and EDX rather than in a buffer,
  * so the trampoline parks them here rather than returning them. */
 extern uint32_t bios_ret_ecx;
 extern uint32_t bios_ret_edx;
@@ -237,89 +535,6 @@ struct gdt_pointer {
 
 extern struct gdt_pointer gdtr64;
 
-/*
- * The bootstrap IDT, and the 64-bit exception entry point.
- *
- * The table is built by stage2_entry.S with 16-byte entries because that is
- * what long mode requires, but its gates point at the 32-bit reporter: until
- * the far jump, the CPU is a 32-bit CPU and the 64-bit entry would decode as
- * nonsense. The timer interrupt is the thing that exposes this -- it fires
- * during the BIOS round trips, long after the last interrupt-enable
- * instruction, and the very first delivery walks a 64-bit function's
- * instruction stream in compatibility mode. The result is a jump into the
- * middle of unrelated bytes and a halt with no output, which looks exactly
- * like the loader deadlocking.
- *
- * So the gates are pointed at the 64-bit reporter at the last moment before
- * the transition, while the CPU is still 32-bit and can do it safely.
- */
-extern char boot_idt[];
-extern void exc_stub64(void);
-
-static void boot_idt_set_64bit(void)
-{
-	uint32_t off = (uint32_t)(uintptr_t)&exc_stub64;
-
-	for (unsigned vec = 0; vec < 256; vec++) {
-		uint8_t *g = (uint8_t *)boot_idt + (size_t)vec * 16u;
-
-		g[0] = (uint8_t)(off & 0xFF);
-		g[1] = (uint8_t)((off >> 8) & 0xFF);
-		g[2] = 0x08;			/* selector: 64-bit code segment */
-		g[3] = 0x00;
-		g[4] = 0x00;			/* IST 0 */
-		g[5] = 0x8E;			/* present, DPL 0, 64-bit interrupt gate */
-		g[6] = (uint8_t)((off >> 16) & 0xFF);
-		g[7] = (uint8_t)((off >> 24) & 0xFF);
-		/* bytes 8-15 stay zero: long mode requires offset[63:32] == 0 */
-	}
-}
-
-/* ------------------------------------------------------ BIOS call tracing --- */
-
-/*
- * Two words of tripwire state, and a per-call counter.
- *
- * These exist because the failure this loader had for a long time presented as
- * "the loader stopped making progress partway through reading the kernel",
- * with nothing on the serial port and no exception reported. The two checks
- * below are what turned that into a specific, checkable claim: that the
- * firmware's `iret` had come back to the wrong place, or come back with the
- * stack pointer somewhere other than where it was set up.
- */
-static uint32_t diag_n;
-
-static void diag_report(const char *what)
-{
-	serial_puts("\r\n[DIAG] ");
-	serial_puts(what);
-	serial_puts(" n=");
-	serial_putdec(diag_n);
-	serial_puts("\r\n");
-}
-
-/* Clear the tripwire and count the call about to be made. */
-static const char *diag_site;
-
-static inline void diag_tick(void)
-{
-	diag_n++;
-}
-
-/*
- * The tripwire itself.
- *
- * The trampoline writes BIOS_RM_STACK_TOP to bios_post_sp and a fixed pattern
- * to bios_iret_magic on the instruction after `lcallw *BIOS_IVT_PTR`, so both
- * words are zero here and both are non-zero the moment a call returns normally.
- * A call that never comes back leaves them zero, and the check below is the
- * difference between "the loader stopped" and "the firmware's iret returned to
- * the wrong address".
- */
-static inline void diag_check(uint32_t where)
-{
-	(void)where;
-}
 
 /* --------------------------------------------------------- CHS conversion --- */
 
@@ -526,10 +741,15 @@ static uint32_t e820_count;
  * all, and cannot tell from out here what happened: the call is refused, the
  * buffer keeps its poison, and the map comes back as whatever was there before.
  * So both are tried, and the one that answers is the one used.
+ *
+ * Return value: the index of the next entry, or 0 for "this was the last one".
+ * The two conventions have to be made to agree on that, because the caller
+ * has one loop and one stop test.
  */
 static uint32_t e820_call(uint32_t entry, uint32_t index)
 {
 	uint16_t es, di;
+	uint64_t r;
 
 	/* ES:DI has to name the entry being asked for, not the first one. A
 	 * single pair computed before the loop makes every call after the first
@@ -542,23 +762,38 @@ static uint32_t e820_call(uint32_t entry, uint32_t index)
 	diag_tick();
 
 	/* SeaBIOS / Ralf Brown form: signature in DX:BP, index in BX, buffer
-	 * at ES:DI. */
-	uint64_t r = bios_call(BIOS_INT_E820, 0xE820u, index, 24u,
-			       0x534D4150u, 0, di, es);
+	 * at ES:DI.
+	 *
+	 * The signature comes back in EAX and the next index in EBX, and
+	 * bios_call returns the firmware's EBX:EAX -- EBX in the *high* half of
+	 * the 64-bit result, EAX in the low one. Reading the signature out of the
+	 * low half and the index out of the high half is therefore not a choice
+	 * but a consequence of the ABI, and the reverse of it cannot match. */
+	r = bios_call(BIOS_INT_E820, 0xE820u, index, 24u,
+		      0x534D4150u, 0, di, es);
 
-
-	if ((uint32_t)(r & 0xFFFFFFFFu) == 0x534D4150u)
+	if ((uint32_t)r == 0x534D4150u)
 		return (uint32_t)(r >> 32);	/* EBX: next index, 0 on last */
 
-	/* Specification form: signature in EBX, linear buffer in EDX. The
-	 * map is above 64 KiB, so the buffer address has to go in EDX
-	 * and the answer comes back in AX with bit 19 set. */
+	/* Specification form: signature in EBX -- the high half again -- and the
+	 * buffer named by a linear address in EDX, so the map above 64 KiB is
+	 * reachable at all.
+	 *
+	 * There is no index in this convention: the firmware always fills the
+	 * buffer it is handed. What it does answer is "is there another entry",
+	 * in AX bit 19, and the bit is *set* when one follows. Reading it the
+	 * other way round ends the map after the first entry, which is
+	 * indistinguishable from a machine with 640 KiB of memory until the
+	 * allocator believes it. So the index the loop wants is manufactured
+	 * from `entry` here rather than read from anywhere. */
 	r = bios_call(BIOS_INT_E820, 0xE820u, 0x534D4150u, 24u,
 		      E820_ADDR + entry * sizeof(struct e820_entry), 0, 0, 0);
 
-	if ((r & 0xFFFFFFFFu) == 0x534D4150u && (r & (1ULL << 19)))
-		return 0;			/* no continuation */
+	if ((uint32_t)(r >> 32) == 0x534D4150u)
+		return ((uint32_t)r & (1u << 19)) ? entry + 1u : 0u;
 
+	/* Neither convention answered. The caller's poison is still in the
+	 * entry, which is how the loop below finds out. */
 	return 0;
 }
 
@@ -598,6 +833,25 @@ static void e820_query(void)
 		uint64_t base = *(const uint64_t *)(const void *)entry;
 		uint64_t length = *(const uint64_t *)(const void *)(entry + 8);
 		uint32_t type = *(const uint32_t *)(const void *)(entry + 16);
+
+		/*
+		 * The poison is still there, which means neither convention
+		 * answered and the firmware refused the call. This is the check
+		 * that decides between a machine with 640 KiB of memory and a
+		 * loader that asked the wrong question: keeping the poisoned
+		 * entry would hand the allocator a map of one 0xA5A5A5A5A5A5A5A5
+		 * byte region and no error anywhere, and a count of one is not a
+		 * count of zero, so the failure at the bottom of this function
+		 * would not fire either.
+		 */
+		if (base == 0xA5A5A5A5A5A5A5A5ull) {
+			if (e820_count == 0)
+				fail("E820 map refused by the firmware");
+			LOG("  entry refused by the firmware at index ");
+			serial_putdec(e820_count);
+			serial_puts("\r\n");
+			break;
+		}
 
 		e820_map[e820_count].base = base;
 		e820_map[e820_count].length = length;
@@ -669,6 +923,45 @@ static bool vbe_set_mode(uint16_t mode)
 					   (uint32_t)mode, 0, 0, di, es);
 
 	return ret == 0x004Fu;
+}
+
+/*
+ * Pull a framebuffer description out of the mode info block vbe_get_mode_info()
+ * has just filled in.
+ *
+ * The channel shifts are the interesting part. A VBE mode info block carries
+ * six bytes about the pixel layout, and they are *positions* and *sizes*, in
+ * that order of confusion:
+ *
+ *   +0x31 RedMaskSize     +0x34 RedMaskPosition
+ *   +0x32 GreenMaskSize   +0x35 GreenMaskPosition
+ *   +0x33 BlueMaskSize    +0x36 BlueMaskPosition
+ *
+ * The kernel composes a pixel as (r << red_shift) | (g << green_shift) |
+ * (b << blue_shift), so it needs the positions and nothing else. Taking the
+ * sizes instead is not a small error: for a plain 32bpp mode, where all three
+ * sizes are 8, it produces red=2, green=0, blue=1 rather than 16/8/0, and
+ * every channel lands in the wrong bits of the wrong byte. Nothing faults, the
+ * framebuffer is mapped, and the text is a plausible smear of colour -- which
+ * is why the numbers are worth checking against the mode list by hand once.
+ *
+ * The positions themselves live in bits 7:3 of their bytes; bits 2:0 are
+ * reserved and are dropped by the shift. What is *not* done here is converting
+ * to byte offsets: the field is a bit shift, and the comment in boot.h that
+ * says otherwise describes a packing this loader does not produce.
+ */
+static void vbe_extract_fb(void)
+{
+	fb_info.address = (uint32_t)(vbe_mode[0x28] | ((uint32_t)vbe_mode[0x29] << 8) |
+				     ((uint32_t)vbe_mode[0x2A] << 16) |
+				     ((uint32_t)vbe_mode[0x2B] << 24));
+	fb_info.pitch = (uint32_t)(vbe_mode[0x10] | ((uint32_t)vbe_mode[0x11] << 8));
+	fb_info.width = (uint32_t)(vbe_mode[0x12] | ((uint32_t)vbe_mode[0x13] << 8));
+	fb_info.height = (uint32_t)(vbe_mode[0x14] | ((uint32_t)vbe_mode[0x15] << 8));
+	fb_info.bpp = vbe_mode[0x19];
+	fb_info.red_shift = (uint8_t)(vbe_mode[0x34] >> 3);
+	fb_info.green_shift = (uint8_t)(vbe_mode[0x35] >> 3);
+	fb_info.blue_shift = (uint8_t)(vbe_mode[0x36] >> 3);
 }
 
 /*
@@ -747,7 +1040,6 @@ static void vbe_setup(void)
 
 		uint32_t width = (uint32_t)(vbe_mode[0x12] | ((uint32_t)vbe_mode[0x13] << 8));
 		uint32_t height = (uint32_t)(vbe_mode[0x14] | ((uint32_t)vbe_mode[0x15] << 8));
-		uint32_t bpp = vbe_mode[0x19];
 		uint32_t phys = (uint32_t)(vbe_mode[0x28] | ((uint32_t)vbe_mode[0x29] << 8) |
 					   ((uint32_t)vbe_mode[0x2A] << 16) |
 					   ((uint32_t)vbe_mode[0x2B] << 24));
@@ -762,15 +1054,7 @@ static void vbe_setup(void)
 		best_score = score;
 		best_mode = m;
 
-		fb_info.address = phys;
-		fb_info.width = width;
-		fb_info.height = height;
-		fb_info.bpp = (uint8_t)bpp;
-		fb_info.pitch = (uint32_t)(vbe_mode[0x10] | ((uint32_t)vbe_mode[0x11] << 8));
-		fb_info.red_shift = (uint8_t)(vbe_mode[0x31] >> 2);
-		fb_info.green_shift = (uint8_t)(((vbe_mode[0x31] >> 5) & 0x7) |
-						(((vbe_mode[0x32] >> 3) & 0x1E)));
-		fb_info.blue_shift = (uint8_t)(vbe_mode[0x32] >> 3);
+		vbe_extract_fb();
 	}
 
 	if (best_mode == 0) {
@@ -788,11 +1072,38 @@ static void vbe_setup(void)
 	}
 
 	/* The mode set can invalidate the mode info block, so the values the
-	 * kernel needs are read back rather than trusted from before. */
+	 * kernel needs are read back rather than trusted from before -- and this
+	 * time the block is actually used. Fetching it and throwing the answer
+	 * away left the kernel with a description of the mode as it was before
+	 * the set, which is a different address and a different pitch on any
+	 * firmware that reprograms it. */
 	if (!vbe_get_mode_info(best_mode)) {
 		LOG("  mode info lost after mode set\r\n");
 		return;
 	}
+
+	vbe_extract_fb();
+
+	if (fb_info.address == 0) {
+		LOG("  no framebuffer address after mode set\r\n");
+		return;
+	}
+
+	serial_puts("  fb ");
+	serial_puthex((uint64_t)fb_info.address);
+	serial_puts(" ");
+	serial_putdec(fb_info.width);
+	serial_puts("x");
+	serial_putdec(fb_info.height);
+	serial_puts(" @");
+	serial_putdec(fb_info.bpp);
+	serial_puts("bpp, shifts r");
+	serial_putdec(fb_info.red_shift);
+	serial_puts(" g");
+	serial_putdec(fb_info.green_shift);
+	serial_puts(" b");
+	serial_putdec(fb_info.blue_shift);
+	serial_puts("\r\n");
 
 	fb_enabled = true;
 }
@@ -817,7 +1128,6 @@ static void copy_from_disk(uint64_t off, uint64_t dst, uint64_t len)
 	uint8_t *out = (uint8_t *)(uintptr_t)dst;
 
 	while (len > 0) {
-		uint32_t count_here = (uint32_t)((len + 511u) / 512u);
 		uint32_t sector = (uint32_t)(off / 512);
 		uint32_t in_sector = (uint32_t)(off % 512);
 		uint32_t sectors;
@@ -979,8 +1289,7 @@ static void load_kernel(void)
 	for (unsigned i = 0; i < eh->e_phnum; i++) {
 		/* Program headers beyond the first sector have to be re-read. The
 		 * bounce window is the source, so a header that straddles a sector
-		 * boundary is copied out through the landing zone and back. */
-		uint64_t need = phdr_off + sizeof(phdr);
+		 * boundary is copied out and reassembled. */
 		uint32_t sector = (uint32_t)(phdr_off / 512);
 		uint32_t in_sector = (uint32_t)(phdr_off % 512);
 		uint8_t *dst_ph = (uint8_t *)(uintptr_t)PHDR_SCRATCH_ADDR;
@@ -1005,7 +1314,6 @@ static void load_kernel(void)
 				dst_ph[i] = *(const volatile uint8_t *)
 					(uintptr_t)(BOUNCE_ADDR + in_sector + i);
 		}
-		(void)need;
 
 		phdr_off += eh->e_phentsize;
 
@@ -1317,7 +1625,6 @@ static void boot_gdt_init(void)
 
 	/* Last chance to install the 64-bit reporter: after this the far jump
 	 * makes every exception a long-mode delivery. */
-	boot_idt_set_64bit();
 
 	LOG("  GDT at 0x");
 	serial_puthex(gdtr64.base);

@@ -15,6 +15,13 @@
  *   - Each zone is locked independently. The allocator is the busiest lock in
  *     the kernel and there is no reason for a DMA-zone allocation to contend
  *     with a high-memory one.
+ *   - Only block *heads* live on the free lists. Every other frame of a
+ *     free order-N block carries PG_TAIL and is reachable only through its
+ *     head. Anything that wants to reserve, pin or otherwise take memory out
+ *     of circulation must therefore walk the free lists — walking the page
+ *     array for PG_FREE finds heads only, which is what silently did nothing
+ *     when pmm_reserve_range() was asked to reserve a range that lay in the
+ *     middle of a large block. See exclude_free_blocks_locked().
  *   - A free block's buddy can only be coalesced if it is itself free AND at
  *     the same order AND at a page-index that differs only in the order bit.
  *     All three conditions are checked; missing any one produces a corrupt
@@ -30,29 +37,57 @@
 #include <io.h>
 #include <cpu_features.h>
 
-/* Maximum block order: 2^11 frames = 8 MiB. Larger allocations come from
- * vmalloc, which is satisfied with non-contiguous frames. */
-#define BUDDY_MAX_ORDER 11
-#define BUDDY_MAX_PAGES (1UL << BUDDY_MAX_ORDER)
+/*
+ * BUDDY_MAX_ORDER is defined once, in pmm.h, and not here. struct pmm_zone
+ * sizes free_list[] by it, so a second definition could drift from the first
+ * without anything noticing. The allocator serves orders 0..BUDDY_MAX_ORDER
+ * inclusive: order 11 is 2048 frames, i.e. 8 MiB, and anything larger is served
+ * as a non-contiguous run by the vmalloc layer. (docs/src/memory/
+ * buddy-allocator.md still says 11 levels, orders 0-10 and 4 MiB; the code is
+ * the authority and that document is stale.)
+ */
+
+/* Zone boundaries. ZONE_DMA exists because of the ISA bus, not because of the
+ * CPU: it is the lowest 16 MiB of physical memory. */
+#define ZONE_DMA_END    0x01000000ull
+#define ZONE_NORMAL_END 0x100000000ull
 
 static struct pmm_zone zones[ZONE_COUNT];
 
 /* Page metadata array. Sized for the largest machine the kernel supports and
  * placed in the direct map during early init. */
 static struct page *page_array;
-static phys_addr_t page_array_pages;
 
+/*
+ * Frames the allocator tracks, i.e. the address-space bound derived from the
+ * E820 map. This is *not* how much memory there is: it counts every frame below
+ * the highest usable address, including the ones the E820 map reports as a hole.
+ * pmm_usable_pages below is the honest "how much memory is there".
+ */
 phys_addr_t pmm_total_pages;
+phys_addr_t pmm_usable_pages;
+
+/* Frames currently on a free list, across all zones. */
 phys_addr_t pmm_free_page_count;
 
 struct pmm_stats pmm_stats;
 
 KLOG_SUBSYSTEM("pmm");
 
-/* Zone boundaries. ZONE_DMA exists because of the ISA bus, not because of the
- * CPU: it is the lowest 16 MiB of physical memory. */
-#define ZONE_DMA_END    0x01000000ull
-#define ZONE_NORMAL_END 0x100000000ull
+/*
+ * End of the kernel image, from the link script.
+ *
+ * The kernel is executing out of physical KERNEL_LANDING_ADDR when pmm_init()
+ * runs, and the E820 map quite correctly describes that range as usable — it is
+ * a statement about RAM, not about what this kernel is standing on. Nothing but
+ * an explicit reservation keeps the allocator from handing out the ELF header
+ * and then .text. Taking the bound from the link script rather than a
+ * hard-coded constant means the reservation follows the image when it grows.
+ *
+ * The declaration is weak so a link script that stops defining it degrades to
+ * "no self-reservation" rather than failing the build.
+ */
+extern char _ebss[] __attribute__((weak));
 
 /* ------------------------------------------------------------- lookup ------ */
 
@@ -93,6 +128,26 @@ static zone_t zone_of(phys_addr_t addr)
 	return ZONE_HIGH;
 }
 
+/* First physical address in `z`. */
+static phys_addr_t zone_base(zone_t z)
+{
+	if (z == ZONE_DMA)
+		return 0;
+	if (z == ZONE_NORMAL)
+		return ZONE_DMA_END;
+	return ZONE_NORMAL_END;
+}
+
+/* First frame index past the end of `z`. */
+static phys_addr_t zone_frame_limit(zone_t z)
+{
+	if (z == ZONE_DMA)
+		return ZONE_DMA_END >> PAGE_SHIFT;
+	if (z == ZONE_NORMAL)
+		return ZONE_NORMAL_END >> PAGE_SHIFT;
+	return pmm_total_pages;
+}
+
 /*
  * Track which frames exist at all.
  *
@@ -105,8 +160,6 @@ static u64 *frame_present;
 static phys_addr_t present_words;
 
 /* Frames that were present but are reserved by something. Same encoding. */
-static u64 *frame_reserved;
-static u64 *zone_bitmap[ZONE_COUNT];
 
 /*
  * Word counts, not pointers: these are the bounds the set/test helpers compare
@@ -115,7 +168,7 @@ static u64 *zone_bitmap[ZONE_COUNT];
  * past the end of the bitmap and turns every out-of-range access into a wild
  * read instead of a clean rejection.
  */
-static phys_addr_t zone_words;
+static u64 *frame_reserved;
 
 static bool frame_present_p(phys_addr_t addr)
 {
@@ -159,26 +212,52 @@ static void frame_set_reserved(phys_addr_t addr, bool reserved)
 		frame_reserved[idx / 64] &= ~(1ULL << (idx % 64));
 }
 
-static void zone_set(zone_t z, phys_addr_t idx, bool in_zone)
+/*
+ * End of the run of frames starting at `first` that are both present and
+ * unreserved, bounded by `limit`.
+ *
+ * Called once per run during init, and always with `first` at or after the
+ * previous run's end, so the whole free-list build is O(tracked frames) rather
+ * than O(regions x frames). A reserved frame in the middle of a region — the
+ * kernel image, say — ends the run, and the caller starts the next one, which is
+ * what keeps a two-megabyte hole from turning a four-gigabyte region into two
+ * million single-page blocks.
+ */
+static phys_addr_t usable_run_end(phys_addr_t first, phys_addr_t limit)
 {
-	if (idx / 64 >= zone_words)
-		return;
-	if (in_zone)
-		zone_bitmap[z][idx / 64] |= 1ULL << (idx % 64);
-	else
-		zone_bitmap[z][idx / 64] &= ~(1ULL << (idx % 64));
-}
+	phys_addr_t i = first;
 
-static bool zone_test(zone_t z, phys_addr_t addr)
-{
-	phys_addr_t idx = addr >> PAGE_SHIFT;
+	while (i < limit) {
+		phys_addr_t addr = i << PAGE_SHIFT;
 
-	if (idx / 64 >= zone_words)
-		return false;
-	return (zone_bitmap[z][idx / 64] >> (idx % 64)) & 1;
+		if (!frame_present_p(addr) || frame_reserved_p(addr))
+			break;
+		i++;
+	}
+	return i;
 }
 
 /* ------------------------------------------------------- buddy core ------- */
+
+/*
+ * Mark the interior frames of a block that is going on a free list.
+ *
+ * Only the head is reachable through the lists; the rest must be visibly
+ * something other than a head, or a scan that looks for free frames finds a
+ * page whose "list" is two stale pointers into a neighbouring block. Used at
+ * init, when blocks are pushed whole — splitting and coalescing maintain the
+ * marking themselves, because every page they touch is a head they are already
+ * rewriting.
+ *
+ * Caller holds the zone lock.
+ */
+static void block_mark_tail(struct page *page, unsigned order)
+{
+	phys_addr_t span = 1UL << order;
+
+	for (phys_addr_t i = 1; i < span; i++)
+		page[i].flags |= PG_TAIL;
+}
 
 /*
  * Insert a block at the head of its order's free list.
@@ -187,9 +266,17 @@ static bool zone_test(zone_t z, phys_addr_t addr)
  */
 static void buddy_free_locked(struct page *page, unsigned order)
 {
-	struct pmm_zone *z = &zones[page->zone];
+	struct pmm_zone *z;
 
-	page->flags = PG_FREE | PG_BUDDY;
+	if (page->zone >= ZONE_COUNT)
+		panic("pmm: buddy_free on frame %llx with zone %u\n",
+		       (unsigned long long)page_to_phys(page), page->zone);
+	z = &zones[page->zone];
+
+	/* A block head is never a tail and never still allocated. PG_PINNED and
+	 * PG_ZEROED survive: both are facts about the frame rather than about
+	 * its ownership. */
+	page->flags = (page->flags & (PG_PINNED | PG_ZEROED)) | PG_FREE | PG_BUDDY;
 	page->order = (uint8_t)order;
 	page->refcount = 0;
 	list_add(&page->list, &z->free_list[order]);
@@ -197,9 +284,14 @@ static void buddy_free_locked(struct page *page, unsigned order)
 	z->free_pages += 1UL << order;
 }
 
-static inline void buddy_set_bitmap(struct pmm_zone *z, unsigned order)
+/* Take a block off its free list. Caller holds the zone lock. */
+static void buddy_remove_locked(struct pmm_zone *z, struct page *page,
+			       unsigned order)
 {
-	z->free_bitmap |= (uint16_t)(1u << order);
+	list_del(&page->list);
+	z->free_pages -= 1UL << order;
+	if (list_empty(&z->free_list[order]))
+		z->free_bitmap &= (uint16_t)~(1u << order);
 }
 
 /*
@@ -218,13 +310,13 @@ static struct page *buddy_alloc_locked(struct pmm_zone *z, unsigned order)
 		return NULL;
 
 	page = list_entry(head->next, struct page, list);
-	list_del(&page->list);
+	buddy_remove_locked(z, page, order);
 
-	z->free_pages -= 1UL << order;
-	if (list_empty(&z->free_list[order]))
-		z->free_bitmap &= (uint16_t)~(1u << order);
-
-	page->flags = PG_ALLOCATED;
+	/* PG_BUDDY stays set on the allocated block: it still is a block head,
+	 * and `order` is still meaningful until the block is freed. zone_free_locked()
+	 * tests PG_FREE before PG_BUDDY, so this does not make an allocated block
+	 * eligible for coalescing. */
+	page->flags = PG_ALLOCATED | PG_BUDDY;
 	page->order = (uint8_t)order;
 	page->refcount = 1;
 	page->slab = NULL;
@@ -259,6 +351,11 @@ static int first_order_at_least(const struct pmm_zone *z, unsigned order)
  * Caller holds the zone lock. Splits the chosen block down to the requested
  * order, returning the lower half and returning the upper halves to the free
  * lists. Splitting is at most BUDDY_MAX_ORDER - order iterations.
+ *
+ * Accounting note: buddy_alloc_locked() has already subtracted the 2^have frames
+ * of the block it removed, and each split has added back the 2^(cur-1) frames of
+ * the half it returned, so the net effect of the whole function is exactly
+ * -2^order and the callers must not subtract it a second time.
  */
 static struct page *zone_alloc_locked(struct pmm_zone *z, unsigned order)
 {
@@ -282,10 +379,10 @@ static struct page *zone_alloc_locked(struct pmm_zone *z, unsigned order)
 		pmm_stats.splits++;
 	}
 
-	page->flags = PG_ALLOCATED;
+	page->flags = PG_ALLOCATED | PG_BUDDY;
 	page->order = (uint8_t)order;
 	page->refcount = 1;
-	z->free_pages -= (1UL << order);
+	page->slab = NULL;
 	return page;
 }
 
@@ -306,12 +403,17 @@ static inline struct page *buddy_of(struct page *page, unsigned order)
  *
  * Coalescing requires the buddy to be free, at the same order, and marked as a
  * buddy head. If any of those fail the merge would produce a block whose
- * interior pages still carry PG_TAIL and whose free-list membership is wrong,
- * so the checks are mandatory rather than defensive.
+ * interior pages still carry PG_FREE and a stale list link, so the checks are
+ * mandatory rather than defensive.
  */
 static void zone_free_locked(struct page *page, unsigned order)
 {
-	struct pmm_zone *z = &zones[page->zone];
+	struct pmm_zone *z;
+
+	if (page->zone >= ZONE_COUNT)
+		panic("pmm: free of frame %llx with zone %u\n",
+		       (unsigned long long)page_to_phys(page), page->zone);
+	z = &zones[page->zone];
 
 	for (;;) {
 		struct page *buddy = buddy_of(page, order);
@@ -332,15 +434,20 @@ static void zone_free_locked(struct page *page, unsigned order)
 
 		/* Remove the buddy from its free list: it is about to become
 		 * part of a larger block. */
-		list_del(&buddy->list);
-		z->free_pages -= 1UL << order;
-		if (list_empty(&z->free_list[order]))
-			z->free_bitmap &= (uint16_t)~(1u << order);
+		buddy_remove_locked(z, buddy, order);
 
 		/* Merge: the pair becomes one block of order+1 whose address is
-		 * the lower of the two. */
-		if (buddy < page)
+		 * the lower of the two. The absorbed head is now an interior
+		 * frame, so it must stop advertising itself as a free head —
+		 * its list link is already stale. */
+		if (buddy < page) {
+			struct page *swap = page;
+
 			page = buddy;
+			buddy = swap;
+		}
+		buddy->flags = PG_TAIL;
+		buddy->order = (uint8_t)(order + 1);
 		page->order = (uint8_t)(order + 1);
 		order++;
 		pmm_stats.coalesces++;
@@ -349,29 +456,134 @@ static void zone_free_locked(struct page *page, unsigned order)
 	buddy_free_locked(page, order);
 }
 
+/*
+ * Exclude [lo, hi) from a zone's free lists.
+ *
+ * Only block heads are on the free lists, so the range cannot be carved out by
+ * walking the page array: an interior frame has no head above it to find, and
+ * `if (!(p->flags & PG_FREE)) continue;` skips it — which is why reserving the
+ * low megabyte used to do nothing at all and why a reserve through the middle of
+ * a large block used to leave that block allocatable whole. The lists have to be
+ * walked instead.
+ *
+ * Two properties matter:
+ *
+ *   - The frames inside the range must not come back. They are re-introduced
+ *     only when they lie outside it, so a coalesce cannot rebuild a block
+ *     spanning the range: zone_free_locked() merges two blocks only when both
+ *     are free at the same order, and a frame inside the range never is.
+ *   - The survivors are handed back through zone_free_locked(), not through a
+ *     bare buddy_free_locked(). Reserving a megabyte therefore costs one block,
+ *     not 2048 order-0 blocks, and the high orders stay available — which
+ *     matters on a machine where the only order-9 block is the one being carved.
+ *
+ * The walk is done in two passes because the second pass frees pages, and
+ * freeing coalesces, and coalescing inserts into the very lists the first pass
+ * is iterating.
+ *
+ * Caller holds the zone lock. Returns how many frames inside the range were on
+ * a free list, i.e. how far the free count has to come down.
+ */
+static phys_addr_t exclude_free_blocks_locked(struct pmm_zone *z,
+					     phys_addr_t lo, phys_addr_t hi)
+{
+	struct list_head blocks = LIST_HEAD_INIT(blocks);
+	struct list_head survivors = LIST_HEAD_INIT(survivors);
+	struct list_head *pos, *tmp;
+	phys_addr_t claimed = 0;
+
+	for (unsigned o = 0; o <= BUDDY_MAX_ORDER; o++) {
+		/* Hand-rolled safe iteration: `tmp` is read before the body so
+		 * the current element can be unlinked inside it. list_for_each_safe()
+		 * would do the same, but its comma expression trips -Wunused-value. */
+		pos = z->free_list[o].next;
+		while (pos != &z->free_list[o]) {
+			struct page *page;
+
+			tmp = pos->next;
+			page = list_entry(pos, struct page, list);
+
+			{
+				phys_addr_t base = page_to_phys(page);
+				phys_addr_t end =
+					base + ((1UL << o) << PAGE_SHIFT);
+
+				if (end > lo && base < hi) {
+					buddy_remove_locked(z, page, o);
+					list_add(&page->list, &blocks);
+				}
+			}
+			pos = tmp;
+		}
+	}
+
+	pos = blocks.next;
+	while (pos != &blocks) {
+		struct page *page;
+		phys_addr_t base, end;
+
+		tmp = pos->next;
+		page = list_entry(pos, struct page, list);
+		base = page_to_phys(page);
+		end = base + ((1UL << page->order) << PAGE_SHIFT);
+
+		for (phys_addr_t q = base; q < end; q += PAGE_SIZE) {
+			struct page *sq = &page_array[q >> PAGE_SHIFT];
+
+			if (q >= lo && q < hi) {
+				sq->flags = PG_ALLOCATED;
+				sq->order = 0;
+				sq->refcount = 1;
+				sq->slab = NULL;
+				claimed++;
+				continue;
+			}
+			sq->zone = (uint8_t)zone_of(q);
+			list_add(&sq->list, &survivors);
+		}
+		pos = tmp;
+	}
+
+	while (!list_empty(&survivors)) {
+		struct page *p = list_entry(survivors.next, struct page, list);
+
+		list_del_init(&p->list);
+		zone_free_locked(p, 0);
+	}
+
+	return claimed;
+}
+
 /* ------------------------------------------------------------ public ------ */
 
 struct page *pmm_alloc_pages(unsigned order, unsigned flags)
 {
-	zone_t want;
 	unsigned start;
 
 	if (order > BUDDY_MAX_ORDER)
 		return NULL;
 
-	if (flags & GFP_DMA) {
-		want = ZONE_DMA;
-	} else {
-		want = ZONE_NORMAL;
-	}
+	start = (flags & GFP_DMA) ? ZONE_DMA : ZONE_NORMAL;
 
-	for (unsigned attempt = 0; attempt < ZONE_COUNT; attempt++) {
-		zone_t z = (zone_t)(want + attempt);
-		struct pmm_zone *zone = &zones[z];
+	/*
+	 * Fall forward through the zones, but only ever to an index that exists.
+	 * The old loop bounded the attempt count instead of the index, so a
+	 * request starting at ZONE_NORMAL reached zones[3] and one starting at
+	 * ZONE_HIGH reached zones[4]. Those slots are adjacent .bss, and
+	 * zones[3].free_list[0].next aliases page_array — a non-NULL pointer —
+	 * so the `if (!zone->free_list[0].next) continue;` guard could not
+	 * catch it. The allocator then took a spinlock on whatever fields
+	 * happened to be there and walked a free list built out of page_array.
+	 */
+	for (unsigned attempt = 0; attempt + start < ZONE_COUNT; attempt++) {
+		struct pmm_zone *zone = &zones[start + attempt];
 		struct page *page;
 		u64 irq;
 
-		if (!zone->free_list[0].next)
+		/* free_bitmap, not free_list[0].next: list_init() points an
+		 * empty list's next at its own head, so that test was never
+		 * true and never meant anything. */
+		if (!zone->free_bitmap)
 			continue;
 
 		irq = spinlock_irqsave(&zone->lock);
@@ -415,7 +627,33 @@ void pmm_free_pages(struct page *page, unsigned order)
 	if (!page)
 		return;
 
+	/*
+	 * Only a block head that this allocator handed out may be freed. An
+	 * interior frame (PG_TAIL) has no valid position in the buddy scheme:
+	 * returning one would thread its stale list link into a free list and the
+	 * next allocation would hand out a frame that is still inside somebody
+	 * else's block. A frame that is already PG_FREE is a double free. Both
+	 * refusals are logged: the alternative is an allocator that corrupts
+	 * itself silently, and a leak with a log line is strictly better than a
+	 * corruption without one.
+	 */
+	if (!(page->flags & PG_ALLOCATED) ||
+	    (page->flags & (PG_TAIL | PG_FREE))) {
+		klog(KLOG_WARN,
+		     "pmm: free of frame %llx refused: flags 0x%x order %u\n",
+		     (unsigned long long)page_to_phys(page), page->flags,
+		     page->order);
+		return;
+	}
+
+	if (order > BUDDY_MAX_ORDER)
+		panic("pmm: free of order %u\n", order);
+
 	z = &zones[page->zone];
+
+	/* An explicit free returns the frame to the pool, so a pin on it is
+	 * over: nothing is left to protect. */
+	page->flags &= ~(uint32_t)PG_PINNED;
 
 	irq = spinlock_irqsave(&z->lock);
 	zone_free_locked(page, order);
@@ -426,93 +664,111 @@ void pmm_free_pages(struct page *page, unsigned order)
 }
 
 /*
- * Reserve a physical range.
+ * Take a physical range out of circulation.
  *
- * A range that overlaps free buddy blocks cannot simply be flagged reserved:
- * the buddy allocator hands out whole blocks, so a block spanning reserved and
- * free frames would eventually be handed out whole. The containing block has to
- * be removed from its free list and split down to individual pages, so the
- * reserved frames become order-0 allocations and the siblings go back as free
- * pages.
+ * `pin` distinguishes the two callers: pmm_reserve_range() marks hardware
+ * reservations (kernel image, bootstrap page tables, the metadata arena, MMIO),
+ * while pmm_pin_range() additionally sets PG_PINNED, which is the promise
+ * pmm_pin_range() is documented to make and which used not to exist at all —
+ * PG_PINNED was cleared again by the very next buddy_free_locked() on the way
+ * back into a free list, because nothing removed a pinned frame from that list
+ * in the first place.
  *
- * This runs during initialisation and for MMIO discovery, not on a hot path,
- * so the search is a simple walk rather than a clever one.
+ * Both record the range in the reserved bitmap. That bitmap is what
+ * pmm_alloc_dma_range() and the init-time free-list build consult, and it is
+ * deliberately *not* what keeps the range out of the buddy allocator after init
+ * — only the free-list exclusion below does that.
  */
-void pmm_reserve_range(phys_addr_t base, phys_addr_t length)
+static void claim_range(phys_addr_t base, phys_addr_t length, bool pin)
 {
-	phys_addr_t start = ALIGN_DOWN(base, PAGE_SIZE);
-	phys_addr_t end = ALIGN_UP(base + length, PAGE_SIZE);
+	phys_addr_t start, end;
+	phys_addr_t claimed = 0;
+
+	/*
+	 * Validate the arithmetic before rounding. base + length was previously
+	 * unchecked, so a wrapping range produced end < start, every loop below
+	 * became a no-op, and the caller was told the reservation had happened.
+	 */
+	if (length == 0)
+		return;
+	if (base + length < base)      /* wrapped */
+		return;
+
+	start = ALIGN_DOWN(base, PAGE_SIZE);
+	if (start + length < base)     /* the ALIGN_DOWN itself wrapped */
+		return;
+
+	end = ALIGN_UP(base + length, PAGE_SIZE);
+	if (end < base + length)       /* the ALIGN_UP itself wrapped */
+		return;
 
 	for (phys_addr_t addr = start; addr < end; addr += PAGE_SIZE) {
 		if (!phys_valid(addr))
-			continue;
-
-		phys_addr_t idx = addr >> PAGE_SHIFT;
-		struct page *p = &page_array[idx];
-
+			continue;       /* not tracked: no bitmap bit to set */
 		frame_set_reserved(addr, true);
+		page_array[addr >> PAGE_SHIFT].zone = (uint8_t)zone_of(addr);
+	}
 
-		if (!(p->flags & PG_FREE))
-			continue;   /* already allocated: nothing to split */
+	/* Take the range out of the free lists. Before pmm_init() builds them
+	 * this walks empty lists and costs nothing, which is what lets the
+	 * kernel image and the metadata arena reserve themselves from inside
+	 * pmm_init(). */
+	for (int z = 0; z < ZONE_COUNT; z++) {
+		phys_addr_t zbase = zone_base(z);
+		phys_addr_t zlo = zone_frame_limit(z) << PAGE_SHIFT;
+		u64 irq;
 
-		zone_t z = p->zone;
-		u64 irq = spinlock_irqsave(&zones[z].lock);
+		if (start >= zlo)
+			continue;       /* entirely above this zone */
+		if (end <= zbase)
+			continue;       /* entirely below this zone */
 
-		/*
-		 * Remove the whole containing block, then re-introduce every
-		 * frame in it individually, marking the target allocated and the
-		 * rest free. Walking the block and freeing page by page achieves
-		 * the same thing with less code, because freeing order-0 pages
-		 * re-coalesces the untouched siblings for free.
-		 */
-		unsigned order = p->order;
-		phys_addr_t block_base = addr & ~(((1UL << order) - 1) << PAGE_SHIFT);
-		phys_addr_t block_end = block_base +
-			((1UL << order) << PAGE_SHIFT);
-
-		/* Take the block out of circulation. */
-		list_del(&p->list);
-		zones[z].free_pages -= 1UL << order;
-		if (list_empty(&zones[z].free_list[order]))
-			zones[z].free_bitmap &= (uint16_t)~(1u << order);
-		pmm_free_page_count -= 1UL << order;
-
-		/* Re-free every frame in the block except the reserved one. */
-		for (phys_addr_t q = block_base; q < block_end; q += PAGE_SIZE) {
-			struct page *sq = &page_array[q >> PAGE_SHIFT];
-
-			if (q == addr) {
-				sq->flags = PG_ALLOCATED;
-				sq->order = 0;
-				sq->refcount = 1;
-				sq->slab = NULL;
-				continue;
-			}
-			sq->zone = (uint8_t)zone_of(q);
-			buddy_free_locked(sq, 0);
-			pmm_free_page_count++;
-		}
-
+		irq = spinlock_irqsave(&zones[z].lock);
+		claimed += exclude_free_blocks_locked(&zones[z],
+						      MAX(start, zbase),
+						      MIN(end, zlo));
 		spinlock_unlock_irqrestore(&zones[z].lock, irq);
 	}
+
+	pmm_free_page_count -= claimed;
+
+	/* Finally the flags. Frames inside the range are either frames we have
+	 * just taken off a free list — allocated now, and claimed — or frames
+	 * somebody already owns, whose order/refcount/slab we must not touch.
+	 * PG_TAIL cannot survive here: every frame that carried it either had
+	 * its block removed above or belonged to a block that is still on a
+	 * free list, and such a block cannot contain a frame in the range. */
+	for (phys_addr_t addr = start; addr < end; addr += PAGE_SIZE) {
+		struct page *p;
+
+		if (!phys_valid(addr))
+			continue;
+		p = &page_array[addr >> PAGE_SHIFT];
+		if (p->flags & PG_ALLOCATED) {
+			if (pin)
+				p->flags |= PG_PINNED;
+			continue;
+		}
+		p->flags = PG_ALLOCATED | (pin ? PG_PINNED : 0u);
+		p->order = 0;
+		p->refcount = 1;
+		p->slab = NULL;
+	}
+}
+
+void pmm_reserve_range(phys_addr_t base, phys_addr_t length)
+{
+	claim_range(base, length, false);
 }
 
 void pmm_pin_range(phys_addr_t base, phys_addr_t length)
 {
-	phys_addr_t start = ALIGN_DOWN(base, PAGE_SIZE);
-	phys_addr_t end = ALIGN_UP(base + length, PAGE_SIZE);
-
-	for (phys_addr_t addr = start; addr < end; addr += PAGE_SIZE) {
-		if (phys_valid(addr)) {
-			page_array[addr >> PAGE_SHIFT].flags |= PG_PINNED;
-			frame_set_reserved(addr, true);
-		}
-	}
+	claim_range(base, length, true);
 }
 
 phys_addr_t pmm_total(void)
 {
-	return pmm_total_pages;
+	return pmm_usable_pages;
 }
 
 phys_addr_t pmm_free(void)
@@ -522,11 +778,15 @@ phys_addr_t pmm_free(void)
 
 phys_addr_t pmm_zone_free(zone_t zone)
 {
+	if (zone >= ZONE_COUNT)
+		return 0;
 	return zones[zone].free_pages;
 }
 
 phys_addr_t pmm_zone_total(zone_t zone)
 {
+	if (zone >= ZONE_COUNT)
+		return 0;
 	return zones[zone].total_pages;
 }
 
@@ -536,75 +796,85 @@ phys_addr_t pmm_zone_total(zone_t zone)
  * DMA regions cannot be satisfied by the buddy allocator in general, because a
  * device wants a specific range rather than any free block: the caller usually
  * needs alignment, and the range must survive until the device is programmed.
- * This walks the E820 map for the largest usable run satisfying the alignment,
- * marks it reserved, and hands back both the virtual alias and the physical
- * address.
+ * This walks the present bitmaps for a run of `length` consecutive frames that is
+ * present, unreserved and aligned, marks it reserved through pmm_reserve_range()
+ * — which now really does remove it from the free lists — and hands back both
+ * the direct-map alias and the physical address.
  */
 void *pmm_alloc_dma_range(size_t length, size_t alignment, phys_addr_t *out_phys)
 {
 	phys_addr_t total = pmm_total_pages;
-	phys_addr_t start;
+	phys_addr_t frames, step, start;
+
+	if (length == 0)
+		return NULL;
 
 	length = ALIGN_UP(length, PAGE_SIZE);
-	if (!alignment)
+	if (length == 0)              /* rounded up past the address space */
+		return NULL;
+	frames = length >> PAGE_SHIFT;
+
+	if (alignment < PAGE_SIZE)
 		alignment = PAGE_SIZE;
+	if (alignment & (alignment - 1)) {
+		/* Not a power of two: the scan steps in units of alignment, so
+		 * rounding up is the only way to honour it at all. Rounding down
+		 * would return a range that is not aligned as asked for. */
+		size_t rounded = PAGE_SIZE;
 
-	/*
-	 * Walk the present bitmaps from the bottom of ZONE_DMA, looking for a
-	 * run of `length` consecutive frames that is present, unreserved, and
-	 * aligned. Bit scanning is word-at-a-time so this is not O(frames) per
-	 * byte; the common case finds the first run immediately.
-	 */
-	for (start = 0; start + (length >> PAGE_SHIFT) <= total; ) {
-		phys_addr_t frames = length >> PAGE_SHIFT;
-		phys_addr_t run = 0;
-		phys_addr_t candidate = start;
+		while (rounded < alignment)
+			rounded <<= 1;
+		klog(KLOG_WARN,
+		     "pmm: DMA alignment %zu is not a power of two, using %zu\n",
+		     alignment, rounded);
+		alignment = rounded;
+	}
+	step = alignment >> PAGE_SHIFT;
 
-		if (start % (alignment >> PAGE_SHIFT)) {
-			/* Skip forward to the next aligned frame. */
-			phys_addr_t step = alignment >> PAGE_SHIFT;
+	for (start = 0; start + frames <= total; ) {
+		phys_addr_t idx;
+
+		/* Skip forward to the next aligned frame. */
+		if (start % step) {
 			start = ALIGN_UP(start, step);
 			continue;
 		}
 
-		while (run < frames) {
-			phys_addr_t idx = start + run;
+		/*
+		 * Every frame of the run has to be checked, including the one at
+		 * `start` itself. The previous implementation cleared bit
+		 * (idx % 64) unconditionally before testing — masking off the
+		 * current position was written as a clear rather than as the
+		 * "ignore the bits below us" mask it was meant to be, so a run
+		 * that began at `start` could never match — and then jumped to
+		 * the next word after consuming a bit, so a run straddling a word
+		 * boundary was never accumulated. It also returned `start` on
+		 * `run + free_run >= frames` without ever having verified the
+		 * frames below the first set bit.
+		 */
+		idx = start;
+		while (idx < start + frames) {
+			phys_addr_t addr = idx << PAGE_SHIFT;
 
-			if (idx / 64 >= present_words)
+			if (!frame_present_p(addr) || frame_reserved_p(addr))
 				break;
-			u64 word = frame_present[idx / 64] &
-				frame_reserved[idx / 64] &
-				~(1ULL << (idx % 64));
-			/* Mask off bits below the current position within the
-			 * word so the run cannot straddle into an earlier bit. */
-			if (run % 64)
-				word &= ~0ULL << (run % 64);
-
-			if (word == 0) {
-				/* Skip to the start of the next word. */
-				phys_addr_t to_word = 64 - (idx % 64);
-				run += to_word;
-				continue;
-			}
-
-			int free_run = __builtin_ctzll(~word);
-			if (free_run > 64 - (int)(idx % 64))
-				free_run = 64 - (int)(idx % 64);
-			run += (phys_addr_t)free_run;
-			if (run >= frames)
-				break;
-			/* A set bit is a usable frame; advance past it. */
-			run += 64 - (run % 64);
+			idx++;
 		}
 
-		if (run >= frames) {
-			pmm_reserve_range(start << PAGE_SHIFT, length);
+		if (idx == start + frames) {
+			phys_addr_t phys = start << PAGE_SHIFT;
+
+			pmm_reserve_range(phys, length);
 			if (out_phys)
-				*out_phys = start << PAGE_SHIFT;
-			return (void *)phys_to_virt(start << PAGE_SHIFT);
+				*out_phys = phys;
+			return (void *)phys_to_virt(phys);
 		}
 
-		start = ALIGN_UP(start + 1, alignment >> PAGE_SIZE ? alignment >> PAGE_SHIFT : 1);
+		/* The run broke. Resume from the frame that failed rather than
+		 * from the next aligned boundary, or a device asking for two
+		 * pages would rescan the entire gap for every alignment slot in
+		 * it. */
+		start = idx + 1;
 	}
 
 	klog(KLOG_WARN, "pmm: no %zu byte contiguous DMA range\n", length);
@@ -614,19 +884,90 @@ void *pmm_alloc_dma_range(size_t length, size_t alignment, phys_addr_t *out_phys
 /* ------------------------------------------------------------- init -------- */
 
 /*
+ * The kernel's own image.
+ *
+ * pmm_init() runs after the paging switch, so the kernel is running from
+ * physical KERNEL_LANDING_ADDR + offset while the E820 map cheerfully reports
+ * that range as usable. Reserving it from inside the allocator, against the
+ * link-time end of the image, means the first pmm_alloc_page() cannot return
+ * the ELF header. The bootstrap page tables at BOOT_PT_ADDR are stage2's and
+ * live in stage2's header, so the caller reserves those; see the note in
+ * pmm_init().
+ */
+static void reserve_kernel_image(void)
+{
+	phys_addr_t virt, phys_end;
+
+	if (!_ebss)
+		return;         /* no link-time symbol: nothing to derive a bound */
+
+	virt = (phys_addr_t)(uintptr_t)_ebss;
+	if (virt < KERNEL_VIRT_BASE || virt <= KERNEL_LANDING_ADDR)
+		return;
+
+	phys_end = kernel_virt_to_phys(virt);
+	klog(KLOG_INFO, "pmm: reserving kernel image %llx-%llx\n",
+	     (unsigned long long)KERNEL_LANDING_ADDR,
+	     (unsigned long long)phys_end);
+	pmm_reserve_range(KERNEL_LANDING_ADDR, phys_end - KERNEL_LANDING_ADDR);
+}
+
+/*
+ * Largest usable run that can hold `size`, reported as [lo, hi).
+ *
+ * "Usable" means E820_USABLE with a non-zero, non-wrapping length, so a
+ * malformed entry cannot contribute a run that is not there. Returns false if
+ * no run is big enough, which is the caller's cue to shrink what it is trying
+ * to place rather than to place it somewhere that does not exist.
+ */
+static bool meta_find_run(const struct e820_entry *map, uint32_t count,
+			  phys_addr_t size, phys_addr_t *out_lo, phys_addr_t *out_hi)
+{
+	phys_addr_t best_len = 0;
+
+	*out_lo = 0;
+	*out_hi = 0;
+
+	for (uint32_t i = 0; i < count; i++) {
+		phys_addr_t base = map[i].base;
+		phys_addr_t length = map[i].length;
+		phys_addr_t lo, hi;
+
+		if (map[i].type != E820_USABLE || length == 0)
+			continue;
+		if (base + length < base)
+			continue;
+		lo = ALIGN_UP(base, PAGE_SIZE);
+		hi = ALIGN_DOWN(base + length, PAGE_SIZE);
+		if (hi <= lo || hi - lo < size)
+			continue;
+		if (hi - lo > best_len) {
+			best_len = hi - lo;
+			*out_lo = lo;
+			*out_hi = hi;
+		}
+	}
+	return best_len != 0;
+}
+
+/*
  * Initialise from the E820 map.
  *
  * The order of operations matters:
- *   1. Find the highest address reported as usable; that bounds the frame
- *      count and therefore the size of every metadata array.
+ *   1. Find the highest address reported as usable; that bounds the frame count
+ *      and therefore the size of every metadata array.
  *   2. Place the metadata arrays in the direct map, which at this point is
  *      whatever stage2's identity map provided. They have to be somewhere
  *      before the buddy allocator can allocate anything.
  *   3. Mark every frame as reserved by default.
  *   4. Walk the E820 map, marking usable frames present and unreserved.
- *   5. Hand the usable, unreserved frames to the buddy allocator.
- *   6. Reserve the kernel image, the bootstrap page tables, and everything the
- *      bootloader used.
+ *   5. Reserve the metadata arena and the kernel image. Both have to be in the
+ *      bitmaps *before* step 6, which is what makes step 6 skip them in bulk
+ *      instead of inserting them and hoping a later reserve finds them.
+ *   6. Hand the usable, unreserved frames to the buddy allocator.
+ *
+ * The caller is responsible for reserving the rest of the bootloader's footprint
+ * — the low megabyte, and stage2's bootstrap page tables at BOOT_PT_ADDR.
  */
 void pmm_init(phys_addr_t e820_phys, uint32_t e820_count)
 {
@@ -640,17 +981,34 @@ void pmm_init(phys_addr_t e820_phys, uint32_t e820_count)
 	const struct e820_entry *map =
 		(const struct e820_entry *)phys_to_virt(e820_phys);
 	phys_addr_t highest = 0;
-	phys_addr_t reserved = 0;
-	phys_addr_t bitmap_bytes;
-	u64 arena_start, arena_end;
+	phys_addr_t bitmap_bytes, page_array_bytes;
+	phys_addr_t meta_bytes;
+	phys_addr_t run_lo = 0, run_hi = 0;
+	phys_addr_t pa_lo = 0, pa_hi = 0;
+	phys_addr_t pr_lo = 0, pr_hi = 0;
+	phys_addr_t rs_lo = 0, rs_hi = 0;
+	bool one_run;
+	phys_addr_t usable = 0, added = 0;
+	u64 *present_map, *reserved_map;
+	struct page *page_map;
+	phys_addr_t carve;
 
-	/* 1. Bound the address space. */
+	/* 1. Bound the address space. Zero-length and wrapping entries are
+	 * dropped here rather than being allowed to contribute a bogus bound:
+	 * base + length is unsigned and a wrapping entry reads as a small
+	 * number, and nothing downstream would notice. */
 	for (uint32_t i = 0; i < e820_count; i++) {
+		phys_addr_t base = map[i].base;
+		phys_addr_t length = map[i].length;
+
 		if (map[i].type != E820_USABLE)
 			continue;
-		phys_addr_t end = map[i].base + map[i].length;
-		if (end > highest)
-			highest = end;
+		if (length == 0)
+			continue;
+		if (base + length < base)
+			continue;
+		if (base + length > highest)
+			highest = base + length;
 	}
 
 	if (highest == 0)
@@ -659,146 +1017,176 @@ void pmm_init(phys_addr_t e820_phys, uint32_t e820_count)
 	pmm_total_pages = highest >> PAGE_SHIFT;
 
 	/*
-	 * 2. Metadata. Everything is placed at the top of usable memory and
-	 * carved down, because the bottom is where the bootloader structures
-	 * live and the top is the least contended.
-	 */
-	bitmap_bytes = ALIGN_UP((pmm_total_pages / 64) * sizeof(u64), PAGE_SIZE);
-
-	/* Find a usable region big enough for the bitmaps and the page array. */
-	arena_start = 0;
-	arena_end = 0;
-	for (uint32_t i = 0; i < e820_count; i++) {
-		if (map[i].type != E820_USABLE)
-			continue;
-		phys_addr_t base = ALIGN_UP(map[i].base, PAGE_SIZE);
-		phys_addr_t end = ALIGN_DOWN(map[i].base + map[i].length, PAGE_SIZE);
-		phys_addr_t need;
-
-		if (end <= base)
-			continue;
-		need = bitmap_bytes          /* present */
-			+ bitmap_bytes       /* reserved */
-			+ bitmap_bytes * ZONE_COUNT  /* zone maps */
-			+ pmm_total_pages * sizeof(struct page);
-
-		if (end - base >= need) {
-			arena_end = end;
-			arena_start = end - need;
-			break;
-		}
-	}
-
-	if (arena_end == 0) {
-		/*
-		 * The machine does not have a single contiguous run large enough
-		 * for all the metadata at once. Fall back to placing each piece
-		 * independently: this is the case on a fragmented VM, and
-		 * refusing to boot because of it would be worse than scattering
-		 * the arrays.
-		 */
-		klog(KLOG_WARN, "pmm: no contiguous metadata run; placing arrays separately\n");
-	}
-
-	/*
-	 * Carve the arrays out of the chosen region, top down.
+	 * 2. Metadata. Every array is placed inside a run the firmware reported
+	 * as usable, at the top of that run, because the bottom of memory is
+	 * where the bootloader structures live and the top is the least
+	 * contended. The frames the arrays occupy are reserved in step 5.
 	 *
-	 * Both placement paths hand back pointers rather than physical addresses.
-	 * The direct map is already live here, so the contiguous path translates
-	 * once at this point and the scattered path already has virtual
-	 * addresses. Keeping one representation is the point: an earlier version
-	 * had the contiguous path publish physical addresses and the scattered
-	 * path publish pointers, then unconditionally re-derived the first from
-	 * the second's variables — so on a fragmented machine the vmalloc results
-	 * were discarded and replaced by translations of uninitialised values.
+	 * vmalloc_raw() is deliberately not used for any of this. It hands back
+	 * non-contiguous VMALLOC_AREA addresses whose backing frames pmm cannot
+	 * recover, and whose PTEs at audit time carried the *virtual* address as
+	 * the frame — 0xFFFFC00000000000 masked down to 0x000FC00000000000,
+	 * about 4 PiB, with no RAM behind it. Metadata written there is written
+	 * nowhere, and the allocator then reads its own bitmaps back out of
+	 * whatever RAM happens to occupy that address. So instead of falling
+	 * back to vmalloc, the tracked frame bound is *shrunk* until the page
+	 * array fits in a run that really exists. Frames above the bound are
+	 * wasted, which is a recoverable and visible loss; an allocator whose own
+	 * state is fictional is neither.
+	 *
+	 * Only two bitmaps are kept. A third, one per zone, used to be allocated
+	 * and written for every frame and read by nothing: the zones come from
+	 * the address, and the allocator's bookkeeping is the free lists. On a
+	 * 4 GiB machine it cost 384 KiB and a -Wunused-function warning.
 	 */
-	phys_addr_t carve = arena_end;
-	u64 *zone_maps_base, *present_map, *reserved_map;
-	struct page *page_map;
+	bitmap_bytes = ALIGN_UP((pmm_total_pages / 64 + 1) * sizeof(u64),
+				PAGE_SIZE);
+	page_array_bytes = ALIGN_UP(pmm_total_pages * sizeof(struct page),
+				    PAGE_SIZE);
+	meta_bytes = bitmap_bytes * 2 + page_array_bytes;
 
-	if (arena_end != 0) {
-		phys_addr_t n;
+	/* Prefer a single run for all of it. */
+	one_run = meta_find_run(map, e820_count, meta_bytes, &run_lo, &run_hi);
 
-		n = ALIGN_UP((phys_addr_t)bitmap_bytes * ZONE_COUNT, PAGE_SIZE);
-		carve -= n;
-		zone_maps_base = (u64 *)(uintptr_t)phys_to_virt(carve);
-		memset(zone_maps_base, 0, n);
+	while (!one_run) {
+		/*
+		 * Nothing holds all of it. Shrink the bound rather than place the
+		 * page array in memory that may not be there. Each pass strictly
+		 * lowers pmm_total_pages, so this terminates.
+		 */
+		if (!meta_find_run(map, e820_count, page_array_bytes,
+				   &run_lo, &run_hi))
+			break;              /* no run can hold the page array */
+		if ((run_hi >> PAGE_SHIFT) >= pmm_total_pages)
+			break;              /* already bounded by that run: no progress */
 
-		n = ALIGN_UP((phys_addr_t)bitmap_bytes, PAGE_SIZE);
-		carve -= n;
-		present_map = (u64 *)(uintptr_t)phys_to_virt(carve);
-		memset(present_map, 0, n);
-
-		/* Same size as the present map, so the length computed above
-		 * still applies. */
-		carve -= n;
-		reserved_map = (u64 *)(uintptr_t)phys_to_virt(carve);
-		memset(reserved_map, 0, n);
-
-		n = ALIGN_UP((phys_addr_t)(pmm_total_pages * sizeof(struct page)),
-			     PAGE_SIZE);
-		carve -= n;
-		page_map = (struct page *)(uintptr_t)phys_to_virt(carve);
-		memset(page_map, 0, n);
-	} else {
-		void *m;
-
-		m = vmalloc_raw(bitmap_bytes * ZONE_COUNT);
-		if (!m)
-			panic("pmm: cannot allocate metadata\n");
-		zone_maps_base = m;
-		m = vmalloc_raw(bitmap_bytes);
-		if (!m)
-			panic("pmm: cannot allocate present bitmap\n");
-		present_map = m;
-		m = vmalloc_raw(bitmap_bytes);
-		if (!m)
-			panic("pmm: cannot allocate reserved bitmap\n");
-		reserved_map = m;
-		m = vmalloc_raw(pmm_total_pages * sizeof(struct page));
-		if (!m)
-			panic("pmm: cannot allocate page array\n");
-		page_map = m;
+		pmm_total_pages = run_hi >> PAGE_SHIFT;
+		bitmap_bytes = ALIGN_UP((pmm_total_pages / 64 + 1) * sizeof(u64),
+					PAGE_SIZE);
+		page_array_bytes = ALIGN_UP(pmm_total_pages * sizeof(struct page),
+					    PAGE_SIZE);
+		meta_bytes = bitmap_bytes * 2 + page_array_bytes;
+		one_run = meta_find_run(map, e820_count, meta_bytes,
+					&run_lo, &run_hi);
 	}
 
-	for (int z = 0; z < ZONE_COUNT; z++)
-		zone_bitmap[z] = zone_maps_base + (size_t)bitmap_bytes * z / sizeof(u64);
+	if (one_run) {
+		carve = run_hi;
+
+		carve -= page_array_bytes;
+		pa_lo = carve;
+		page_map = (struct page *)(uintptr_t)phys_to_virt(pa_lo);
+		pa_hi = carve + page_array_bytes;
+		memset(page_map, 0, page_array_bytes);
+
+		carve -= bitmap_bytes;
+		rs_lo = carve;
+		reserved_map = (u64 *)(uintptr_t)phys_to_virt(rs_lo);
+		rs_hi = carve + bitmap_bytes;
+		memset(reserved_map, 0, bitmap_bytes);
+
+		carve -= bitmap_bytes;
+		pr_lo = carve;
+		present_map = (u64 *)(uintptr_t)phys_to_virt(pr_lo);
+		pr_hi = carve + bitmap_bytes;
+		memset(present_map, 0, bitmap_bytes);
+	} else {
+		/*
+		 * The page array has to stand on its own, so put it in the
+		 * largest run that holds it and the bitmaps in another. Both are
+		 * still real frames from the E820 map.
+		 */
+		if (!meta_find_run(map, e820_count, page_array_bytes,
+				   &run_lo, &run_hi))
+			panic("pmm: no usable E820 run holds the %llu byte page array\n",
+			       (unsigned long long)page_array_bytes);
+
+		pa_hi = run_hi;
+		pa_lo = run_hi - page_array_bytes;
+		page_map = (struct page *)(uintptr_t)phys_to_virt(pa_lo);
+		memset(page_map, 0, page_array_bytes);
+
+		/* Prefer the tail of the same run for the bitmaps; fall back to
+		 * whatever other run is largest. */
+		if (pa_lo - bitmap_bytes * 2 >= run_lo)
+			carve = pa_lo;
+		else if (!meta_find_run(map, e820_count, bitmap_bytes * 2,
+					&run_lo, &run_hi))
+			panic("pmm: no usable E820 run holds the %llu byte bitmaps\n",
+			       (unsigned long long)(bitmap_bytes * 2));
+		else
+			carve = run_hi;
+
+		carve -= bitmap_bytes;
+		rs_lo = carve;
+		reserved_map = (u64 *)(uintptr_t)phys_to_virt(rs_lo);
+		rs_hi = carve + bitmap_bytes;
+		memset(reserved_map, 0, bitmap_bytes);
+
+		carve -= bitmap_bytes;
+		pr_lo = carve;
+		present_map = (u64 *)(uintptr_t)phys_to_virt(pr_lo);
+		pr_hi = carve + bitmap_bytes;
+		memset(present_map, 0, bitmap_bytes);
+
+		klog(KLOG_WARN,
+		     "pmm: metadata split across runs: page array %llx-%llx, bitmaps %llx-%llx\n",
+		     (unsigned long long)pa_lo, (unsigned long long)pa_hi,
+		     (unsigned long long)pr_lo, (unsigned long long)rs_hi);
+	}
+
 
 	frame_present = present_map;
 	frame_reserved = reserved_map;
 	page_array = page_map;
-	page_array_pages = (pmm_total_pages * sizeof(struct page)) >> PAGE_SHIFT;
 	present_words = (pmm_total_pages / 64) + 1;
-	zone_words = present_words;
 
 	/* 3. Default: everything is reserved. A frame becomes available only by
 	 * being explicitly marked present and unreserved below. The E820 gap
 	 * regions therefore stay unavailable for free. */
 	memset(frame_present, 0, (size_t)present_words * sizeof(u64));
 	memset(frame_reserved, 0xFF, (size_t)present_words * sizeof(u64));
-	for (int z = 0; z < ZONE_COUNT; z++)
-		memset(zone_bitmap[z], 0, (size_t)zone_words * sizeof(u64));
 
-	/* 4. Mark usable ranges present. */
+	/* 4. Mark usable ranges present, and stamp each frame's zone. */
 	for (uint32_t i = 0; i < e820_count; i++) {
-		phys_addr_t base, end, addr;
+		phys_addr_t base = map[i].base;
+		phys_addr_t length = map[i].length;
+		phys_addr_t lo, hi, addr;
 
-		if (map[i].type != E820_USABLE)
+		if (map[i].type != E820_USABLE || length == 0)
 			continue;
-		base = ALIGN_UP(map[i].base, PAGE_SIZE);
-		end = ALIGN_DOWN(map[i].base + map[i].length, PAGE_SIZE);
+		if (base + length < base)
+			continue;
+		lo = ALIGN_UP(base, PAGE_SIZE);
+		hi = ALIGN_DOWN(base + length, PAGE_SIZE);
 
-		for (addr = base; addr < end; addr += PAGE_SIZE) {
-			if ((addr >> PAGE_SHIFT) >= pmm_total_pages)
+		for (addr = lo; addr < hi; addr += PAGE_SIZE) {
+			phys_addr_t idx = addr >> PAGE_SHIFT;
+
+			if (idx >= pmm_total_pages)
 				break;
 			frame_set_present(addr, true);
 			frame_set_reserved(addr, false);
-			zone_set(zone_of(addr), addr >> PAGE_SHIFT, true);
+			/* Every frame's zone is set here, once, over the whole
+			 * address range. buddy_free_locked() selects its list
+			 * from page->zone and zone_free_locked() locks
+			 * page->zone, so a frame whose zone was left at the
+			 * memset value of 0 puts every block on the machine into
+			 * ZONE_DMA while the accounting is credited to the right
+			 * zone — which is exactly what pmm_dump reported:
+			 * 1048479 free pages under "dma", zero under "normal"
+			 * and "high". */
+			page_array[idx].zone = (uint8_t)zone_of(addr);
 		}
-		reserved += end - base;
 	}
 
-	/* 5. Init zones and hand the free memory to the buddy allocator. */
+	/*
+	 * Zone state. This has to happen before step 5, not after it: step 5
+	 * goes through pmm_reserve_range(), which walks each zone's free lists,
+	 * and an uninitialised free_list[] is a zeroed struct list_head whose
+	 * next is NULL. list_empty() then answers false — NULL is not the head —
+	 * so the walk believes the list is populated and dereferences NULL.
+	 */
 	memset(zones, 0, sizeof(zones));
 	static const char *const zone_names[ZONE_COUNT] = {
 		"dma", "normal", "high"
@@ -808,8 +1196,9 @@ void pmm_init(phys_addr_t e820_phys, uint32_t e820_count)
 		struct pmm_zone *zone = &zones[z];
 
 		zone->name = zone_names[z];
-		zone->base = 0;
-		zone->end = 0;
+		zone->base = zone_base(z);
+		zone->end = MIN(zone_frame_limit(z) << PAGE_SHIFT,
+				pmm_total_pages << PAGE_SHIFT);
 		zone->free_pages = 0;
 		zone->total_pages = 0;
 		zone->free_bitmap = 0;
@@ -819,118 +1208,185 @@ void pmm_init(phys_addr_t e820_phys, uint32_t e820_count)
 	}
 
 	/*
-	 * Build the free lists. Regions are handed over in ascending address
-	 * order and aligned down to the region base, which is what makes the
-	 * buddy invariant hold: a block at order k is 2^k-aligned, so its
-	 * buddy is a valid block at the same order.
+	 * 5. Reserve the metadata, then the kernel image.
+	 *
+	 * This is the step whose absence was audit #29: the arena was computed
+	 * and written through but never reserved, and because blocks are pushed
+	 * at the list head the allocator's own page array sat at the head of a
+	 * free list. The first caller was handed the allocator's bookkeeping and
+	 * memset over it.
+	 *
+	 * All three ranges are reserved, not just the page array: in the split
+	 * layout the bitmaps live somewhere else entirely.
 	 */
-	phys_addr_t added = 0;
-	for (uint32_t i = 0; i < e820_count; i++) {
-		phys_addr_t base, end, addr;
+	if (pa_hi > pa_lo)
+		pmm_reserve_range(pa_lo, pa_hi - pa_lo);
+	if (pr_hi > pr_lo)
+		pmm_reserve_range(pr_lo, pr_hi - pr_lo);
+	if (rs_hi > rs_lo)
+		pmm_reserve_range(rs_lo, rs_hi - rs_lo);
+	reserve_kernel_image();
 
-		if (map[i].type != E820_USABLE)
-			continue;
+	/*
+	 * And confirm the placement was real. If a metadata frame is not in
+	 * RAM the firmware reported, the allocator is about to read its own
+	 * state back out of memory it does not own, and every number it prints
+	 * will be meaningless. Say so here, where the addresses are known,
+	 * rather than three screens later in unexplained numbers.
+	 */
+	{
+		const phys_addr_t probe[3][2] = {
+			{ pa_lo, pa_hi }, { pr_lo, pr_hi }, { rs_lo, rs_hi },
+		};
+		const char *const what[3] = {
+			"page array", "present bitmap", "reserved bitmap",
+		};
 
-		base = ALIGN_UP(map[i].base, PAGE_SIZE);
-		end = ALIGN_DOWN(map[i].base + map[i].length, PAGE_SIZE);
-
-		/* Trim leading partial-order head so the first block is aligned. */
-		for (addr = base; addr < end;) {
-			zone_t z = zone_of(addr);
-			struct pmm_zone *zone = &zones[z];
-			unsigned order;
-			phys_addr_t run = 0;
-			phys_addr_t probe;
-			phys_addr_t limit = MIN(end,
-						   (z == ZONE_HIGH) ? pmm_total_pages << PAGE_SHIFT
-						   : ((uint64_t)z == ZONE_DMA ?
-						      ZONE_DMA_END : ZONE_NORMAL_END));
-
-			if (addr >= limit) {
-				addr = limit;
-				continue;
-			}
-
-			/* Find the largest order for which `addr` is aligned and
-			 * the whole block is inside this zone and this region. */
-			for (order = BUDDY_MAX_ORDER; order > 0; order--) {
-				phys_addr_t size = (1UL << order) << PAGE_SHIFT;
-				bool aligned = (addr % size) == 0;
-				bool fits = addr + size <= limit;
-				bool same_zone = zone_of(addr) ==
-						 zone_of(addr + size - 1);
-
-				if (aligned && fits && same_zone)
+		for (int i = 0; i < 3; i++) {
+			for (phys_addr_t a = probe[i][0]; a < probe[i][1];
+			     a += PAGE_SIZE) {
+				if (!frame_present_p(a)) {
+					panic("pmm: %s frame %llx is not in any usable E820 range\n",
+					      what[i], (unsigned long long)a);
 					break;
+				}
+				if (!frame_reserved_p(a))
+					panic("pmm: %s frame %llx was not reserved\n",
+					      what[i], (unsigned long long)a);
 			}
-
-			/* Count how many consecutive blocks of this order fit. */
-			probe = addr;
-			while (probe + ((1UL << order) << PAGE_SHIFT) <= limit) {
-				phys_addr_t size = (1UL << order) << PAGE_SHIFT;
-
-				if ((probe % size) != 0)
-					break;
-				if (zone_of(probe) != zone_of(probe + size - 1))
-					break;
-				if (!frame_present_p(probe) ||
-				    frame_reserved_p(probe))
-					break;
-				run += 1UL << order;
-				probe += size;
-			}
-
-			if (run == 0) {
-				addr += PAGE_SIZE;
-				continue;
-			}
-
-			zone = &zones[zone_of(addr)];
-			for (phys_addr_t n = 0; n < run; n += 1UL << order) {
-				struct page *p = &page_array[(addr + n) >> PAGE_SHIFT];
-				u64 irq = spinlock_irqsave(&zone->lock);
-
-				buddy_free_locked(p, order);
-				spinlock_unlock_irqrestore(&zone->lock, irq);
-				added += 1UL << order;
-			}
-
-			addr = probe;
 		}
 	}
 
-	for (int z = 0; z < ZONE_COUNT; z++) {
-		zones[z].total_pages = zones[z].free_pages;
-		if (zones[z].free_pages)
-			zones[z].base = 0;
-		pmm_total_pages += 0;   /* total was set from the E820 bound */
+	/* 6. Hand the free memory to the buddy allocator. */
+	/*
+	 * Build the free lists.
+	 *
+	 * Regions are handed over in ascending address order and blocks within a
+	 * region are cut at the largest order that is aligned at the current
+	 * frame and fits inside both the run of usable frames and the zone, which
+	 * is what makes the buddy invariant hold: a block at order k is 2^k
+	 * aligned, so its buddy is a valid block at the same order.
+	 *
+	 * The run is measured first, in bulk, so a reservation in the middle of a
+	 * region costs one alignment step on each side of it rather than turning
+	 * everything after it into single pages. Without that, reserving the
+	 * kernel image would leave the whole remaining 3 GiB as order-0 blocks
+	 * and no order-9 allocation could ever succeed.
+	 */
+	for (uint32_t i = 0; i < e820_count; i++) {
+		phys_addr_t base = map[i].base;
+		phys_addr_t length = map[i].length;
+		phys_addr_t lo, hi;
+
+		if (map[i].type != E820_USABLE || length == 0)
+			continue;
+		if (base + length < base)
+			continue;
+		lo = ALIGN_UP(base, PAGE_SIZE) >> PAGE_SHIFT;
+		hi = ALIGN_DOWN(base + length, PAGE_SIZE) >> PAGE_SHIFT;
+
+		while (lo < hi) {
+			phys_addr_t run = usable_run_end(lo, hi);
+
+			if (run == lo) {
+				lo++;
+				continue;
+			}
+
+			while (lo < run) {
+				zone_t z = zone_of(lo << PAGE_SHIFT);
+				phys_addr_t zone_hi =
+					MIN(run, zone_frame_limit(z));
+				struct page *p;
+				unsigned order;
+
+				/* Largest order aligned at this frame that fits
+				 * inside both the run and the zone. One block
+				 * at a time: taking the whole run at order 0
+				 * when the first frame is misaligned would
+				 * emit thousands of single pages where a
+				 * handful of doubling blocks would do, and
+				 * order 9+ would stop being satisfiable. */
+				order = BUDDY_MAX_ORDER;
+				while (order > 0 &&
+				       (((lo & ((1UL << order) - 1)) != 0) ||
+					(lo + (1UL << order) > zone_hi)))
+					order--;
+
+				p = &page_array[lo];
+				buddy_free_locked(p, order);
+				block_mark_tail(p, order);
+				added += 1UL << order;
+				lo += 1UL << order;
+			}
+			lo = run;
+		}
 	}
 
+	/*
+	 * Zone totals and the usable count. total_pages is the number of frames
+	 * the zone *manages* — present and unreserved — not the number that
+	 * happened to be free when init finished. Assigning the free count left
+	 * pmm_zone_total() returning a free count and pmm_dump printing "X/X
+	 * pages free" for every zone, with base and end left at 0 so nothing
+	 * could say which addresses a zone covered.
+	 */
+	for (int z = 0; z < ZONE_COUNT; z++) {
+		struct pmm_zone *zone = &zones[z];
+		phys_addr_t lo = zone->base >> PAGE_SHIFT;
+		phys_addr_t hi = zone->end >> PAGE_SHIFT;
+		phys_addr_t count = 0;
+
+		for (phys_addr_t idx = lo; idx < hi && idx < pmm_total_pages;
+		     idx++) {
+			phys_addr_t addr = idx << PAGE_SHIFT;
+
+			if (frame_present_p(addr) && !frame_reserved_p(addr))
+				count++;
+		}
+		zone->total_pages = count;
+		usable += count;
+	}
+
+	pmm_usable_pages = usable;
 	pmm_free_page_count = added;
 
-	klog(KLOG_INFO, "pmm: %u usable frames (%llu MiB) of %llu reported\n",
-	     (unsigned)added, (unsigned long long)(added * PAGE_SIZE >> 20),
+	klog(KLOG_INFO, "pmm: %llu usable frames (%llu MiB) of %llu tracked (%llu MiB)\n",
+	     (unsigned long long)usable,
+	     (unsigned long long)(usable * PAGE_SIZE >> 20),
+	     (unsigned long long)pmm_total_pages,
 	     (unsigned long long)(pmm_total_pages * PAGE_SIZE >> 20));
 	for (int z = 0; z < ZONE_COUNT; z++)
-		klog(KLOG_INFO, "pmm: zone %-6s free %u pages\n",
-		     zones[z].name, (unsigned)zones[z].free_pages);
+		klog(KLOG_INFO, "pmm: zone %-6s %llx-%llx %llu/%llu pages free\n",
+		     zones[z].name,
+		     (unsigned long long)zones[z].base,
+		     (unsigned long long)zones[z].end,
+		     (unsigned long long)zones[z].free_pages,
+		     (unsigned long long)zones[z].total_pages);
 
-	klog(KLOG_INFO, "pmm: metadata bitmaps %zu KiB, page array %zu KiB\n",
-	     (size_t)(present_words * 3 * sizeof(u64)) >> 10,
-	     (size_t)(pmm_total_pages * sizeof(struct page)) >> 10);
+	klog(KLOG_INFO,
+	     "pmm: metadata bitmaps %zu KiB, page array %zu KiB, reserved %llx-%llx %llx-%llx %llx-%llx\n",
+	     (size_t)(present_words * 2 * sizeof(u64)) >> 10,
+	     (size_t)(pmm_total_pages * sizeof(struct page)) >> 10,
+	     (unsigned long long)pr_lo, (unsigned long long)pr_hi,
+	     (unsigned long long)rs_lo, (unsigned long long)rs_hi,
+	     (unsigned long long)pa_lo, (unsigned long long)pa_hi);
 }
 
 void pmm_dump(void)
 {
 	klog(KLOG_INFO, "pmm: %llu/%llu frames free (%llu MiB of %llu MiB)\n",
 	     (unsigned long long)pmm_free_page_count,
-	     (unsigned long long)pmm_total_pages,
+	     (unsigned long long)pmm_usable_pages,
 	     (unsigned long long)(pmm_free_page_count * PAGE_SIZE >> 20),
-	     (unsigned long long)(pmm_total_pages * PAGE_SIZE >> 20));
+	     (unsigned long long)(pmm_usable_pages * PAGE_SIZE >> 20));
 	for (int z = 0; z < ZONE_COUNT; z++)
-		klog(KLOG_INFO, "pmm:   %-6s %u/%u pages free\n",
-		     zones[z].name, (unsigned)zones[z].free_pages,
-		     (unsigned)zones[z].total_pages);
+		klog(KLOG_INFO, "pmm:   %-6s %llx-%llx %llu/%llu pages free\n",
+		     zones[z].name,
+		     (unsigned long long)zones[z].base,
+		     (unsigned long long)zones[z].end,
+		     (unsigned long long)zones[z].free_pages,
+		     (unsigned long long)zones[z].total_pages);
 	klog(KLOG_INFO, "pmm: %llu allocs, %llu frees, %llu splits, %llu coalesces, %llu failures\n",
 	     (unsigned long long)pmm_stats.allocs,
 	     (unsigned long long)pmm_stats.frees,

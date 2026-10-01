@@ -197,6 +197,23 @@ void kmain(uint64_t bootinfo_phys)
 	pmm_reserve_range(0, 1024 * 1024);
 
 	/*
+	 * The bootstrap page tables, which the CPU is walking right now.
+	 *
+	 * stage2 builds them at BOOT_PT_ADDR/BOOT_PT_BYTES and enables paging on
+	 * them before handing over. They are ordinary usable RAM as far as the
+	 * E820 map is concerned, so the allocator would hand them out -- and the
+	 * first write to an allocated frame would rewrite the PML4 or the page
+	 * directory the processor is using, turning one allocation into a machine
+	 * that no longer can fetch its next instruction.
+	 *
+	 * pmm reserves the kernel image itself from _ebss, but these tables are
+	 * not part of the image: they are loader scratch that outlives the loader.
+	 * Nothing else covers them. Everything else stage2 touches sits below the
+	 * 1 MiB reserved above -- stack, bounce buffer, E820 map, bootinfo, GDT.
+	 */
+	pmm_reserve_range(0x002D0000, 0x00010000);
+
+	/*
 	 * The SLAB caches allocate buddy pages on first use, so they come up
 	 * after the PMM and not before it. Nothing between pmm_init() and here
 	 * allocates, so the first kmalloc() cannot arrive too early.
@@ -278,7 +295,7 @@ void kmain(uint64_t bootinfo_phys)
 
 static void kmain_banner(void)
 {
-	kprintf("OS kernel %s (%s, rev %s)\n", KERNEL_VERSION_STRING,
+	kprintf("%s (%s, rev %s)\n", KERNEL_VERSION_STRING,
 		KERNEL_BUILD_STAMP, KERNEL_GIT_REV);
 	kprintf("boot: entry 0x%016lx, image 0x%016lx, drive 0x%lx, cmdline '%s'\n",
 		boot.kernel_entry, boot.kernel_phys_base, boot.boot_drive,
@@ -307,8 +324,19 @@ static void kmain_report_cpu(void)
  */
 static void kmain_report_memory(void)
 {
+	/*
+	 * Bytes, not frames.
+	 *
+	 * pmm_total() and pmm_free() count frames, and this shifted them by 20 as
+	 * though they were bytes -- so a machine with 4 GiB of usable memory
+	 * reported "0 MiB total", because 1048576 frames is the threshold and
+	 * anything under 4 GiB of frames printed zero. The count was always right;
+	 * the unit was wrong. pmm_total_bytes()/pmm_free_bytes() exist so the
+	 * conversion happens in one place with a name that says which way it goes.
+	 */
 	kprintf("memory: %lu MiB total, %lu MiB free, %u E820 entries\n",
-		(unsigned long)(pmm_total() >> 20), (unsigned long)(pmm_free() >> 20),
+		(unsigned long)(pmm_total_bytes() >> 20),
+		(unsigned long)(pmm_free_bytes() >> 20),
 		boot.e820_count);
 
 	for (uint32_t i = 0; i < boot.e820_count; i++) {

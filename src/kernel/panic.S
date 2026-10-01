@@ -15,7 +15,26 @@
 	.type panic_regs, @function
 panic_regs:
 	/* rdi = &panic_state */
+	/* Saved first, because the return address below wants RAX as its
+	 * scratch register and the caller's RAX is the value that belongs at
+	 * offset 0. */
 	movq	%rax,  0(%rdi)
+
+	/*
+	 * The return address, taken before anything is pushed. At entry (rsp)
+	 * is the return address itself, because this function has no prologue
+	 * and no frame, so this is the address to return to in the *caller* --
+	 * the instruction after its call to panic_regs, which is the closest
+	 * thing to a faulting RIP available without a debugger.
+	 *
+	 * A label inside this function (the obvious `leaq .Lrip(%rip), %rax`)
+	 * answers a different question: it yields the address of the panic
+	 * handler, so every dump points into the reporter and looks like the
+	 * fault happened there.
+	 */
+	movq	(%rsp), %rax
+	movq	%rax, 128(%rdi)
+
 	movq	%rbx,  8(%rdi)
 	movq	%rcx, 16(%rdi)
 	movq	%rdx, 24(%rdi)
@@ -30,15 +49,6 @@ panic_regs:
 	movq	%r13, 104(%rdi)
 	movq	%r14, 112(%rdi)
 	movq	%r15, 120(%rdi)
-
-	/*
-	 * RIP has already advanced past the call to panic_regs, so the saved
-	 * value is the instruction after this function's caller set up the
-	 * frame. That is close enough to be useful and is the only RIP
-	 * obtainable without a debugger.
-	 */
-	leaq	.Lrip(%rip), %rax
-	movq	%rax, 128(%rdi)
 
 	/* CS is not readable with a plain MOV in 64-bit mode; pushfq/popq give
 	 * RFLAGS directly, and CS is recorded by the caller-side stub. */
@@ -63,7 +73,6 @@ panic_regs:
 
 	movl	$0, 168(%rdi)		/* cpu_id, filled by the caller */
 	ret
-.Lrip:
 	.size panic_regs, . - panic_regs
 
 	.section .note.GNU-stack, "", @progbits

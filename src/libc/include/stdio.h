@@ -58,6 +58,9 @@ extern char *fgets(char *s, int size, FILE *stream);
 extern int getline(char **lineptr, size_t *n, FILE *stream);
 extern int getc(FILE *stream);
 extern int getchar(void);
+extern int ungetc(int c, FILE *stream);
+extern void setbuf(FILE *stream, char *buf);
+extern int setvbuf(FILE *stream, char *buf, int mode, size_t size);
 
 extern int fprintf(FILE *stream, const char *format, ...);
 extern int printf(const char *format, ...);

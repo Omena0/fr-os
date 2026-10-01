@@ -195,8 +195,23 @@ static long sc_clock_gettime(struct syscall_regs *r)
 	/* Both clocks are the same counter. There is no RTC driver, so
 	 * CLOCK_REALTIME is uptime; the difference matters only to a program
 	 * that compares the two. */
-	ts.tv_sec = (s64)(sched_now_ns() / 1000000000ULL);
-	ts.tv_nsec = (s64)(sched_now_ns() % 1000000000ULL);
+	{
+		/*
+		 * Read the clock once.
+		 *
+		 * Two reads, one per field, can straddle a tick. The second read is
+		 * the later one, so if it lands in the next second the pair
+		 * reconstructs as sec = N, nsec = (small), which is *earlier* than
+		 * the N-1 that the previous call returned. A timestamp that goes
+		 * backwards is worse than an imprecise one: init's uptime computes
+		 * `ms = (now - last) * 1e6 / 1e3` as unsigned, so one backwards step
+		 * underflows and prints a number in the billions of milliseconds.
+		 */
+		uint64_t now = sched_now_ns();
+
+		ts.tv_sec = (s64)(now / 1000000000ULL);
+		ts.tv_nsec = (s64)(now % 1000000000ULL);
+	}
 	return copy_to_user(arg1(r), &ts, sizeof(ts));
 }
 

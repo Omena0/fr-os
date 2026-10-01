@@ -43,6 +43,14 @@ extern size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n)
  * A stream is the header plus its buffer in one allocation. fclose frees the
  * single block, and the three standard streams are static objects so they
  * exist before any allocator is usable.
+ *
+ * Known limit: the single buffer is shared, and put_byte() appends at wpos
+ * without first retiring whatever getc() has read but not yet consumed. A
+ * program that interleaves reads and writes on one stream can therefore have
+ * unread input overwritten. Nothing in this tree does that -- stdin, stdout and
+ * stderr are separate streams, and fopen never hands back a stream both ways --
+ * so the fix (compact the buffer on the first write after a read) is left for
+ * the program that needs it rather than guessed at here.
  */
 struct _IO_FILE {
 	int		fd;
@@ -97,6 +105,12 @@ FILE *stderr = &stderr_file;
  * Push bytes at the fd, retrying a short write from the new offset rather than
  * treating it as an error: a pipe with a small buffer legitimately accepts less
  * than was offered.
+ *
+ * A writer that returns 0 with a non-zero count is an error, not an
+ * end-of-stream: it means the write made no progress and, if the caller treats
+ * 0 as success, will never make any. This used to `break` out of the loop and
+ * return 0, so fflush() cleared wpos, reported success, and the caller believed
+ * the bytes were on the console.
  */
 static int write_all(int fd, const unsigned char *data, size_t n)
 {
@@ -111,7 +125,7 @@ static int write_all(int fd, const unsigned char *data, size_t n)
 			return -1;
 		}
 		if (ret == 0)
-			break;
+			return -1;
 		done += (size_t)ret;
 	}
 	return 0;
@@ -212,16 +226,103 @@ int puts(const char *s)
 size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream)
 {
 	const unsigned char *p = ptr;
-	size_t total = size * nmemb;
+	size_t total;
+	size_t done = 0;
 	size_t i;
 
 	if (size == 0 || nmemb == 0)
 		return 0;
-	for (i = 0; i < total; i++) {
-		if (put_byte(stream, p[i]) == EOF)
-			return i / size;
+	/* Checked because the product is what the loop below counts to: a
+	 * wrapped total would return "everything wrote" having written a
+	 * fraction of a byte per element. */
+	if (nmemb > SIZE_MAX / size) {
+		__errno = EOVERFLOW;
+		return 0;
+	}
+	total = size * nmemb;
+
+	/* An unbuffered stream never has a write region, so it goes the long
+	 * way round through put_byte(). This is the stderr path hello relies
+	 * on to see its line even when stdout still has bytes queued. */
+	if (stream->mode == _IONBF) {
+		for (i = 0; i < total; i++) {
+			if (put_byte(stream, p[i]) == EOF)
+				return i / size;
+		}
+		return nmemb;
+	}
+
+	while (done < total) {
+		size_t room = stream->bufsize - stream->wpos;
+		size_t chunk = total - done;
+
+		if (room == 0) {
+			if (fflush(stream))
+				return done / size;
+			room = stream->bufsize;
+		}
+		if (chunk > room)
+			chunk = room;
+		/* Bulk copy into the write region. put_byte() appends the same
+		 * bytes one at a time to the same place; doing it in one memcpy
+		 * is what makes a 93 KB initrd dump or a large snprintf cheap. */
+		memcpy(stream->buf + stream->wpos, p + done, chunk);
+		stream->wpos += chunk;
+		done += chunk;
+		if (stream->wpos == stream->bufsize ||
+		    (stream->mode == _IOLBF &&
+		     memchr(p + done - chunk, '\n', chunk) != NULL))
+			if (fflush(stream))
+				return done / size;
 	}
 	return nmemb;
+}
+
+/*
+ * Buffering mode and buffer size. setvbuf() only takes effect before the
+ * stream's first I/O, which is the last point at which the buffer model can be
+ * chosen: after that the stream may hold a partially filled buffer that
+ * changing the buffer underneath would strand. POSIX requires the call to have
+ * no effect in that case, so it reports failure and leaves the stream alone.
+ */
+int setvbuf(FILE *stream, char *buf, int mode, size_t size)
+{
+	if (!stream)
+		return -1;
+	if (mode != _IOFBF && mode != _IOLBF && mode != _IONBF) {
+		__errno = EINVAL;
+		return -1;
+	}
+	if (stream->wpos || stream->rpos < stream->rend)
+		return -1;
+	if (mode == _IONBF) {
+		/* put_byte() writes straight to the fd in this mode, so the
+		 * buffer is not merely unused: leaving the pointer in place
+		 * would keep the static 1 KiB of stdout alive for nothing. */
+		stream->mode = _IONBF;
+		stream->buf = NULL;
+		stream->bufsize = 0;
+		return 0;
+	}
+	if (buf && size) {
+		/* A caller-supplied buffer replaces the stream's own. It is
+		 * borrowed, never freed: fclose only frees streams that came
+		 * from fopen, and only their own trailing buffer. */
+		stream->buf = (unsigned char *)buf;
+		stream->bufsize = size;
+	}
+	stream->mode = mode;
+	return 0;
+}
+
+void setbuf(FILE *stream, char *buf)
+{
+	/* The historical contract: a non-NULL buf means fully buffered with
+	 * BUFSIZ bytes, NULL means unbuffered. */
+	if (buf)
+		setvbuf(stream, buf, _IOFBF, BUFSIZ);
+	else
+		setvbuf(stream, NULL, _IONBF, 0);
 }
 
 /* ------------------------------------------------------------------- input -- */
@@ -277,19 +378,41 @@ int getchar(void)
 size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream)
 {
 	unsigned char *p = ptr;
-	size_t want = size * nmemb;
+	size_t want;
 	size_t got = 0;
+	int c;
 
 	if (size == 0 || nmemb == 0)
 		return 0;
+	if (nmemb > SIZE_MAX / size) {
+		__errno = EOVERFLOW;
+		return 0;
+	}
+	want = size * nmemb;
 	while (got < want) {
-		int c = getc(stream);
-
+		c = getc(stream);
 		if (c == EOF)
 			break;
 		p[got++] = (unsigned char)c;
 	}
 	return got / size;
+}
+
+int ungetc(int c, FILE *stream)
+{
+	/*
+	 * One byte of pushback, which is what the struct has room for and all
+	 * POSIX requires. getc() checks the slot first. A pushback after EOF
+	 * clears the EOF indicator, as ungetc(3) specifies: the byte is what
+	 * the caller just read, so the stream is not at end of file any more.
+	 */
+	if (c == EOF)
+		return EOF;
+	if (stream->ungot >= 0)
+		return EOF;
+	stream->ungot = (unsigned char)c;
+	stream->eof = 0;
+	return (unsigned char)c;
 }
 
 char *fgets(char *s, int size, FILE *stream)
@@ -453,11 +576,14 @@ int perror(const char *s)
 	 * stderr is unbuffered, so the line cannot be lost in a buffer that a
 	 * crash would take with it, and building the text through fprintf
 	 * keeps the number formatting in one place.
+	 *
+	 * errno == 0 is not a reason to print nothing. glibc prints
+	 * "Success", which is the answer to the question that was asked; a
+	 * silent perror leaves the caller with no output and no clue that the
+	 * errno it was about to report was never set in the first place.
 	 */
 	int err = __errno;
 
-	if (err == 0)
-		return 0;
 	if (s && *s)
 		fprintf(stderr, "%s: %s\n", s, strerror(err));
 	else
@@ -475,20 +601,50 @@ int fclose(FILE *stream)
 		return EOF;
 	if (fflush(stream))
 		ret = EOF;
+	/*
+	 * The three standard streams are static and outlive every fclose, so
+	 * closing one of them must not release its descriptor: fd 1 is the
+	 * console for the whole lifetime of the process, and a program that
+	 * fclose(stdout) -- which POSIX explicitly permits, with stdio
+	 * reopening it on the next use -- would otherwise lose stdout for
+	 * good. Everything else is closed and, if it came from fopen, freed.
+	 */
+	if (stream == &stdin_file || stream == &stdout_file ||
+	    stream == &stderr_file) {
+		if (sys_close(stream->fd))
+			ret = EOF;
+		/* Reopenable: the next use of the stream works again. */
+		stream->fd = (stream == &stdin_file) ? STDIN_FILENO :
+			     (stream == &stdout_file) ? STDOUT_FILENO :
+			     STDERR_FILENO;
+		stream->err = 0;
+		stream->eof = 0;
+		stream->wpos = 0;
+		stream->rpos = 0;
+		stream->rend = 0;
+		stream->ungot = -1;
+		return ret;
+	}
 	if (sys_close(stream->fd))
 		ret = EOF;
-	/* The three standard streams are static and outlive every fopen;
-	 * anything else came from malloc and goes back. */
-	if (stream != &stdin_file && stream != &stdout_file && stream != &stderr_file)
-		free(stream);
+	free(stream);
 	return ret;
 }
 
+/*
+ * The mode string is validated rather than pattern-matched loosely: POSIX
+ * allows only [rwa] followed by an optional 'b' and an optional '+', in that
+ * order and at most once each. The previous code looked only at mode[1], so
+ * "rw" opened read-only and "r+b" fell through to the plain 'r' path -- a typo
+ * became a silently wrong open rather than an error.
+ */
 FILE *fopen(const char *path, const char *mode)
 {
-	int oflags = 0;
+	int oflags;
 	int fflags = 0;
 	int smode = _IOFBF;
+	int plus = 0;
+	const char *p;
 	FILE *stream;
 
 	if (!path || !mode || !*mode) {
@@ -513,14 +669,31 @@ FILE *fopen(const char *path, const char *mode)
 		__errno = EINVAL;
 		return NULL;
 	}
+
 	/* "b" is accepted and ignored: there is no mode where a byte and a text
 	 * stream differ on this target, and rejecting it would break every
 	 * portable program that writes "wb". */
-	if (mode[1] == '+' || (mode[1] == 'b' && mode[2] == '+')) {
+	for (p = mode + 1; *p; p++) {
+		if (*p == 'b')
+			continue;
+		if (*p == '+' && !plus) {
+			plus = 1;
+			continue;
+		}
+		__errno = EINVAL;
+		return NULL;
+	}
+
+	if (plus) {
 		oflags = (oflags & ~O_ACCMODE) | O_RDWR;
-		fflags = FREAD | FWRITE;
-		if (fflags & FAPPEND)
-			fflags |= FREAD;
+		/*
+		 * OR in FREAD; do not reassign. The `fflags = FREAD | FWRITE`
+		 * this replaces cleared the FAPPEND that the 'a' branch had
+		 * just set, so "a+" lost O_APPEND and the lseek-to-end that
+		 * fflush() issues on an append stream never happened --
+		 * writes landed wherever the shared offset had drifted to.
+		 */
+		fflags |= FREAD;
 	}
 
 	stream = malloc(sizeof(*stream) + BUFSIZ);

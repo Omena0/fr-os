@@ -1,5 +1,10 @@
 # Bootloader Overview
 
+> This page is about **Fr Boot**, the bootloader. Fr Boot's job ends when it
+> transfers control to **Fr Core**, the kernel, at the kernel's link address in
+> its own page tables. It is not responsible for anything after that, and it
+> cannot report a fault raised by the kernel.
+
 ## Role
 
 The bootloader is responsible for:

@@ -1,5 +1,10 @@
 # Kernel Overview
 
+> This page is about **Fr Core**, the kernel. Fr Core is one component of
+> **Fr OS**; it is not the system. A panic in Fr Core does not mean Fr Boot or
+> the firmware are down, and the kernel's own diagnostics say "Fr Core" for
+> exactly that reason. `KERNEL_VERSION_STRING` is `FR_CORE_NAME " " KERNEL_VERSION`.
+
 ## Architecture
 
 The kernel is a **monolithic kernel** with the following characteristics:

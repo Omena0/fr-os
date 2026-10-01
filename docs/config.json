@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/Omena0/fr-docs/main/config.schema.json",
-  "project_name": "Docs",
+  "project_name": "Fr OS",
   "copyright_holder": "CHANGE_ME",
   "project_url": "",
   "site_path_prefix": "/",
@@ -9,23 +9,259 @@
   "docs_dir": ".",
   "sidebar": [
     [
-      "Getting Started",
+      "Fr OS",
       [
         [
-          "index",
-          "Home"
+          "README",
+          "Overview"
         ],
         [
-          "installation",
-          "Installation"
+          "architecture/overview",
+          "Architecture"
         ],
         [
-          "quickstart",
-          "Quickstart"
+          "architecture/memory-layout",
+          "Memory Layout"
         ],
         [
-          "configuration",
-          "Configuration"
+          "architecture/posix-compliance",
+          "POSIX Compliance"
+        ],
+        [
+          "architecture/security-model",
+          "Security Model"
+        ],
+        [
+          "architecture/performance-mandate",
+          "Performance Mandate"
+        ]
+      ]
+    ],
+    [
+      "Fr Boot",
+      [
+        [
+          "bootloader/overview",
+          "Overview"
+        ],
+        [
+          "bootloader/stage1",
+          "Stage 1"
+        ],
+        [
+          "bootloader/stage2",
+          "Stage 2"
+        ],
+        [
+          "bootloader/kernel-handoff",
+          "Kernel Handoff"
+        ],
+        [
+          "bootloader/memory-map",
+          "Memory Map"
+        ],
+        [
+          "bootloader/serial-output",
+          "Serial Output"
+        ],
+        [
+          "bootloader/build",
+          "Build"
+        ]
+      ]
+    ],
+    [
+      "Fr Core",
+      [
+        [
+          "kernel/overview",
+          "Overview"
+        ],
+        [
+          "kernel/early-boot",
+          "Early Boot"
+        ],
+        [
+          "kernel/interrupt-handling",
+          "Interrupts"
+        ],
+        [
+          "kernel/context-switching",
+          "Context Switching"
+        ],
+        [
+          "kernel/privilege-levels",
+          "Privilege Levels"
+        ],
+        [
+          "kernel/syscall-abi",
+          "Syscall ABI"
+        ],
+        [
+          "kernel/panic-system",
+          "Panic"
+        ],
+        [
+          "kernel/logging",
+          "Logging"
+        ]
+      ]
+    ],
+    [
+      "Memory",
+      [
+        [
+          "memory/overview",
+          "Overview"
+        ],
+        [
+          "memory/physical-allocator",
+          "Physical Allocator"
+        ],
+        [
+          "memory/buddy-allocator",
+          "Buddy Allocator"
+        ],
+        [
+          "memory/slab-allocator",
+          "SLAB"
+        ],
+        [
+          "memory/virtual-memory",
+          "Virtual Memory"
+        ],
+        [
+          "memory/userspace-malloc",
+          "Userspace malloc"
+        ]
+      ]
+    ],
+    [
+      "Scheduling",
+      [
+        [
+          "scheduling/overview",
+          "Overview"
+        ],
+        [
+          "scheduling/mlfq",
+          "MLFQ"
+        ],
+        [
+          "scheduling/realtime-scheduler",
+          "Realtime"
+        ],
+        [
+          "scheduling/multicore-overview",
+          "Multicore"
+        ]
+      ]
+    ],
+    [
+      "Syscalls",
+      [
+        [
+          "syscalls/overview",
+          "Overview"
+        ],
+        [
+          "syscalls/dispatch-path",
+          "Dispatch Path"
+        ],
+        [
+          "syscalls/process-syscalls",
+          "Process"
+        ],
+        [
+          "syscalls/memory-syscalls",
+          "Memory"
+        ],
+        [
+          "syscalls/file-syscalls",
+          "File"
+        ]
+      ]
+    ],
+    [
+      "Fr Libc and Fr Userland",
+      [
+        [
+          "userspace/overview",
+          "Overview"
+        ],
+        [
+          "userspace/libc",
+          "Fr Libc"
+        ],
+        [
+          "userspace/process-model",
+          "Process Model"
+        ],
+        [
+          "userspace/elf-loading",
+          "ELF Loading"
+        ],
+        [
+          "userspace/init-system",
+          "Fr Init"
+        ]
+      ]
+    ],
+    [
+      "Designed, Not Built",
+      [
+        [
+          "filesystem/overview",
+          "Filesystem"
+        ],
+        [
+          "networking/overview",
+          "Networking"
+        ],
+        [
+          "ipc/overview",
+          "IPC"
+        ],
+        [
+          "drivers/overview",
+          "Drivers"
+        ],
+        [
+          "security/overview",
+          "Security"
+        ]
+      ]
+    ],
+    [
+      "Building and Debugging",
+      [
+        [
+          "build/overview",
+          "Build Overview"
+        ],
+        [
+          "build/toolchain",
+          "Toolchain"
+        ],
+        [
+          "build/makefile-structure",
+          "Makefile"
+        ],
+        [
+          "build/qemu-setup",
+          "QEMU"
+        ],
+        [
+          "build/testing",
+          "Testing"
+        ],
+        [
+          "debugging/overview",
+          "Debugging"
+        ],
+        [
+          "debugging/serial-diagnostics",
+          "Serial Diagnostics"
         ]
       ]
     ]

@@ -1,5 +1,11 @@
 # Architecture Overview
 
+> **Fr OS** is the project. **Fr Core** is the kernel. Everything on this page is
+> about the whole system unless it says otherwise. Where a page describes a
+> component, it names that component: `Fr Boot` (bootloader), `Fr Init` (first
+> userspace process), `Fr Libc` (C runtime), `Fr Userland` (programs). The names
+> are macros in `src/include/version.h`.
+
 ## System Philosophy
 
 This OS is a POSIX-compatible, Linux-like operating system targeting x86-64 hardware, running under QEMU with KVM acceleration. It is designed with three primary constraints:

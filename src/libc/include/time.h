@@ -36,6 +36,13 @@ typedef uint32_t clockid_t;
  * Clock ids. The values are the kernel's, not glibc's: they are part of the
  * syscall ABI, and using glibc's numbering would silently select the wrong
  * clock rather than fail.
+ *
+ * Only the first three are served. The kernel runs one counter and ignores the
+ * clock id, so CLOCK_THREAD_CPUTIME_ID (no per-thread accounting),
+ * CLOCK_MONOTONIC_RAW (no separate raw counter) and CLOCK_BOOTTIME (which would
+ * have to exclude suspend time, and there is no suspend) have no honest answer
+ * here: clock_gettime rejects them with EINVAL rather than returning the
+ * monotonic clock under a name that promises something else.
  */
 #define CLOCK_REALTIME		0
 #define CLOCK_MONOTONIC		1

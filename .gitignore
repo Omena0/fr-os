@@ -1,4 +1,6 @@
 /build
 .vscode
 .kilo
-MEGA_AUDIT.md
+# transient shared-tree coordination state; not source
+/ownership.json
+/ownership.json.lock

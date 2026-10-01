@@ -24,7 +24,7 @@ import sys
 
 INITRD_MAGIC = 0x4F53425255444E44  # "OSRBUNDND"
 INITRD_VERSION = 1
-INITRD_HEADER_FMT = "<QIIQ"  # magic, version, flags, total_len
+INITRD_HEADER_FMT = "<QIIQ"  # magic, version, entry_count, total_len
 INITRD_HEADER_SIZE = struct.calcsize(INITRD_HEADER_FMT)
 ENTRY_FMT = "<HHQQ"  # name_len, mode, size, offset
 
@@ -51,7 +51,8 @@ def build(entries: list[tuple[str, str, int]]) -> bytes:
         index.extend(name_bytes)
 
     total = INITRD_HEADER_SIZE + len(index) + len(payload)
-    header = struct.pack(INITRD_HEADER_FMT, INITRD_MAGIC, INITRD_VERSION, 0, total)
+    header = struct.pack(INITRD_HEADER_FMT, INITRD_MAGIC, INITRD_VERSION,
+                          len(entries), total)
     return header + bytes(index) + bytes(payload)
 
 

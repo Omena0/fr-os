@@ -37,7 +37,8 @@ INITRD_LBA = 4096
 # Where the userspace bundle begins inside the initrd, and its size. The kernel
 # reads a small header at the start of the initrd to find it.
 INITRD_MAGIC = 0x4F53425255444E44  # "OSRBUNDND"
-INITRD_HEADER_FMT = "<QIIQ"  # magic, version, flags, total_len
+INITRD_HEADER_FMT = "<QIIQ"  # magic, version, entry_count, total_len
+INITRD_HEADER_SIZE = struct.calcsize(INITRD_HEADER_FMT)
 
 
 def pad_to_sectors(data: bytes, what: str) -> int:
@@ -73,8 +74,8 @@ def build_initrd(entries: list[tuple[str, str]]) -> bytes:
         index.extend(struct.pack("<HHQQ", len(name_bytes), 0o755, len(payload), offset))
         index.extend(name_bytes)
 
-    total = 16 + len(index) + len(body)
-    header = struct.pack(INITRD_HEADER_FMT, INITRD_MAGIC, 1, 0, total)
+    total = INITRD_HEADER_SIZE + len(index) + len(body)
+    header = struct.pack(INITRD_HEADER_FMT, INITRD_MAGIC, 1, len(entries), total)
     return header + bytes(index) + bytes(body)
 
 

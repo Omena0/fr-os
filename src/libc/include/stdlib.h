@@ -28,10 +28,28 @@ void  free(void *ptr);
 void *calloc(size_t nmemb, size_t size);
 void *realloc(void *ptr, size_t size);
 void *reallocarray(void *ptr, size_t nmemb, size_t size);
-void *aligned_alloc(size_t alignment, size_t size);
-int   posix_memalign(void **memptr, size_t alignment, size_t size);
 size_t malloc_usable_size(void *ptr);
 int   malloc_trim(size_t pad);
+
+/*
+ * aligned_alloc and posix_memalign over-allocate and store the raw pointer in
+ * the sizeof(void*) bytes immediately below the address they return.
+ *
+ * Consequence, and it is a real limitation rather than an oversight: free()
+ * cannot accept the aligned address. free() validates the block by reading the
+ * header at `ptr - sizeof(struct chunk)`, and for an aligned pointer those
+ * bytes are the stored raw pointer, not a header -- so free() refuses it and
+ * aborts instead of corrupting the heap. A program that needs aligned memory
+ * that free() can reclaim must ask malloc() for `size + alignment +
+ * sizeof(void *)` and do the alignment itself.
+ *
+ * C11 7.22.3.1 and POSIX both say free() shall accept the aligned result;
+ * neither is satisfied here. Nothing in the tree uses these two functions, so
+ * the gap is documented rather than worked around; the fix belongs in the
+ * allocator, which is the only code that can find the raw pointer.
+ */
+void *aligned_alloc(size_t alignment, size_t size);
+int   posix_memalign(void **memptr, size_t alignment, size_t size);
 
 void  exit(int status) __attribute__((noreturn));
 void  _Exit(int status) __attribute__((noreturn));

@@ -37,27 +37,39 @@ Kernel
 
 ## Design Principles
 
-- **O(1) fast path**: Per-CPU SLAB magazines provide O(1) allocation without locks for the common case.
-- **Fragmentation avoidance**: SLAB reuses freed objects before requesting new pages. Buddy coalesces free blocks. Virtual space is compacted by the memory compaction daemon.
-- **Strict physical/virtual separation**: Kernel code never assumes physical contiguity for virtually allocated memory (except for DMA allocations).
-- **NUMA awareness**: Physical allocations prefer the NUMA node local to the requesting CPU.
-- **Huge page support**: 2 MB huge pages are used for kernel direct map and for userspace regions that use `MAP_HUGETLB`.
+- **O(1) fast path**: Per-CPU SLAB magazines absorb the common case, so the
+  per-object cost is a push or pop rather than a list walk. The magazine path
+  does take a spinlock — it is not lock-free — but it is the cheapest of the
+  three tiers and it is what keeps an interrupt that allocates mid-operation
+  from handing the same pointer to two callers.
+- **Fragmentation avoidance**: SLAB reuses freed objects before requesting new
+  pages, and the buddy allocator coalesces free blocks with its buddy on free.
+  There is no compaction daemon and no page reclamation daemon.
+- **Strict physical/virtual separation**: `vmalloc` never assumes physical
+  contiguity; only `pmm_alloc_dma_range()` does, and it exists for DMA.
+- **NUMA awareness**: none. `struct page` has no `numa_node`, and every zone is
+  derived purely from the physical address.
+- **Huge pages**: the 4 GiB direct map is built with 2 MiB pages. User mappings
+  are all 4 KiB, and `MAP_HUGETLB` does nothing.
 
 ## Concurrency Strategy
 
 | Layer | Locking |
 |---|---|
-| Per-CPU SLAB magazine | None (per-CPU, only accessed by local CPU) |
-| SLAB global pool | Per-slab-cache spinlock |
+| Per-CPU SLAB magazine | One spinlock (irqsave) per CPU per cache — **not** lock-free |
+| SLAB cache (`partial`/`full` lists) | Per-cache spinlock |
 | Buddy allocator | Per-zone spinlock |
-| VMM (page table ops) | Per-process page table lock (or RCU for reads) |
-| TLB shootdown | IPI broadcast (atomic, non-blocking) |
+| PMM frame metadata bitmaps | Unsynchronised after `pmm_init()` |
+| VMM page-table updates | **None.** `invlpg` flushes whichever address space CR3 currently names, and nothing protects the walk |
+| TLB shootdown | Not implemented; there is no IPI and no second CPU |
 
 ## Memory System Daemons
 
-- **Memory compaction daemon**: Periodically defragments physical memory by moving pages to consolidate free blocks. See [memory-compaction.md](memory-compaction.md).
-- **Page reclamation daemon (`kreclaimd`)**: Reclaims pages from page cache and anonymous memory under memory pressure. See [page-reclamation.md](page-reclamation.md).
-- **Overcommit manager**: Enforces the configured overcommit policy. See [overcommit-policy.md](overcommit-policy.md).
+None. There is no compaction daemon, no page reclamation daemon (`kreclaimd`)
+and no overcommit manager. The documents that describe them —
+[memory-compaction.md](memory-compaction.md),
+[page-reclamation.md](page-reclamation.md),
+[overcommit-policy.md](overcommit-policy.md) — describe a design, not this tree.
 
 ## Related Documents
 

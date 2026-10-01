@@ -160,8 +160,14 @@ void sched_add(struct task *t);
 /* Remove a task from whatever queue holds it. */
 void sched_remove(struct task *t);
 
-/* Pick the highest-priority runnable task and switch to it. Returns when the
- * calling task is scheduled again. */
+/* Pick the highest-priority runnable task and switch to it.
+ *
+ * Does not return in the usual sense: the calling task is suspended inside
+ * this function's loop and, when it is next scheduled, resumes by jumping back
+ * to the top of that loop rather than by returning to its own caller. Every
+ * value the loop needs is recomputed at the top, so a second pass through it is
+ * a plain re-pick and not a replay of the switch. See the resume contract above
+ * schedule() in sched.c. */
 void schedule(void);
 
 /* Never returns: hands the CPU to the first task and stays in the scheduler. */
@@ -171,7 +177,20 @@ __noreturn void sched_start(void);
  * abandoned, so control never returns to it. */
 __noreturn void sched_stop_current(void);
 
-/* Move a runnable task to `cpu`'s run queue. */
+/*
+ * Move `t` to `cpu`'s run queue.
+ *
+ * The migration list is for *placement*, not for state. This places any task
+ * that is on no run queue — blocked, stopped, TASK_NEW, or currently running
+ * elsewhere — so it cannot be described as moving "a runnable task": a task
+ * that is asleep and then has its affinity changed is exactly the case this
+ * exists for, and it must not be made runnable by being moved.
+ *
+ * The runnable test lives where the list is consumed: global_pop() refuses a
+ * task that is not TASK_RUNNABLE and leaves it on the migration list, so a
+ * blocked task here becomes runnable on the next runnable call to sched_wake(),
+ * not at migration time. sched_migrate() deliberately does not touch t->state.
+ */
 void sched_migrate(struct task *t, u32 cpu);
 
 /* Restrict a task to `mask`; migrates it if it is no longer allowed to run

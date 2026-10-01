@@ -67,6 +67,52 @@ void fd_table_close_all(struct task *t);
 extern unsigned char init_image[];
 extern unsigned long init_image_size;
 
+/*
+ * Initrd container, as produced by tools/initrd.py.
+ *
+ *   header  24 bytes: magic u64, version u32, entry_count u32, total_len u64
+ *
+ * `entry_count` is load-bearing, not decoration. Every entry's offset is
+ * relative to the payload and the payload follows the index, so the payload
+ * base cannot be found without knowing where the index stops. Deriving it by
+ * walking until a zero name length parses the first bytes of an ELF header as
+ * an index entry.
+ *   index   repeated: name_len u16, mode u16, size u64, offset u64,
+ *                     then name_len bytes of name -- no padding, no alignment
+ *   payload the files, concatenated; every entry's `offset` is relative to
+ *           the *start of this section*, which the header does not record.
+ *           The only way to find it is to walk the index to its end, so a
+ *           consumer cannot resolve an offset without doing so first.
+ *
+ * Little-endian throughout, matching every x86 ABI we run on.
+ */
+#define INITRD_MAGIC       0x4F53425255444E44ULL  /* "OSRBUNDND" */
+#define INITRD_HEADER_SIZE 24u
+#define INITRD_ENTRY_SIZE  20u
+
+/* Unaligned little-endian loads. The container is byte-packed, so casting a
+ * pointer to a struct would silently depend on the kernel's alignment. */
+static inline uint16_t initrd_le16(const uint8_t *p)
+{
+	return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
+}
+
+static inline uint32_t initrd_le32(const uint8_t *p)
+{
+	return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+	       ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static inline uint64_t initrd_le64(const uint8_t *p)
+{
+	uint64_t v = 0;
+	int i;
+
+	for (i = 7; i >= 0; i--)
+		v = (v << 8) | p[i];
+	return v;
+}
+
 struct task *process_create_init(void);
 
 /* Terminate the calling task. Never returns. */

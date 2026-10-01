@@ -83,6 +83,85 @@ static spinlock_t global_lock = SPINLOCK_INIT;
 static struct list_head global_queue = LIST_HEAD_INIT(global_queue);
 static volatile u64 global_count;
 
+/*
+ * Take a task off the migration list if it is on it.
+ *
+ * A task has one `rq_node` and therefore one place it can be linked, so
+ * `on_rq` and `in_global` record which place that is and the invariant is that
+ * at most one of them is set: a task is on a run queue, or on the migration
+ * list, or on neither — never on both.
+ *
+ * The invariant is not free, and the reason is worth stating because it is not
+ * obvious from either list operation. `rq_enqueue_locked()` re-initialises
+ * `rq_node` before linking it, so enqueueing a task that is *still* linked in
+ * `global_queue` does not splice it out of that list. `global_queue` is left
+ * holding a pointer to a node whose prev/next now belong to a different list,
+ * and both lists are corrupt from that instant: a later `global_pop()` walks
+ * out of the migration list and into a run queue. Symmetrically, `global_push()`
+ * linking a node a run queue already owns corrupts the run queue the same way.
+ *
+ * So both paths into a list go through here or through `global_push()`, and
+ * each refuses a node that is already linked. That makes the invariant
+ * structural: there is no sequence of calls that gives one task two owners.
+ *
+ * Called with the destination run queue's lock held, and it must be called
+ * before `rq_enqueue_locked()` links anything. `global_lock` is therefore
+ * always taken run-queue-then-global, which is the order `sched_set_affinity()`
+ * already uses; no path in this file takes them the other way round.
+ */
+static void global_unlink(struct task *t)
+{
+	u64 flags = spinlock_irqsave(&global_lock);
+
+	if (t->in_global) {
+		list_del(&t->rq_node);
+		list_init(&t->rq_node);
+		t->in_global = false;
+		if (global_count)
+			global_count--;
+	}
+	spinlock_unlock_irqrestore(&global_lock, flags);
+}
+
+/*
+ * Is there a runnable task waiting on the migration list?
+ *
+ * A predicate rather than a count of runnable entries, on purpose.
+ * global_count stays the exact length of the list, which list_add and list_del
+ * already maintain without any help, so its accounting cannot drift. A second
+ * counter meaning "how many of those could run" would have to be updated by
+ * every push, pop and unlink, and getting one of them wrong is a silent
+ * under- or over-count rather than a crash — the kind of bug that shows up as a
+ * CPU that is mysteriously busy.
+ *
+ * The cost is an O(n) walk of the migration list, where n is the number of
+ * tasks migrated and not yet picked up. It runs at most once per hlt, and only
+ * when the list is non-empty.
+ *
+ * It has to exist at all because sched_migrate() pushes any task that is on no
+ * run queue, including one that is blocked. The idle loop asks this question to
+ * decide whether to call schedule(), and schedule() cannot find work for a
+ * blocked task, so asking on the list's length alone would leave the idle task
+ * calling schedule(), finding nothing, and looping — a spin on the CPU that can
+ * never reach the hlt below it.
+ */
+static bool global_has_runnable(void)
+{
+	bool found = false;
+	u64 flags = spinlock_irqsave(&global_lock);
+
+	for (struct list_head *pos = global_queue.next; pos != &global_queue;
+	     pos = pos->next) {
+		if (list_entry(pos, struct task, rq_node)->state == TASK_RUNNABLE) {
+			found = true;
+			break;
+		}
+	}
+
+	spinlock_unlock_irqrestore(&global_lock, flags);
+	return found;
+}
+
 /* Per-CPU sleep lists, ordered by wake_tick. Short by design: a kernel this
  * size has tens of sleepers, not thousands, and a sorted insertion keeps the
  * expiry walk O(expired) instead of O(all). */
@@ -123,7 +202,7 @@ struct task *sched_idle_task(void)
 }
 
 /* Forward: the idle task consults it before every hlt. */
-static bool rq_has_work_locked(const struct runqueue *rq);
+static bool rq_has_work_locked(const struct runqueue *rq, const struct task *ignore);
 
 /* ------------------------------------------------------------ idle task ----- */
 
@@ -142,11 +221,26 @@ static __noreturn void idle_thread(void *arg)
 
 	for (;;) {
 		u64 flags = spinlock_irqsave(&rq->lock);
-		bool work = rq_has_work_locked(rq);
+		/*
+		 * Nothing is runnable on this CPU, so this task — which is not on
+		 * any run queue itself, see sched_init() — can go to hlt.
+		 *
+		 * `ignore` is passed anyway. It is a backstop, not the mechanism:
+		 * no code path enqueues the idle task, so `rq_has_work_locked()`
+		 * can never see it. That is deliberate — see the note on
+		 * rq_pick_locked() — and it is what makes "the picker returned
+		 * NULL" mean exactly "no task is runnable" rather than "only the
+		 * idle task is left". If a future change does put the idle task on
+		 * a level, this test starts reporting work the queue does not have,
+		 * and the loop below spins on the CPU instead of ever reaching the
+		 * hlt. Better that than the reverse: a missed hlt costs a spin,
+		 * a spurious one costs the idle loop's reason to exist.
+		 */
+		bool work = rq_has_work_locked(rq, rq->idle);
 
 		spinlock_unlock_irqrestore(&rq->lock, flags);
 
-		if (work || global_count) {
+		if (work || global_has_runnable()) {
 			schedule();
 			continue;
 		}
@@ -222,6 +316,14 @@ static inline int rt_bitmap_highest(const struct rt_prio_array *rt)
  */
 static void rq_enqueue_locked(struct runqueue *rq, struct task *t, bool head)
 {
+	/*
+	 * Detach from the migration list before linking into this one. rq_node is
+	 * a single link and cannot be in two lists, and linking it without
+	 * detaching first leaves global_queue pointing at a node this queue now
+	 * owns. See global_unlink().
+	 */
+	global_unlink(t);
+
 	t->rq_cpu = this_cpu_id();
 	t->on_rq = true;
 	t->rq_node.prev = &t->rq_node;
@@ -276,8 +378,22 @@ static void rq_enqueue_locked(struct runqueue *rq, struct task *t, bool head)
 	}
 }
 
+/*
+ * Unlink a task from whichever queue holds it.
+ *
+ * The unlink comes first, deliberately. The RT branch below asks whether its
+ * priority list is now empty in order to clear that priority's bitmap bit, and
+ * the answer it needs is the state of the list *after* the task has left it —
+ * asking before the unlink answers a question about a list that still contains
+ * the task, so the last task at a priority never clears its bit, the bitmap
+ * keeps saying that priority has work, and the next pick computes a task
+ * pointer out of a sentinel node instead of out of a task.
+ */
 static void rq_dequeue_locked(struct runqueue *rq, struct task *t)
 {
+	list_del(&t->rq_node);
+	t->on_rq = false;
+
 	switch (t->policy) {
 	case SCHED_DEADLINE:
 		if (rq->deadline_count)
@@ -306,40 +422,79 @@ static void rq_dequeue_locked(struct runqueue *rq, struct task *t)
 	}
 	}
 
-	list_del(&t->rq_node);
-	t->on_rq = false;
 	if (rq->nr_running)
 		rq->nr_running--;
 }
 
 /*
- * Dequeue the highest-priority runnable task. Returns NULL when only the idle
- * task is left, which the caller turns into "run idle".
+ * First task on `head`, or NULL if the list is empty.
+ *
+ * A caller that got here through a non-zero count or a set bitmap bit must be
+ * prepared for NULL: that is what "the summary and the list disagree" looks
+ * like, and it has to be repaired by falling through to the next class. The
+ * alternative — treating the head node as if it were a task — hands
+ * sched_first_entry() a sentinel to subtract an offset from and produces a
+ * pointer into the middle of struct runqueue, which the switch path would then
+ * write through as if it were a struct task.
+ */
+static struct task *rq_first_locked(const struct list_head *head)
+{
+	if (list_empty(head))
+		return NULL;
+	return list_entry(head->next, struct task, rq_node);
+}
+
+/*
+ * Dequeue the highest-priority runnable task, or NULL if there is none.
+ *
+ * NULL means "no run queue anywhere has a runnable task", and schedule() turns
+ * that into "run idle". It does *not* mean "only the idle task is left": the
+ * idle task is never enqueued at all. sched_init() installs it as rq->idle and
+ * as the initial per-CPU `current`, and from there it runs on its own stack via
+ * context_restore() without ever passing through a run queue. Keeping it off
+ * the queues is what lets a NULL here be unambiguous, and it is also what keeps
+ * the pick from ever handing back the task that is already running.
+ *
+ * Every task returned here came off a queue, and a task only reaches a queue
+ * with state TASK_RUNNABLE — including via the migration list, where global_pop()
+ * refuses anything else. So the return value is runnable by construction and the
+ * caller does not re-check it.
  */
 static struct task *rq_pick_locked(struct runqueue *rq)
 {
-	if (rq->deadline_count) {
-		struct task *t = sched_first_entry(&rq->deadline, struct task, rq_node);
+	struct task *t;
 
-		rq_dequeue_locked(rq, t);
-		return t;
+	if (rq->deadline_count) {
+		t = rq_first_locked(&rq->deadline);
+		if (t) {
+			rq_dequeue_locked(rq, t);
+			return t;
+		}
+		/* The list is the authority; the count is only a fast path. */
+		rq->deadline_count = 0;
 	}
 
 	int prio = rt_bitmap_highest(&rq->rt);
 
 	if (prio >= 0) {
-		struct task *t = sched_first_entry(&rq->rt.queue[prio], struct task, rq_node);
-
-		rq_dequeue_locked(rq, t);
-		return t;
+		t = rq_first_locked(&rq->rt.queue[prio]);
+		if (t) {
+			rq_dequeue_locked(rq, t);
+			return t;
+		}
+		rt_bitmap_clear(&rq->rt, prio);
 	}
 
-	if (rq->mlfq_bitmap) {
+	while (rq->mlfq_bitmap) {
 		u32 level = (u32)__builtin_ctz(rq->mlfq_bitmap);
-		struct task *t = sched_first_entry(&rq->mlfq[level].head, struct task, rq_node);
 
-		rq_dequeue_locked(rq, t);
-		return t;
+		t = rq_first_locked(&rq->mlfq[level].head);
+		if (t) {
+			rq_dequeue_locked(rq, t);
+			return t;
+		}
+		rq->mlfq[level].count = 0;
+		rq->mlfq_bitmap &= ~(1u << level);
 	}
 
 	return NULL;
@@ -348,14 +503,44 @@ static struct task *rq_pick_locked(struct runqueue *rq)
 /*
  * Non-destructive "is there anything to run". The idle task needs the answer
  * without the side effect rq_pick_locked() has of removing what it found.
+ *
+ * `ignore` is the task asking, and it is skipped rather than counted: the only
+ * caller that passes one is the idle loop, and a run queue whose only content
+ * is the idle task is a run queue with no work on it.
  */
-static bool rq_has_work_locked(const struct runqueue *rq)
+static bool rq_has_work_locked(const struct runqueue *rq, const struct task *ignore)
 {
-	if (rq->deadline_count)
-		return true;
-	if (rq->mlfq_bitmap)
-		return true;
-	return rt_bitmap_highest(&rq->rt) >= 0;
+	struct task *t;
+	int prio;
+
+	if (rq->deadline_count) {
+		t = rq_first_locked(&rq->deadline);
+		if (t && t != ignore)
+			return true;
+	}
+
+	prio = rt_bitmap_highest(&rq->rt);
+	if (prio >= 0) {
+		t = rq_first_locked(&rq->rt.queue[prio]);
+		if (t && t != ignore)
+			return true;
+	}
+
+	u32 bitmap = rq->mlfq_bitmap;
+
+	while (bitmap) {
+		u32 level = (u32)__builtin_ctz(bitmap);
+		struct list_head *pos = rq->mlfq[level].head.next;
+
+		bitmap &= ~(1u << level);
+		while (pos != &rq->mlfq[level].head) {
+			if (list_entry(pos, struct task, rq_node) != ignore)
+				return true;
+			pos = pos->next;
+		}
+	}
+
+	return false;
 }
 
 /* Does the run queue hold anything that outranks `t`? */
@@ -395,17 +580,52 @@ static bool rq_has_higher_locked(const struct runqueue *rq, const struct task *t
 
 /* --------------------------------------------------------- global queue ----- */
 
+/*
+ * Hand a task to the migration list.
+ *
+ * Refuses a node that is already linked, for the reason spelled out at
+ * global_unlink(): a second list_add over a node another list still points at
+ * corrupts that list, and nothing here can repair it afterwards because the
+ * damage is already in the neighbour's pointers.
+ *
+ * `on_rq` is rejected too, so a caller that forgets to dequeue first fails to
+ * move the task rather than quietly giving it two owners. Every caller in this
+ * file dequeues before pushing; the check is the backstop, not the mechanism.
+ * The remaining case this actually rejects is a second migration request for a
+ * task whose first one has not been picked up yet.
+ */
 static void global_push(struct task *t)
 {
 	u64 flags = spinlock_irqsave(&global_lock);
 
+	if (t->in_global || t->on_rq) {
+		spinlock_unlock_irqrestore(&global_lock, flags);
+		return;
+	}
 	t->in_global = true;
 	list_add_tail(&t->rq_node, &global_queue);
 	global_count++;
 	spinlock_unlock_irqrestore(&global_lock, flags);
 }
 
-/* Claim one task from the migration list, if there is one. */
+/*
+ * Claim one *runnable* task from the migration list, or NULL.
+ *
+ * Runnable is the whole content of that word here. sched_migrate() pushes every
+ * task that is on no run queue, which includes one that is blocked, stopped,
+ * still TASK_NEW, or currently running on another CPU: a migration request is
+ * about placement, not about state. Adopting one of those here would put a
+ * task the picker can return onto a run queue, and the switch to it would run a
+ * task that is asleep, or one whose context frame was never built — with no
+ * fault and no diagnostic, just a task executing when it has no business
+ * executing. A non-runnable task therefore stays on the migration list, and
+ * sched_wake() removes it from there when it becomes runnable.
+ *
+ * Returning NULL on a non-empty list is not a lost-wakeup risk. The list is
+ * FIFO and this takes the head, so NULL means the head is not runnable; it
+ * becomes runnable only via sched_wake(), and sched_wake() removes it from the
+ * migration list itself rather than waiting for a drain.
+ */
 static struct task *global_pop(void)
 {
 	struct task *t = NULL;
@@ -413,11 +633,16 @@ static struct task *global_pop(void)
 
 	if (!list_empty(&global_queue)) {
 		t = sched_first_entry(&global_queue, struct task, rq_node);
-		list_del(&t->rq_node);
-		list_init(&t->rq_node);
-		t->in_global = false;
-		if (global_count)
-			global_count--;
+
+		if (t->state == TASK_RUNNABLE) {
+			list_del(&t->rq_node);
+			list_init(&t->rq_node);
+			t->in_global = false;
+			if (global_count)
+				global_count--;
+		} else {
+			t = NULL;
+		}
 	}
 	spinlock_unlock_irqrestore(&global_lock, flags);
 	return t;
@@ -444,9 +669,18 @@ void sched_migrate(struct task *t, u32 cpu)
 	if (!cpumask_test(&t->cpumask, cpu))
 		cpu = sched_select_cpu(&t->cpumask, cpu);
 	t->rq_cpu = cpu;
-	/* The actual move is performed by sched_remote_pull() on the target
-	 * CPU; a task sitting on the global list is already "migrated" in the
-	 * only sense that matters until then. */
+	/*
+	 * Not a move, and not a copy: the task goes on the migration list and
+	 * whichever CPU next calls sched_drain_global() adopts it onto its own
+	 * run queue. That is the whole point of the list — this caller never
+	 * takes the destination's lock.
+	 *
+	 * A second request for a task already on the list is refused by
+	 * global_push() rather than linking the node twice.
+	 *
+	 * t->state is deliberately untouched. See the note on global_pop():
+	 * whether the task may run is decided when the list is consumed.
+	 */
 	if (!t->on_rq)
 		global_push(t);
 }
@@ -518,18 +752,8 @@ void sched_add(struct task *t)
 
 void sched_remove(struct task *t)
 {
-	if (t->in_global) {
-		u64 flags = spinlock_irqsave(&global_lock);
-
-		if (t->in_global) {
-			list_del(&t->rq_node);
-			list_init(&t->rq_node);
-			t->in_global = false;
-			if (global_count)
-				global_count--;
-		}
-		spinlock_unlock_irqrestore(&global_lock, flags);
-	}
+	/* Off the migration list first, so the run queue is its only owner. */
+	global_unlink(t);
 
 	if (!t->on_rq)
 		return;
@@ -551,6 +775,13 @@ void sched_remove(struct task *t)
  * Drain the migration list. Called at the top of schedule() so a task whose
  * wakeup landed on the wrong CPU becomes visible locally without any
  * cross-CPU locking on the wakeup path itself.
+ *
+ * global_pop() only ever hands back a runnable task, so nothing admitted here
+ * can be picked and switched to while it is asleep, still TASK_NEW, or running
+ * on another CPU. It returns NULL on the first task it cannot take, which is
+ * what bounds this loop: the list is FIFO, so the task left behind is the one
+ * at the head, and it leaves the list through sched_wake() when it becomes
+ * runnable rather than being skipped over.
  */
 static void sched_drain_global(struct runqueue *rq)
 {
@@ -622,20 +853,26 @@ u32 sched_task_cpu(struct task *t)
 /* ------------------------------------------------------------- switching ---- */
 
 /*
- * The one place a context switch happens. Everything else — the tick, a yield,
- * a block, a preemption — funnels through here so the FPU policy, the address
- * space switch, and the syscall stack update are applied exactly once.
+ * Everything a switch has to do to `next` before control leaves this CPU,
+ * except the switch itself. Returns the frame to resume `next` with.
  *
- * FPU policy: save and restore on every switch, unconditionally, rather than
- * tracking CR0.TS. The lazy alternative costs a #NM on the first FPU
- * instruction in every task and needs a per-task "has this task ever used the
- * FPU" bit that is wrong the moment a task is preempted between the use and
- * the save. 512 bytes on a switch that already writes CR3 and the TSS RSP0 is
- * not the bottleneck; being wrong about register state is.
+ * This is deliberately *not* the function that switches. It is the whole of the
+ * switch bookkeeping, and schedule() calls it as an argument to
+ * context_switch(), so that in schedule()'s instruction stream the switch is
+ * followed by exactly one thing: the jump back to the top of the loop. See the
+ * resume contract above schedule() for why that is the whole point.
+ *
+* FPU policy: save and restore on every switch, rather than tracking CR0.TS.
+ * The lazy alternative costs a #NM on the first FPU instruction in every task
+ * and needs a per-task "has this task ever used the FPU" bit that is wrong the
+ * moment a task is preempted between the use and the save. 512 bytes on a switch
+ * that already writes CR3 and the TSS RSP0 is not the bottleneck; being wrong
+ * about register state is. The NULL guard below is only about a task that was
+ * never given an fpu_state, not about whether it has used the FPU — a task that
+ * has used it and a task that has not are treated identically.
  */
-static __noreturn void context_switch_to(struct task *next)
+static u64 sched_switch_frame(struct task *prev, struct task *next)
 {
-	struct task *prev = current_task();
 	struct runqueue *rq = sched_runqueues[this_cpu_id()];
 
 	if (prev == next)
@@ -669,7 +906,20 @@ static __noreturn void context_switch_to(struct task *next)
 				      TASK_KERNEL_STACK_SIZE));
 
 	/* The address space changes only when the mm actually differs, so a
-	 * CLONE_VM thread switch costs no TLB flush at all. */
+	 * CLONE_VM thread switch costs no TLB flush at all.
+	 *
+	 * This runs *here*, before the call to context_switch() in schedule(),
+	 * and that ordering is the resume contract rather than an optimisation.
+	 * A suspended task's return address is the instruction after that call, so
+	 * anything the switch itself does has to have already happened by the time
+	 * the task comes back: CR3 here, the FPU below, both ahead of the frame
+	 * hand-off. Doing the write after the call instead would re-run the
+	 * outgoing pair's CR3 reload on the way back, installing the kernel PGD
+	 * over a process's own address space, and then fpu_save() into the wrong
+	 * task's save area.
+	 *
+	 * Verified in build/kernel.elf: `mov %rax,%cr3` at 0xffffffff8000b057,
+	 * `call context_switch` at 0xffffffff8000b08a, and one `jmp` after it. */
 	if (prev->mm != next->mm) {
 		if (next->mm)
 			write_cr3(next->mm->pgd);
@@ -682,8 +932,7 @@ static __noreturn void context_switch_to(struct task *next)
 	if (next->fpu_state)
 		fpu_restore(next->fpu_state);
 
-	context_switch(&prev->context_rsp, next->context_rsp);
-	__builtin_unreachable();
+	return next->context_rsp;
 }
 
 __noreturn void sched_switch_to_new(struct task *t)
@@ -691,32 +940,123 @@ __noreturn void sched_switch_to_new(struct task *t)
 	context_restore(t->context_rsp);
 }
 
+/*
+ * Pick something to run, and switch to it. Returns when the calling task is
+ * scheduled again — which, because the switch suspends it inside this loop,
+ * means it returns by resuming here rather than by returning to its caller.
+ *
+ * The resume contract
+ * -------------------
+ * context_switch() publishes the caller's frame and `ret`s into the incoming
+ * one. The frame it publishes ends at whatever address the `call` pushed, so a
+ * suspended task's resume address is *exactly* the instruction after the
+ * `call context_switch` below. There is no other candidate, and no source-level
+ * way to move it: a resumption is a `ret` to a return address that was chosen
+ * before the task was suspended. So the only question is what that instruction
+ * has to be.
+ *
+ * It has to satisfy two properties, and both are structural rather than
+ * incidental:
+ *
+ *   1. It must not depend on CR3, because the resumed task is running with the
+ *      address space that *switch* installed for it, not the one that was live
+ *      when it suspended. Any instruction that recomputes or reloads CR3 on the
+ *      way back is a bug waiting for the first user process.
+ *   2. It must be idempotent. Re-entering the loop must not replay the switch
+ *      bookkeeping, or a resumed task runs the switch again, with the callee's
+ *      arguments, for a pair of tasks that have already been switched.
+ *
+ * Both are satisfied by making the resume point the jump back to `reschedule:`
+ * at the top of the loop, with every derived value recomputed there and nothing
+ * between the jump and the top. Nothing is left after the call, so the compiler
+ * has no dead code to sink past the switch point.
+ *
+ * Measured, not asserted. In build/kernel.elf:
+ *
+ *     ffffffff8000b057:  0f 22 d8          mov  %rax,%cr3      <- before the call
+ *     ffffffff8000b08a:  e8 4d 52 00 00    call context_switch
+ *     ffffffff8000b08f:  e9 4c fd ff ff    jmp  ffffffff8000ade0   <- the resume pad
+ *                                                                           (= reschedule:)
+ *
+ * Five bytes, one instruction, a relative displacement and nothing else: no
+ * memory operand, no call, no stack traffic, no CR3. Whichever address space
+ * the switch installed, that `jmp` is valid, and the kernel half it lands in is
+ * mapped in every PGD (mm.c copies PML4 entries 256 and 511 out of the kernel
+ * page directory), so resuming a user task cannot fault on its own return.
+ *
+ * The bug this replaces, measured the same way from the pre-fix object. The
+ * call used to be followed by __builtin_unreachable(), which told GCC the call
+ * never returns and is a licence to sink anything below the switch. It took one.
+ * With context_switch_to() inlined into schedule(), the object had:
+ *
+ *     bbf:  call  fpu_save
+ *     bd0:  call  fpu_restore
+ *     be3:  call  context_switch
+ *     be8:  call  vmm_switch_to_kernel_pgd   <- the resume address, a call
+ *     bed:  jmp   bb3                        <- back into the fpu_save block
+ *
+ * The resume address was therefore a *call*, not a jump: the `next->mm == NULL`
+ * arm of the address-space switch had been sunk past the hand-off, and the
+ * resume path jumped into the middle of the FPU sequence. So the first time any
+ * task was resumed it re-ran the address-space switch for the pair it had just
+ * left — installing the kernel PGD over a process's own — then fpu_save()'d into
+ * the *other* task's save area, then called context_switch() again to switch
+ * back to that same other task. Two runnable tasks ping-ponged forever, making
+ * no forward progress and no diagnostic, with the address space of whichever
+ * task had one destroyed on every lap.
+ */
 void schedule(void)
 {
-	struct runqueue *rq = sched_runqueues[this_cpu_id()];
-	struct task *prev = current_task();
+	struct runqueue *rq;
+	struct task *prev;
 	struct task *next;
 	u64 flags;
+
+reschedule:
+	/*
+	 * Recomputed on every pass, including the pass taken on resumption:
+	 * the only input that is still authoritative at this point is the
+	 * per-CPU state, because the caller-saved half of this frame belongs to
+	 * whichever task happened to run last.
+	 */
+	rq = sched_runqueues[this_cpu_id()];
+	prev = current_task();
+
+	if (!rq || !prev)
+		panic("schedule() before the scheduler was initialised");
 
 	/* Anything the migration list is holding is ours to adopt. */
 	sched_drain_global(rq);
 
 	/*
-	 * Pick first, requeue the outgoing task second. The outgoing task is
-	 * not on the queue while it runs, so it can never be the one picked;
+	 * Pick first, requeue the outgoing task second.
+	 *
+	 * A running task is off the queue, so it can never be the one picked:
 	 * the only way it comes back onto a queue is here, and the only way it
 	 * stays off is if nothing else is runnable and it simply keeps running.
+	 *
+	 * On the resumption pass it is *not* off — the task was requeued on its
+	 * way out and that is the state it was suspended in — so it is taken
+	 * back off here, before the pick. Skipping this would leave the resumed
+	 * task both running and queued, and the pick below could hand it back to
+	 * itself.
 	 */
 	flags = spinlock_irqsave(&rq->lock);
+	if (prev->on_rq && !prev->in_global && prev->rq_cpu == this_cpu_id())
+		rq_dequeue_locked(rq, prev);
 	next = rq_pick_locked(rq);
 	spinlock_unlock_irqrestore(&rq->lock, flags);
+
+	/* `next` cannot be `prev`: `prev` is off the queue by now, and
+	 * rq_pick_locked() only ever returns linked tasks. */
+	BUG_ON(next == prev);
 
 	if (!next) {
 		/* Nothing else is runnable anywhere: keep running. Requeueing
 		 * the current task here rather than leaving it off the queue
 		 * means a later wakeup finds it and does not have to know that
 		 * it was already running. */
-		if (prev && prev->state == TASK_RUNNING && !prev->detached) {
+		if (prev->state == TASK_RUNNING && !prev->detached) {
 			prev->state = TASK_RUNNABLE;
 			prev->last_run = now_ticks();
 			flags = spinlock_irqsave(&rq->lock);
@@ -726,7 +1066,7 @@ void schedule(void)
 		return;
 	}
 
-	if (prev && prev->state == TASK_RUNNING && !prev->detached) {
+	if (prev->state == TASK_RUNNING && !prev->detached) {
 		prev->state = TASK_RUNNABLE;
 		/* The aging pass measures the wait from the moment a task left
 		 * the CPU, so the timestamp is taken here rather than only in
@@ -738,7 +1078,19 @@ void schedule(void)
 		spinlock_unlock_irqrestore(&rq->lock, flags);
 	}
 
-	context_switch_to(next);
+	/*
+	 * The switch. This is the last instruction of the loop body other than
+	 * the jump below, and the frame published by context_switch() has that
+	 * jump's address as its return address — which is the entire resume
+	 * contract.
+	 *
+	 * `sched_switch_frame()` is an argument, so all of the bookkeeping runs
+	 * before the call. Nothing else may be placed after the call: the
+	 * `goto` has no operands and no memory traffic, so it is valid whatever
+	 * CR3 is, and the loop above it recomputes everything it needs.
+	 */
+	context_switch(&prev->context_rsp, sched_switch_frame(prev, next));
+	goto reschedule;
 }
 
 __noreturn void sched_stop_current(void)
@@ -936,7 +1288,7 @@ void sched_tick(void)
 			 * protect, so its only job is to notice. */
 			u64 flags = spinlock_irqsave(&rq->lock);
 
-			need_switch = rq_has_work_locked(rq);
+			need_switch = rq_has_work_locked(rq, NULL);
 			spinlock_unlock_irqrestore(&rq->lock, flags);
 		} else {
 			/* Strict priority within the MLFQ: if anything better is

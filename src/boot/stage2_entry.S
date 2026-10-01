@@ -15,6 +15,25 @@
 	.section .text
 #include "boot_layout.h"
 
+/*
+ * Stack top for the real-mode half of the BIOS trampoline.
+ *
+ * An absolute symbol rather than a use of BIOS_RM_STACK_TOP, because that
+ * macro's value is a trap: 0x7E00 is inside stage1's own image and the
+ * trampoline's pushfw + far call write over the boot-drive handover byte. See
+ * the note on the `movw` in bios_trampoline for the whole story; the short
+ * version is that a downward-growing stack at 0x7E00 eats 0x7DFC, which is
+ * STAGE1_DRIVE_ADDR.
+ *
+ * 0x7B00 is the top of the only low memory nothing claims -- above the BIOS
+ * data area and the 0x5000 vector slot, below the MBR -- which leaves 10 KiB
+ * for the firmware's register save and interrupt frame. stage2.ld asserts both
+ * ends of that window, so neither a larger MBR nor a relocated slot can make
+ * this silently wrong.
+ */
+	.equ	bios_rm_stack_top, 0x7B00
+	.globl	bios_rm_stack_top
+
 	.globl stage2_entry
 stage2_entry:
 	cli
@@ -29,35 +48,53 @@ stage2_entry:
 	movw	$STAGE2_STACK_TOP, %sp
 
 	/*
-	 * Install a real IDT *before* the mode switch. Two reasons, and the
-	 * second is the urgent one.
+	 * Load the descriptor tables.
 	 *
-	 * The logical reason: the real-mode IVT is still loaded at this point,
-	 * and a far jump changes the meaning of every byte in it. The 16-bit
-	 * gate at vector 8 is not a 32-bit gate, so the first interrupt taken
-	 * after the switch would be decoded from the wrong shape.
+	 * The GDT goes in here, in 16-bit code, and cannot go anywhere else: the
+	 * far jump at the end of this block resolves CS through the GDTR, so the
+	 * table it depends on has to be installed before the jump that needs it.
+	 * There is no ordering that gets round this and no second chance.
 	 *
-	 * The urgent reason: without an IDT, an exception taken during the
-	 * switch is a triple fault, and a triple fault is a machine reset with
-	 * no register state and no explanation. That is precisely how a fault at
-	 * the ljmp below presents itself: the machine reboots silently and the
-	 * cause has to be guessed at from the surrounding instructions. With a
-	 * handler in place the same fault prints CR2 and stops.
+	 * The IDT does not have that constraint, so it is installed from the
+	 * 32-bit side, immediately after the mode switch. See protected_mode.
+	 *
+	 * `lgdt (%si)`, with no suffix, is the spelling that assembles to the
+	 * m16&32 form: `0f 01 /2`, no 0x66 prefix, so the base read out of memory
+	 * is the full 32 bits. The suffixed spellings are the traps here:
+	 *
+	 *   - `lgdtl (%si)` assembles to `66 0f 01 /2`. The 0x66 is what selects
+	 *     the 16-bit-base form, so the `l` suffix -- the one that reads like
+	 *     "long base" -- produces the short base. It only differs from the
+	 *     correct encoding when the table sits above 64 KiB, which is the
+	 *     condition nothing in the build used to check.
+	 *   - `lidtl (%si)` assembles to `66 0f 01 /3`, and /3 is LGDT in 16- and
+	 *     32-bit mode and LIDT in 64-bit mode. Both of those were live here at
+	 *     some point and neither worked, for that one reason: the mnemonic that
+	 *     means LIDT everywhere else assembles to the other instruction
+	 *     entirely.
+	 *
+	 * The version this replaces was `.byte 0x0f, 0x01, 0x1c` -- a hand-encoded
+	 * /3 with no operand-size prefix. ModRM 0x1c is mod=00, reg=/3, rm=100, and
+	 * in 16-bit addressing rm=100 is %si, not a SIB indicator, so the encoding
+	 * is complete and well-formed: it is three bytes that load a *GDTR* from the
+	 * six bytes at `idtr`, i.e. limit 0x0FFF and a base of the low half of the
+	 * `idt` address. The next two instructions then loaded the real GDT over the
+	 * top of it. The IDT was never loaded at all, in the whole boot.
+	 *
+	 * That is load-bearing by accident in both directions. The PICs stay masked
+	 * until the kernel remaps them, so no interrupt is ever delivered through
+	 * the table that was never installed; and the real-mode IVT is still what
+	 * the IDTR names, so an exception taken in this window is decoded as a
+	 * 16-bit gate out of the BIOS vector table rather than as anything stage2
+	 * owns. Both of those had to stay true for the missing LIDT to be invisible,
+	 * and neither is asserted anywhere.
+	 *
+	 * The 16-bit form does put one constraint back: %si can only name an
+	 * address below 64 KiB. stage2.ld asserts that the GDT is, so growing
+	 * .rodata past the window is a link error rather than a silently
+	 * truncated base. The IDT has no such constraint -- it is loaded from the
+	 * 32-bit side, with the full 32-bit base.
 	 */
-	movw	$idtr, %si
-	/* Written as bytes for the same reason as the CR0 sequence below: GAS
-	 * assembles `lidtl (%si)` in .code16 as `66 0f 01 1c`, and that prefix
-	 * selects the m16&16 form. LIDT would then read a four-byte operand --
-	 * a 16-bit limit and a 16-bit base -- leaving the top half of the real
-	 * base uninitialised. The loaded table would land in the right place by
-	 * luck and contain the idtr structure's own bytes as its first gate, so
-	 * the first exception would decode a garbage descriptor and escalate to
-	 * a triple fault. The bare `0f 01 1c` is the m16&32 form: 6 bytes, the
-	 * full 32-bit base. */
-	.byte	0x0f, 0x01, 0x1c
-
-	/* Load the GDTR. In 16-bit mode LGDT takes an m16:32 operand, so the
-	 * limit and base live in adjacent words and the instruction reads m16. */
 	movw	$gdtr, %si
 	lgdt	(%si)
 
@@ -88,12 +125,81 @@ stage2_entry:
 
 	.code32
 protected_mode:
+	/*
+	 * Reload the data segments before anything uses the stack.
+	 *
+	 * A far jump reloads CS and nothing else. DS, ES, FS, GS and SS keep the
+	 * cached descriptors they had in real mode -- base zero, 64 KiB limit, and
+	 * for SS a *16-bit* stack width -- so until SS names the flat 32-bit data
+	 * descriptor, every push and pop uses the low 16 bits of ESP and lands at
+	 * 0xFFFC and below rather than at 0x20000.
+	 *
+	 * That is silent rather than fatal, which is what makes it worth being
+	 * explicit about: an SS with a zero-width stack means `pushl %eax` decrements
+	 * ESP by four and stores through a *16-bit* SP of 0x0000, so the frame the
+	 * exception reporter reads back is the contents of low memory rather than
+	 * the frame the CPU just wrote. Every field prints as zero and the reporter
+	 * looks broken.
+	 */
 	movw	$0x10, %ax		/* flat data descriptor */
 	movw	%ax, %ds
 	movw	%ax, %es
 	movw	%ax, %fs
 	movw	%ax, %gs
 	movw	%ax, %ss
+
+	/*
+	 * Switch to the 32-bit stack, next, and before anything that can fault.
+	 *
+	 * The CPU does not change stacks on a far jump, so the 16-bit stack pointer
+	 * is still live, and it points into the MBR: STAGE2_STACK_TOP is 0x7E00 and
+	 * the first four-byte push below it writes 0x7DFC, which is
+	 * STAGE1_DRIVE_ADDR. So an exception in the next few instructions would
+	 * report itself by destroying the boot drive number, and the loader would
+	 * then read the kernel from drive 0x00 -- the floppy controller -- and fail
+	 * with a disk error that has nothing to do with the fault.
+	 *
+	 * It also has to be the *32-bit* stack and not a lower SP: the reporter's
+	 * prologue pushes six registers and calls, so it needs a frame, and it
+	 * needs one that is not about to run into stage1's image.
+	 *
+	 * The hex digit table is what the equivalent mistake looked like when this
+	 * used to load the *bottom* of the stack. stack32 sits at the very bottom of
+	 * .bss, so the first 84 bytes of downward growth land exactly across the
+	 * last 84 bytes of .rodata -- and the last string in .rodata is
+	 * serial_puthex's "0123456789abcdef". serial_puthex then printed its own
+	 * lookup table, byte for byte, in place of the digits, so every number the
+	 * loader printed was wrong and nothing faulted. stack32_top is the top of
+	 * a region the linker places after everything else, so the growth walks
+	 * into empty space instead.
+	 */
+	movl	$stack32_top, %esp
+
+	/*
+	 * Install the IDT, here, from 32-bit code.
+	 *
+	 * Everything above had to be 16-bit because the GDT has to be in place
+	 * before the far jump. This has no such constraint: the CPU is a 32-bit
+	 * CPU from the instruction after the jump, and in 32-bit mode the operand
+	 * and address sizes both default to 32 bits, so an ordinary memory
+	 * operand is the whole m16&32 form with nothing to get wrong --
+	 * `lidtl idtr` assembles to `0f 01 /3` with a four-byte displacement, and
+	 * /3 is LIDT in this mode.
+	 *
+	 * The 32-bit base is the whole point. Both tables are in .rodata and .rodata
+	 * has no fixed address -- it grew past 0xC000 while the 4 KiB bootstrap IDT
+	 * was added to it -- so a 16-bit base is correct only while the table
+	 * happens to sit below 64 KiB, which is not a property anything asserted.
+	 * With the base truncated, the CPU decodes the first gate out of unrelated
+	 * memory: a fault still gets *reported*, which is what makes this so
+	 * expensive to find, but it is reported by whatever the truncated address
+	 * happens to point at.
+	 *
+	 * Nothing between here and the kernel's own LIDT is allowed to fault with
+	 * the real-mode IVT still loaded, so this is also the first instruction that
+	 * makes a fault in stage2 a fault stage2 can describe.
+	 */
+	lidtl	idtr
 
 	/* Retire the boot drive. stage1 left it at a fixed offset in its own
 	 * image, which is still intact here: stage1 occupies 0x7C00-0x7DFF and
@@ -115,28 +221,6 @@ protected_mode:
 	 * carries the value across safely. */
 	movb	%al, %dl
 
-	/* The CPU does not switch stacks on a far jump, so the 16-bit stack
-	 * pointer is still live. Point ESP at a 32-bit stack allocated above the
-	 * stage2 image.
-	 *
-	 * At the *top* of it. x86 stacks grow down, so `movl $stack32, %esp` puts
-	 * the stack pointer at the lowest address of the region and every push
-	 * lands outside it, below and then in the middle of .rodata. The damage is
-	 * not a crash, because the addresses below the stack are perfectly good
-	 * memory holding perfectly good code and data: it is silent, and it
-	 * appears as whatever the loader overwrote being wrong.
-	 *
-	 * The hex digit table is what it appeared as. stack32 sits at the very
-	 * bottom of .bss, which puts the first 84 bytes of downward growth exactly
-	 * across the last 84 bytes of .rodata -- and the last string in .rodata is
-	 * serial_puthex's "0123456789abcdef". So serial_puthex printed its own
-	 * lookup table, byte for byte, in place of the digits: 0xA5 where the
-	 * poison-filled E820 entry wanted a '0', and whatever else was on the
-	 * stack where the rest wanted a '9'. Every number the loader printed was
-	 * wrong, the firmware's own return values read as noise, and nothing
-	 * faulted. */
-	movl	$stack32_top, %esp
-
 	/* Stage2 is loaded by sector rather than through an ELF loader, so the
 	 * linker-emitted BSS bounds are the only record of what needs zeroing.
 	 * Clearing it before any C runs keeps .bsetup initialised by the C
@@ -151,19 +235,6 @@ protected_mode:
 	/* Safe to store now that the BSS has been zeroed. See the note on the
 	 * `movb %al, %dl` above for why this could not come earlier. */
 	movb	%dl, stage1_boot_drive
-
-	/* TEMP: which parts of .rodata survived the load?
-	 * 'a' + byte, so a zero byte prints as 'a'. */
-	movl	$0x3F8, %edx
-	movl	$0xc400, %ecx
-1:	movzbl	(%ecx), %eax
-	addl	$'a', %eax
-	outb	%al, (%dx)
-	addl	$0x100, %ecx
-	cmpl	$0xc800, %ecx
-	jb	1b
-	movb	$'\n', %al
-	outb	%al, (%dx)
 
 	call	stage2_start
 
@@ -495,8 +566,33 @@ bios_real_mode_flat:
 
 	/* Switch to a 16-bit stack below 64 KiB. SS:SP is a real-mode pair, so SP
 	 * has to fit in 16 bits or the firmware's own pushes land off the top of
-	 * memory. */
-	movw	$BIOS_RM_STACK_TOP, %sp
+	 * memory.
+	 *
+	 * Below 64 KiB is the easy half of that. The other half is that it has to
+	 * be clear of stage1, and BIOS_RM_STACK_TOP (0x7E00) is not: stage1 owns
+	 * 0x7C00-0x7DFF and a stack grows *down*, so the two lines below write
+	 * 0x7DFE and 0x7DFC -- and 0x7DFC is STAGE1_DRIVE_ADDR, the one byte of
+	 * memory stage1 and stage2 share. The `pushfw` lands on the drive byte
+	 * itself, on the first BIOS call of every boot.
+	 *
+	 * It is harmless today for one reason only, and it is a coincidence rather
+	 * than a design: stage2 reads the drive byte at the top of protected_mode,
+	 * long before anything calls the firmware, so the value has already been
+	 * copied into .bss by the time it is destroyed. The header's own comment
+	 * ("0x7E00 is above stage1's image ... so nothing the firmware writes there
+	 * can collide") reasons backwards -- 0x7E00 is above 0x7C00-0x7DFF in
+	 * address order and a downward-growing stack at 0x7E00 grows straight into
+	 * it.
+	 *
+	 * So the top is taken below the MBR instead, in the gap between the BIOS
+	 * data area and stage1's image, which is the only low memory nothing in the
+	 * boot path claims. Two things bound it: stage1's image above, and the
+	 * BIOS_VECTOR_ADDR / BIOS_IVT_PTR slot at 0x5000 below. That is 10 KiB of
+	 * headroom for what the firmware actually pushes -- its own register save
+	 * plus a full interrupt frame, a few dozen bytes -- and both bounds are
+	 * asserted in stage2.ld, so a stage1 image that grew into the gap or a
+	 * slot that moved up into it is a link error. */
+	movw	$bios_rm_stack_top, %sp
 	movw	%sp, %bp
 
 	/* Take the firmware's interrupt for the vector the C caller stored at
@@ -911,17 +1007,43 @@ exc_stub64:
 	 * RIP-relative or absolute form the assembler cannot encode here -- it
 	 * rejects BFD_RELOC_X86_64_32S outright. Building the address with a
 	 * 32-bit lea and pushing/popping it is the same instruction sequence the
-	 * assembler would have emitted. */
+	 * assembler would have emitted.
+	 *
+	 * The offsets are 48, 56 and 64 -- RIP-or-error-code, CS-or-RIP,
+	 * RFLAGS-or-CS -- and the reason all three are printed with the same
+	 * "err/EIP CR2 EIP CS" heading as the 32-bit stub above is that the gate
+	 * does not say which of the two layouts it produced. A long-mode gate
+	 * pushes RFLAGS, CS and RIP, plus an error code for the vectors that have
+	 * one; the CPU never tells the handler whether it did, so the reporter
+	 * prints the word that could be either first and lets the reader decide.
+	 *
+	 * This used to read 56 and 64 and skip 48 altogether, which is off by one
+	 * word for every vector that pushes no error code -- #UD, #GP(0), and any
+	 * software `int n` -- so the word labelled EIP was CS and the word labelled
+	 * CS was RFLAGS, and RIP was never printed at all. Measured, with an
+	 * `int $0xFE` immediately after the long-mode jump:
+	 *
+	 *   0000000000000000 0000000000000008 0000000000000006
+	 *   CR2 = 0, then 8 (CS, not RIP) and 6 (RFLAGS, not CS)
+	 *
+	 * The 8 and the 6 are correct values being reported under the wrong
+	 * labels, which is the most expensive kind of wrong: the report looks
+	 * plausible. The four-field layout below is the same one the 32-bit stub
+	 * uses, so the message string describes both of them. */
+
+	leaq	48(%rsp), %rax
+	movq	(%rax), %rax		/* error code, or RIP */
+	call	exc_hex64
 
 	movq	%cr2, %rax
 	call	exc_hex64
 
 	leaq	56(%rsp), %rax
-	movq	(%rax), %rax		/* RIP */
+	movq	(%rax), %rax		/* RIP, or CS */
 	call	exc_hex64
 
 	leaq	64(%rsp), %rax
-	movq	(%rax), %rax		/* CS */
+	movq	(%rax), %rax		/* CS, or RFLAGS */
 	call	exc_hex64
 
 	movl	$exc_msg, %edi
@@ -1170,50 +1292,26 @@ bios_ret_edx:
 /*
  * The 32-bit loader stack.
  *
- * 12 KiB, and bounded by STAGE2_BSS_LIMIT rather than left to grow: the bounce
- * buffer, disk address packet and VBE scratch block begin at 0x10000, so a
- * 32 KiB stack here reached 0x13ABE and sat on top of all three. Nothing
- * noticed, because the loader touches those structures through pointers that
- * still validate -- the stack simply overwrote them between the BIOS filling
- * the bounce buffer and stage2 reading it back. stage2.ld asserts the limit,
- * and that assert is what actually enforces the bound: this size was reduced
- * from 16 KiB because the tripwire words above no longer fit beneath 0x10000
- * alongside it. A stack size that only holds because nothing else claimed the
- * space is a stack size with no margin.
+ * Not defined here at all: stage2.ld sizes and places it, at STACK32_ADDR with
+ * stack32_top at STACK32_TOP. The numbers are 0xE000 and 0x20000, so the stack
+ * is 0x12000 -- 72 KiB -- and stage2_top sits exactly on BOUNCE_ADDR, which is
+ * the one arrangement that is safe at that boundary: the stack grows down from
+ * stack32_top, so the bytes it uses are all below it and the bounce window,
+ * which begins at stack32_top itself, is never touched.
  *
- * stack32_top is the address the stack pointer is loaded with, and it has to
- * exist as a symbol rather than being written out at the use site: the region
- * is sized here and used in the entry code, and a literal 0x4000 added to
- * $stack32 in both places is a size that can be changed in one of them.
+ * Keeping the region out of .bss is what stops the growth from being a
+ * question about link order. A stack grows down from stack32_top, so anything
+ * the linker placed below stack32 is what the stack eats first; with stack32 at
+ * the bottom of .bss its first 3.5 KiB of growth went straight through .data
+ * and into .rodata, and the first thing it overwrote was serial_puthex's digit
+ * table -- so every number the loader printed came out blank, with no fault to
+ * attribute it to, because the memory being overwritten was perfectly good
+ * code. The measured high-water mark is under 1552 bytes.
  *
- * stack32 is in .bss while the trampoline words are in .trampoline, which the
- * linker script places lower and separately. That is what keeps the two from
- * colliding: a stack grows down from stack32_top, so anything sharing .bss
- * below it is the first thing a push lands on, and the trampoline words are
- * read and written on every single BIOS call. The original arrangement had both
- * in .bss, and the 16 KiB stack ran straight through them. */
-/*
- * The loader stack, in its own section that the linker script places last.
- *
- * It has to be last. A stack grows down, so the first push lands just below
- * stack32_top and successive pushes walk toward lower addresses: anything the
- * linker placed below stack32 is what the stack eats first. With stack32 at the
- * bottom of .bss, its first 3.5 KiB of growth went straight through .data and
- * into .rodata, and the first thing it overwrote was serial_puthex's digit
- * table -- so every number the loader printed came out blank, and the
- * corruption was invisible because the addresses below the stack were all
- * perfectly good memory holding perfectly good code.
- *
- * Placing it in .stack, emitted after .bss, makes the ordering a property of
- * the link script rather than of the order two files happen to be compiled in.
- */
-/*
- * The loader stack itself is defined by the linker script, not here: see the
- * note there. It is a fixed 12 KiB region at 0xD000, between the image and the
- * bounce buffer, so both of the things it must not touch -- the read-only data
- * below it and the firmware's transfer window above it -- are excluded by
- * arithmetic rather than by whatever order the sections happened to link in.
- * The measured high-water mark is under 1552 bytes.
+ * The trampoline state is in .trampoline, which the linker places low and
+ * separately. That is the same concern from the other side: the trampoline
+ * words are read and written on every single BIOS call, and a stack that ran
+ * through them would corrupt the state of the call in progress.
  */
 	.section .bss
 	.globl stage1_boot_drive

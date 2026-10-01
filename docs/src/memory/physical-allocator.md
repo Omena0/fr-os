@@ -8,11 +8,29 @@ The Physical Memory Manager (PMM) is the lowest-level memory allocator. It manag
 
 The PMM is initialized during early boot from the E820 memory map:
 
-1. Parse E820 entries. Entries of type `USABLE` contribute free frames.
-2. Reserve frames for: kernel image, boot page tables, `BootInfo` structure.
+1. Parse E820 entries. Only entries of type `USABLE` (type 1) contribute free
+   frames; everything else is reserved by construction, because the presence
+   bitmap is memset to "reserved" and only the usable pass clears it.
+2. Reserve, before the free lists are built:
+   - the PMM's own metadata arena (presence bitmaps and the page array), sized
+     from the frame count;
+   - the kernel image, `[KERNEL_LANDING_ADDR, phys(_ebss))`, derived from the
+     link-time `_ebss`.
 3. Align frame tracking to page boundaries.
-4. Build the buddy allocator free lists from all usable frames.
-5. Report total free frames to the kernel log.
+4. Build the buddy allocator free lists from all usable frames, skipping the
+   reserved ones.
+5. Report usable and free frames to the kernel log.
+
+Two more ranges are reserved by the *caller*, after `pmm_init()` returns:
+`[0, 1 MiB)`, which the bootloader is still executing from, and stage 2's own
+bootstrap page tables at `0x2D0000`–`0x2DFFFF`, which sit just above the kernel
+image.
+
+### Reading the log
+
+`pmm_total()` and `pmm_free()` return **frame counts**, not byte counts. Use
+`pmm_total_bytes()` and `pmm_free_bytes()` when you want bytes; converting by
+shifting by 20 is the mistake this file's header once described.
 
 ## Memory Zones
 
@@ -22,7 +40,7 @@ Physical memory is divided into zones to satisfy different allocation requiremen
 |---|---|---|
 | `ZONE_DMA` | 0 – 16 MB | Legacy ISA DMA — device buffers for old hardware |
 | `ZONE_NORMAL` | 16 MB – 4 GB | Standard kernel and user page frames |
-| `ZONE_HIGH` | > 4 GB | Extended memory (mapped via direct map for 64-bit kernel) |
+| `ZONE_HIGH` | > 4 GB | Extended memory. **Not reachable through the direct map**, which covers only 4 GiB — a `ZONE_HIGH` frame dereferenced through `phys_to_virt()` faults. On a 4 GiB machine the zone is empty and this is latent. |
 
 Allocation requests specify which zone they require via `gfp_t` flags:
 

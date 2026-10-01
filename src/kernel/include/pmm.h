@@ -79,12 +79,17 @@ STATIC_ASSERT(sizeof(struct page) <= 32, "struct page must stay within 32 bytes"
 
 /*
  * Largest buddy order the allocator serves: order 11 is 2048 pages, i.e.
- * 8 MiB. Anything larger is served as a contiguous run by the vmalloc
- * layer instead, because splitting a 16 MiB block to satisfy a small
- * request costs 12 splits and permanently fragments the highest orders.
+ * 8 MiB, and orders 0 through 11 are all served (12 levels). Anything larger is
+ * served as a non-contiguous run by the vmalloc layer instead, because
+ * splitting a 16 MiB block to satisfy a small request costs 12 splits and
+ * permanently fragments the highest orders.
  *
- * It lives here rather than in pmm.c because struct pmm_zone sizes its free
- * list array by it, and the struct is part of the public header.
+ * This is the only definition. It lives here rather than in pmm.c because
+ * struct pmm_zone sizes its free list array by it and the struct is part of the
+ * public header, so a second definition in pmm.c was free to drift from this one
+ * without anything noticing. (docs/src/memory/buddy-allocator.md still says
+ * 11 levels, orders 0-10 and 4 MiB. The code is the authority; that document is
+ * stale.)
  */
 #define BUDDY_MAX_ORDER 11
 
@@ -116,8 +121,17 @@ struct pmm_zone {
 	spinlock_t lock;
 };
 
-/* Total machine memory, in pages. */
+/*
+ * Frames the allocator tracks: every frame below the highest usable address the
+ * E820 map reported, including the ones that fall in an E820 hole. Bounds the
+ * bitmaps and phys_to_page(); it is *not* a memory total. pmm_total() below is.
+ */
 extern phys_addr_t pmm_total_pages;
+
+/* Frames present and unreserved after init: the real memory total. */
+extern phys_addr_t pmm_usable_pages;
+
+/* Frames currently on a free list, across all zones. */
 extern phys_addr_t pmm_free_page_count;
 
 /* Statistics for the memory subsystem's observability interface. */
@@ -165,17 +179,44 @@ static inline struct page *pmm_alloc_page(unsigned flags)
 void pmm_free_pages(struct page *page, unsigned order);
 
 /*
- * Reserve a physical range: mark it allocated and unavailable. Used for the
- * kernel image, the bootstrap page tables, and MMIO regions discovered after
+ * Reserve a physical range: mark it allocated and remove it from the buddy
+ * allocator's free lists. Used for the kernel image, the bootstrap page
+ * tables, the allocator's own metadata arena, and MMIO regions discovered after
  * init. Must be called before the range is handed out, i.e. during init.
+ *
+ * The range is validated: length 0 and a base+length that wraps are ignored, and
+ * the range is clamped to what the allocator tracks. A reservation genuinely
+ * takes the frames out of the free lists even when they sit in the interior of
+ * a larger block, and the parts of that block outside the range are handed back
+ * in a form that can coalesce, so reserving the low megabyte does not
+ * permanently shatter every high order in the zone.
  */
 void pmm_reserve_range(phys_addr_t base, phys_addr_t length);
 
-/* Total and free frames across all zones. */
+/*
+ * Claim a physical range and guarantee it: the frames are removed from the free
+ * lists and marked PG_PINNED, so neither buddy_free_locked() nor any future
+ * reclamation pass can put them back. Callers that took the address from
+ * pmm_alloc_dma_range() call this once the device is programmed.
+ */
+void pmm_pin_range(phys_addr_t base, phys_addr_t length);
+
+/*
+ * Free and total frames, across all zones or for one zone.
+ *
+ * All four are FRAMES, not bytes. Reporting code that wants bytes must scale
+ * them: shifting a frame count right by 20 prints 1/256th of the real figure,
+ * which is how the boot log came to claim "1 MiB total, 0 MiB free" on a
+ * machine with four of them.
+ */
 phys_addr_t pmm_total(void);
 phys_addr_t pmm_free(void);
 
-/* Free frames in one zone, for the NUMA and per-CPU statistics. */
+/* Byte-denominated forms of the two above, for reporting. */
+static inline phys_addr_t pmm_total_bytes(void) { return pmm_total() * PAGE_SIZE; }
+static inline phys_addr_t pmm_free_bytes(void)  { return pmm_free() * PAGE_SIZE; }
+
+/* Frames in one zone, for the NUMA and per-CPU statistics. */
 phys_addr_t pmm_zone_free(zone_t zone);
 phys_addr_t pmm_zone_total(zone_t zone);
 
@@ -186,15 +227,15 @@ struct page *phys_to_page(phys_addr_t addr);
 phys_addr_t page_to_phys(const struct page *page);
 
 /*
- * Find a contiguous physical range of `length` bytes for DMA, without
- * permanently allocating it. The caller pins it with pmm_pin_range() once the
- * device is programmed. Splitting this out is what lets a driver allocate its
- * descriptors, fail to set up the device, and release them cleanly.
+ * Find a contiguous physical range of `length` bytes for DMA, aligned to
+ * `alignment` (rounded up to PAGE_SIZE and then to the next power of two, with a
+ * warning if it was not one). The range is *reserved*, i.e. already out of the
+ * buddy free lists, so it cannot be handed out twice; pmm_pin_range() then marks
+ * it PG_PINNED once the device is programmed. Splitting this out is what lets a
+ * driver allocate its descriptors, fail to set up the device, and release them
+ * cleanly.
  */
 void *pmm_alloc_dma_range(size_t length, size_t alignment, phys_addr_t *out_phys);
-
-/* Mark a range as permanently allocated (device MMIO, or mlock'd pages). */
-void pmm_pin_range(phys_addr_t base, phys_addr_t length);
 
 /* Print the zone summary. */
 void pmm_dump(void);

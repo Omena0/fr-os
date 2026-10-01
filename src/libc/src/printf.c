@@ -60,14 +60,22 @@ static void sink_repeat(struct fmt_state *st, char c, size_t n)
 /*
  * Build a formatted representation of `value` in `base` into `buf`, returning
  * its length. Digits are produced least-significant first and reversed here.
+ *
+ * tmp has to hold the widest conversion this target can produce: a 64-bit
+ * value in base 2 is 64 digits. At 24 entries the loop's `n < sizeof(tmp)`
+ * guard stopped after 23 digits and the number was silently truncated --
+ * printf("%b", ~0UL) printed 23 ones and no error. Every caller below sizes
+ * its own buffer from this same bound.
  */
+#define DIGITS_MAX 64
+
 static size_t utoa(char *buf, size_t size, unsigned long long value,
 		   unsigned base, int upper)
 {
 	static const char lower_digits[] = "0123456789abcdef";
 	static const char upper_digits[] = "0123456789ABCDEF";
 	const char *digits = upper ? upper_digits : lower_digits;
-	char tmp[24];
+	char tmp[DIGITS_MAX];
 	size_t n = 0;
 	size_t i;
 
@@ -151,39 +159,102 @@ static void handle_string(struct fmt_state *st, int width, int left_align,
 
 	if (!s)
 		s = "(null)";
-	len = strlen(s);
-	if (has_precision && precision >= 0 && (size_t)precision < len)
-		len = (size_t)precision;
+	/*
+	 * strnlen, not strlen followed by a clamp. `%.4s` is specified to
+	 * read at most four bytes and stop: a bounded field is how a program
+	 * prints a fixed-width column out of a buffer that is known to be
+	 * shorter than the buffer's capacity. Calling strlen first walks to
+	 * the NUL regardless, which faults on exactly the input the precision
+	 * was written to protect against.
+	 */
+	if (has_precision)
+		len = strnlen(s, (size_t)precision);
+	else
+		len = strlen(s);
 	emit_padded(st, s, len, 0, 0, width, left_align, 0, NULL);
+}
+
+/*
+ * plus/space decide the sign of a non-negative result, and alternate is the
+ * "#" flag: "0x" for x/X, "0" for o. Both are prefixes that go in before the
+ * pad, which is exactly the slot `sign` occupies, so they travel the same way.
+ * C99 7.21.6.1 p6: "#" has no effect on d, i, u, so no prefix is passed for
+ * those.
+ */
+static void handle_signed(struct fmt_state *st, long long value, unsigned base,
+			  int width, int left_align, int zero_pad,
+			  int precision, int has_precision,
+			  int plus, int space, const char *alternate)
+{
+	char buf[DIGITS_MAX];
+	const char *sign;
+	int negative = 0;
+	size_t len = itoa(buf, sizeof(buf), value, base, 0, &negative);
+
+	if (negative)
+		sign = "-";
+	else if (alternate)
+		sign = alternate;
+	else if (plus)
+		sign = "+";
+	else if (space)
+		sign = " ";
+	else
+		sign = NULL;
+
+	if (has_precision && precision == 0 && value == 0)
+		len = 0;
+	/* An empty field has no first digit to prefix. */
+	if (len == 0)
+		sign = negative ? "-" : NULL;
+	emit_padded(st, buf, len, (size_t)precision, has_precision, width,
+		    left_align, zero_pad, sign);
 }
 
 static void handle_unsigned(struct fmt_state *st, unsigned long long value,
 			    unsigned base, int upper, int width, int left_align,
-			    int zero_pad, int precision, int has_precision)
+			    int zero_pad, int precision, int has_precision,
+			    const char *alternate)
 {
-	char buf[24];
+	char buf[DIGITS_MAX];
 	size_t len = utoa(buf, sizeof(buf), value, base, upper);
 
 	/* "%.0d" of zero is an empty field, not "0": the precision is a floor
 	 * on the digit count, and the value happens to need none. */
 	if (has_precision && precision == 0 && value == 0)
 		len = 0;
+	/*
+	 * C99 7.21.6.1 p6, for '#': "for o ... increases the precision, if and
+	 * only if necessary, to force the first digit to be a zero". So the
+	 * prefix is not a decoration to bolt on, it is a *digit*: it is needed
+	 * only when the conversion would not otherwise start with one. Two
+	 * cases where it is not needed and was being emitted anyway:
+	 *   %#o of 0     -> "00", the value is already a single leading zero
+	 *   %#.0x of 0   -> "0x", and the field is empty to begin with
+	 */
+	if (alternate) {
+		if (len == 0) {
+			/*
+			 * For octal the prefix is a *digit* the '#' rule
+			 * restores, so the empty field regains one:
+			 *   %#.0o of 0 -> "0", not "" and not "00".
+			 * For every other base an empty field simply has no
+			 * first digit to prefix, so the prefix goes away:
+			 *   %#.0x of 0 -> "", not "0x".
+			 */
+			if (base == 8) {
+				buf[0] = '0';
+				len = 1;
+			}
+			alternate = NULL;
+		} else if (base == 8 && value == 0) {
+			/* %#o of 0 with room to print: the digit is
+			 * already the leading zero. */
+			alternate = NULL;
+		}
+	}
 	emit_padded(st, buf, len, (size_t)precision, has_precision, width,
-		    left_align, zero_pad, NULL);
-}
-
-static void handle_signed(struct fmt_state *st, long long value, unsigned base,
-			  int width, int left_align, int zero_pad,
-			  int precision, int has_precision)
-{
-	char buf[24];
-	int negative = 0;
-	size_t len = itoa(buf, sizeof(buf), value, base, 0, &negative);
-
-	if (has_precision && precision == 0 && value == 0)
-		len = 0;
-	emit_padded(st, buf, len, (size_t)precision, has_precision, width,
-		    left_align, zero_pad, negative ? "-" : NULL);
+		    left_align, zero_pad, alternate);
 }
 
 /*
@@ -208,6 +279,7 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
 	while (*p) {
 		int left_align = 0, zero_pad = 0;
 		int has_precision = 0;
+		int plus = 0, space = 0, alternate = 0;
 		int width = 0, precision = 0;
 		int longness = 0;	/* 0 = int, 1 = long, 2 = long long, -1 = short */
 
@@ -228,26 +300,62 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
 			} else if (*p == '0') {
 				zero_pad = 1;
 				p++;
-			} else if (*p == '+' || *p == ' ') {
-				p++;   /* accepted and ignored: no sign decoration */
+			} else if (*p == '+') {
+				plus = 1;
+				p++;
+			} else if (*p == ' ') {
+				space = 1;
+				p++;
 			} else if (*p == '#') {
-				p++;   /* accepted and ignored */
+				/* Alternate form: "0x" for x/X, "0" for o, and
+				 * nothing at all for d/i/u, which have no
+				 * alternate form. Applied at the conversion
+				 * so the prefix matches the base actually
+				 * printed. */
+				alternate = 1;
+				p++;
 			} else {
 				break;
 			}
 		}
 
-		/* Width. A negative `*` means left-justify. */
+		/*
+		 * Width and precision are parsed with saturation rather than
+		 * by letting the accumulator wrap. `width * 10 + digit` on an
+		 * int that has run past ten digits is signed overflow, which is
+		 * undefined behaviour -- and a negative width becomes a negative
+		 * precision downstream, where `(size_t)precision` turns it into
+		 * SIZE_MAX and sink_repeat() then tries to emit SIZE_MAX bytes
+		 * of padding. Saturating at INT_MAX keeps the value a sane
+		 * field width and, for precision, still leaves "no digits were
+		 * requested" detectable.
+		 */
 		if (*p == '*') {
-			width = va_arg(st.ap, int);
+			int w = va_arg(st.ap, int);
+
 			p++;
-			if (width < 0) {
+			if (w < 0) {
 				left_align = 1;
-				width = -width;
+				/* Negating INT_MIN is not representable, so that
+				 * one width saturates. Every other negative
+				 * width keeps its magnitude, which is what
+				 * %-*d with a small width has to do. */
+				if (w == INT_MIN)
+					width = INT_MAX;
+				else
+					width = -w;
+			} else {
+				width = w;
 			}
 		} else {
-			while (*p >= '0' && *p <= '9')
-				width = width * 10 + (*p++ - '0');
+			while (*p >= '0' && *p <= '9') {
+				int d = *p++ - '0';
+
+				if (width > (INT_MAX - d) / 10)
+					width = INT_MAX;
+				else
+					width = width * 10 + d;
+			}
 		}
 
 		/* Precision. Minimum digits for an integer, maximum characters
@@ -256,12 +364,36 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
 			p++;
 			has_precision = 1;
 			if (*p == '*') {
-				precision = va_arg(st.ap, int);
+				int pr = va_arg(st.ap, int);
+
 				p++;
+				/* A negative precision means "as many as it
+				 * takes" (C99 7.19.6.1), which is the same as
+				 * no precision at all. */
+				if (pr < 0)
+					has_precision = 0;
+				else if (pr > INT_MAX)
+					precision = INT_MAX;
+				else
+					precision = pr;
 			} else {
-				while (*p >= '0' && *p <= '9')
-					precision = precision * 10 + (*p++ - '0');
+				while (*p >= '0' && *p <= '9') {
+					int d = *p++ - '0';
+
+					if (precision > (INT_MAX - d) / 10)
+						precision = INT_MAX;
+					else
+						precision = precision * 10 + d;
+				}
 			}
+			/*
+			 * C99 7.21.6.1 p6: for d, i, o, u, x, X the '0' flag is
+			 * *ignored* when a precision is specified, so the field is
+			 * space-padded and only the precision floor is zero-filled:
+			 * %08.5d of 42 is "   00042", not "00000042". Zero-filling
+			 * the width pad as well is what produced the second.
+			 */
+			zero_pad = 0;
 		}
 
 		/* Length modifier. 'z' is a signed size_t, which on this target
@@ -294,8 +426,10 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
 				v = (short)va_arg(st.ap, int);
 			else
 				v = va_arg(st.ap, int);
+			/* d/i have no alternate form, so '#' adds nothing. */
 			handle_signed(&st, v, 10, width, left_align, zero_pad,
-				      precision, has_precision);
+				      precision, has_precision, plus, space,
+				      NULL);
 			break;
 		}
 		case 'u':
@@ -305,12 +439,28 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
 		case 'b': {
 			unsigned long long v;
 			unsigned base;
+			/*
+			 * "#" prefixes a '0' for o and "0x"/"0X" for x/X, and
+			 * nothing for u. The '0' flag was already cleared
+			 * below if a precision was given, so the two never
+			 * compete for the same leading digit.
+			 */
+			const char *alt_prefix = NULL;
 
 			switch (*p) {
 			case 'u': base = 10; break;
 			case 'o': base = 8; break;
 			case 'b': base = 2; break;
 			default:   base = 16; break;
+			}
+
+			if (alternate) {
+				if (*p == 'o')
+					alt_prefix = "0";
+				else if (*p == 'x')
+					alt_prefix = "0x";
+				else if (*p == 'X')
+					alt_prefix = "0X";
 			}
 
 			if (longness >= 2)
@@ -322,30 +472,54 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
 			else
 				v = va_arg(st.ap, unsigned int);
 			handle_unsigned(&st, v, base, *p == 'X', width, left_align,
-					zero_pad, precision, has_precision);
+					zero_pad, precision, has_precision,
+					alt_prefix);
 			break;
 		}
 		case 'c': {
 			char ch = (char)va_arg(st.ap, int);
 
+			/* The '0' flag is defined only for the numeric
+			 * conversions, so %05c pads with spaces like %5c. */
+			zero_pad = 0;
+
 			emit_padded(&st, &ch, 1, 0, 0, width, left_align, 0, NULL);
 			break;
 		}
 		case 's':
+			zero_pad = 0;
 			handle_string(&st, width, left_align, precision,
 				      has_precision);
 			break;
 		case 'p': {
 			unsigned long long v =
 				(unsigned long long)(uintptr_t)va_arg(st.ap, void *);
-			char buf[24];
+			char buf[DIGITS_MAX];
 			char prefix[2] = { '0', 'x' };
 			size_t len = utoa(buf, sizeof(buf), v, 16, 0);
 			size_t pad = len < 16 ? 16 - len : 0;
 
-			/* Pointers are always 0x-prefixed and at least 16 hex
-			 * digits, because an abbreviated address is a
-			 * debugging trap. */
+			/*
+			 * Pointers are always 0x-prefixed and zero-padded to
+			 * 16 hex digits, because an abbreviated address is a
+			 * debugging trap: `0x1234` from a pointer print is
+			 * indistinguishable from the integer 0x1234.
+			 *
+			 * This deliberately differs from glibc, which strips
+			 * leading zeros and prints NULL as "(nil)". Two
+			 * reasons to keep the difference: the width is
+			 * constant, so pointer columns line up, and a NULL
+			 * pointer prints as an address rather than a word
+			 * that means something else entirely. A program that
+			 * parses %p output as a fixed-length string is the
+			 * thing this breaks, and it should not exist.
+			 *
+			 * Positional parameters (%1$d) are NOT implemented;
+			 * they are passed through as literal text. Nothing in
+			 * the tree uses them and supporting them means
+			 * reordering the va_list, which is a different piece
+			 * of work from anything else in this file.
+			 */
 			sink_put(&st, prefix, sizeof(prefix));
 			sink_repeat(&st, '0', pad);
 			sink_put(&st, buf, len);

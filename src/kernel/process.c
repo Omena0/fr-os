@@ -370,10 +370,29 @@ static long user_copy(struct address_space *mm, void *kbuf, u64 user,
 			continue;
 		}
 
+		/*
+		 * Direction matters, and both halves are wrong without it.
+		 *
+		 *   to_user   : kbuf is the kernel *source*, the page is the user
+		 *               destination  ->  page <- kbuf
+		 *   !to_user  : kbuf is the kernel *destination*, the page is the
+		 *               user source  ->  kbuf <- page
+		 *
+		 * The !to_user branch used `memcpy(page + off, kother + done)`,
+		 * which copies *into* the user page from kother and never touches
+		 * the kernel destination at all. copy_from_user passes kother =
+		 * NULL, so every byte came from address `done` -- 0, 1, 2, ... --
+		 * and the caller's buffer was left holding whatever was already in
+		 * it. A read() that "succeeded" would return uninitialised stack.
+		 *
+		 * The kernel destination being untouched is why this never showed up
+		 * as a fault: nothing is ever read from an unmapped address except
+		 * the first byte or two, and the write target is always valid.
+		 */
 		if (to_user)
-			memcpy((u8 *)kbuf + done, page + off, chunk);
+			memcpy((u8 *)page + off, (const u8 *)kbuf + done, chunk);
 		else
-			memcpy((u8 *)page + off, (const u8 *)kother + done, chunk);
+			memcpy((u8 *)kbuf + done, page + off, chunk);
 		done += chunk;
 	}
 	return (long)done;
@@ -1118,8 +1137,7 @@ struct task *process_create_init(void)
 
 	/*
 	 * The image is linked into the kernel by the build. If it is missing
-	 * the link fails rather than producing a kernel that boots to a panic,
-	 * so a NULL here means the image exists but is not a valid ELF.
+	 * the link fails rather than producing a kernel that boots to a panic.
 	 */
 	if (init_image_size == 0) {
 		PROC_LOG(KLOG_FATAL, "no init image linked into the kernel");
@@ -1127,7 +1145,85 @@ struct task *process_create_init(void)
 		return NULL;
 	}
 
-	if (exec_load_and_run(t, init_image, init_image_size, argv, envp) < 0) {
+	const unsigned char *elf = (const unsigned char *)init_image;
+	unsigned long elf_size = init_image_size;
+
+	/*
+	 * The linked-in blob is an *initrd container*, not a bare ELF.
+	 *
+	 * Passing it straight to the ELF loader hands elf_validate() the four
+	 * bytes "DNDU" where it expects 0x7f "ELF", so PID 1 never starts. Not a
+	 * corner case: every boot, and total.
+	 */
+	if (init_image_size >= INITRD_HEADER_SIZE &&
+	    initrd_le64((const uint8_t *)init_image) == INITRD_MAGIC) {
+		unsigned long total = initrd_le64((const uint8_t *)init_image + 16);
+		unsigned int entries;
+		unsigned long pos = INITRD_HEADER_SIZE;
+		unsigned long payload;
+		unsigned long off = 0, size = 0;
+		int found = 0;
+
+		if (total > init_image_size || total < INITRD_HEADER_SIZE) {
+			PROC_LOG(KLOG_FATAL,
+				 "initrd total_len %lu exceeds blob %lu",
+				 total, (unsigned long)init_image_size);
+			task_put(t);
+			return NULL;
+		}
+
+		/*
+		 * The header records an entry count, and it has to: every entry's
+		 * offset is relative to the payload, while the payload follows the
+		 * index, so without a count the payload base is uncomputable. Walking
+		 * until a zero name_len -- the first guess at this -- reads the first
+		 * bytes of an ELF header as a 20-byte index entry and treats them as
+		 * one, which puts the payload base inside the file and yields a
+		 * garbage ELF that happens to pass the magic check some of the time.
+		 *
+		 * Entry names are not padded or aligned; the bytes follow the fixed
+		 * part immediately, so `pos` advances by exactly name_len.
+		 */
+		entries = initrd_le32((const uint8_t *)init_image + 12);
+		for (unsigned int e = 0; e < entries && pos + INITRD_ENTRY_SIZE <= total; e++) {
+			unsigned int name_len = initrd_le16((const uint8_t *)init_image + pos);
+			unsigned long esz = initrd_le64((const uint8_t *)init_image + pos + 4);
+			unsigned long eoff = initrd_le64((const uint8_t *)init_image + pos + 12);
+
+			pos += INITRD_ENTRY_SIZE;
+			if (name_len == 0 || pos + name_len > total)
+				break;
+
+			if (!found && name_len == 4 &&
+			    !memcmp(init_image + pos, "init", 4)) {
+				off = eoff;
+				size = esz;
+				found = 1;
+			}
+			pos += name_len;
+		}
+		payload = pos;
+
+		if (!found) {
+			PROC_LOG(KLOG_FATAL,
+				 "initrd has no entry named \"init\" (%lu bytes)",
+				 (unsigned long)init_image_size);
+			task_put(t);
+			return NULL;
+		}
+		if (off + size > total) {
+			PROC_LOG(KLOG_FATAL,
+				 "initrd \"init\" payload out of range: off %lu size %lu",
+				 off, size);
+			task_put(t);
+			return NULL;
+		}
+
+		elf = (const unsigned char *)init_image + payload + off;
+		elf_size = size;
+	}
+
+	if (exec_load_and_run(t, elf, elf_size, argv, envp) < 0) {
 		PROC_LOG(KLOG_FATAL, "cannot load the init image");
 		task_put(t);
 		return NULL;

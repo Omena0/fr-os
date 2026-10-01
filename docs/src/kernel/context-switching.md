@@ -30,15 +30,23 @@ struct context {
 
 ### SIMD / FPU State
 
-The x87 FPU, SSE, and AVX state is saved lazily:
+**The lazy `TS`-based scheme described in earlier versions of this page is not
+what the code does.** `context.S` saves and restores the FPU state eagerly on
+every switch, with `fxsave`/`fxrstor`, into a per-task `fpu_state` buffer. `TS`
+is never set to trigger a #NM, and there is no FPU exception handler.
 
-- On context switch, the `TS` bit in CR0 is set for the outgoing thread.
-- If the new thread uses FPU instructions, a #NM (Device Not Available) exception fires.
-- The exception handler saves the previous thread's FPU state and restores the new thread's FPU state, then clears `TS`.
+The buffer is `FXSAVE`-shaped: 512 bytes covering x87 and XMM0-15. `fxsave` does
+**not** save bits 128-255 of YMM0-15, and userspace is still compiled with
+`-mavx2 -mfma -mf16c -mxsave` (`USER_CFLAGS` in `src/config.mk`). So two
+preempted userspace processes have the upper halves of their YMM registers
+silently clobbered across a switch: no fault, no diagnostic, just corrupted
+vector spills and results. The kernel itself is built GPR-only
+(`-mno-avx -mno-avx2 -mno-fma -mno-f16c`), which is why this does not bite the
+kernel.
 
-This avoids saving/restoring 512+ bytes of SIMD state on every context switch when most switches are between kernel threads that don't use FPU.
-
-The FPU state is stored using `FXSAVE`/`FXRSTOR` (512 bytes) or `XSAVE`/`XRSTOR` (variable, up to ~2 KB for AVX-512).
+Either drop the AVX flags from `USER_CFLAGS`, or move to `xsave`/`xrstor` with an
+`XSAVE` header and a per-task XCR0. See finding #63 in
+[`../../../MEGA_AUDIT.md`](../../../MEGA_AUDIT.md).
 
 ### Scheduling Metadata
 

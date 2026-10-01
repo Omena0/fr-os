@@ -248,10 +248,10 @@ size_t strcspn(const char *s, const char *reject)
 }
 
 /*
- * The reentrant form only, and the non-reentrant strtok() is a macro over it
- * that keeps its state in a file-static. A shell parsing its own input cannot
- * afford a global cursor: two nested tokenisations of two different buffers
- * would fight over it.
+ * The reentrant form carries its own cursor, so it is the one that can be used
+ * to parse two strings at once. The non-reentrant strtok() below is a thin
+ * wrapper over it with the cursor in a file-static, which is the whole of the
+ * difference between them.
  */
 char *strtok_r(char *s, const char *delim, char **save)
 {
@@ -280,6 +280,20 @@ char *strtok_r(char *s, const char *delim, char **save)
 		*save = NULL;
 	}
 	return start;
+}
+
+/*
+ * strtok() is not a macro here; it is a function over strtok_r() with the state
+ * in a file-static. The comment that used to sit above strtok_r claimed the
+ * macro existed and that it did not, and userspace programs were written around
+ * the wrong belief -- init.c carried its own splitter with a comment saying
+ * strtok was not available. It is available, and this is it.
+ */
+static char *strtok_save;
+
+char *strtok(char *s, const char *delim)
+{
+	return strtok_r(s, delim, &strtok_save);
 }
 
 /*

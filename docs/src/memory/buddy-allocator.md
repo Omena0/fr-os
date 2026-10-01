@@ -6,7 +6,8 @@ The buddy allocator is the physical page allocation algorithm used by the PMM. I
 
 ## Order System
 
-Pages are tracked in 11 order levels (order 0 through order 10):
+`BUDDY_MAX_ORDER` is 11 (`src/kernel/include/pmm.h`), so there are **12** order
+levels, order 0 through order 11:
 
 | Order | Pages | Size |
 |---|---|---|
@@ -21,8 +22,11 @@ Pages are tracked in 11 order levels (order 0 through order 10):
 | 8 | 256 pages | 1 MB |
 | 9 | 512 pages | 2 MB |
 | 10 | 1024 pages | 4 MB |
+| 11 | 2048 pages | 8 MB |
 
-Each zone has 11 free lists (`struct list_head free_list[11]`), one per order.
+Each zone has 12 free lists (`struct list_head free_list[BUDDY_MAX_ORDER + 1]`),
+one per order, and its `free_bitmap` has 12 meaningful bits. This constant is
+defined once, in `pmm.h`; `pmm.c` does not define it a second time.
 
 ## Allocation Algorithm
 
@@ -61,10 +65,16 @@ Finding the smallest non-empty order ≥ `requested_order`:
 
 ```c
 uint16_t mask = ~((1 << requested_order) - 1);
-int order = __builtin_ctz(free_bitmap & mask);
+unsigned bits = free_bitmap & mask;
+if (bits == 0)
+        return -1;                      /* nothing at or above the order */
+int order = __builtin_ctz(bits);
 ```
 
-This avoids walking empty free lists.
+The zero test is not optional. `__builtin_ctz(0)` is undefined behaviour, and on
+a zone with no free block at or above the requested order this is exactly the
+value it would be handed. `first_order_at_least()` in `pmm.c` tests `mask == 0`
+before the call.
 
 ## Zone Locking
 

@@ -4,6 +4,15 @@
  * clock_gettime dispatches on clock id: 0 = REALTIME, 1 = MONOTONIC,
  * 2 = PROCESS_CPUTIME_ID (mapped to monotonic, documented as approximate),
  * anything else -> EINVAL.
+ *
+ * The clock ids are NOT redefined here. time.h already gives them the kernel's
+ * values, and a second set of #defines that agree today is two places for one
+ * number to live. The other three ids time.h names -- CLOCK_THREAD_CPUTIME_ID,
+ * CLOCK_MONOTONIC_RAW and CLOCK_BOOTTIME -- cannot be answered: the kernel has
+ * a single counter and ignores the clock id entirely, so returning something
+ * for them would mean handing back a number that is not the clock that was
+ * asked for. They fail with EINVAL, and time.h says so where a caller sees it.
+ *
  * clock_getres returns the resolution (1ns for all clocks here).
  * time() returns the realtime seconds.
  * nanosleep() wraps the syscall with EINTR retry.
@@ -13,14 +22,9 @@
 #include <errno.h>
 #include <stdint.h>
 
-/* __MORE__ */
 
 extern int sys_clock_gettime(clockid_t clk_id, struct timespec *tp);
 extern int sys_nanosleep(const struct timespec *req, struct timespec *rem);
-
-#define CLOCK_REALTIME           0
-#define CLOCK_MONOTONIC          1
-#define CLOCK_PROCESS_CPUTIME_ID 2
 
 int clock_gettime(clockid_t clk_id, struct timespec *tp)
 {

@@ -29,6 +29,21 @@
  * buddy allocator until those objects are flushed back. That is deliberately
  * conservative in the safe direction: reclaiming a slab early would free pages
  * that a magazine still hands out.
+ *
+ * Ordering. kmalloc_init() is the only thing that makes this allocator usable,
+ * and every entry point here treats a cache that has not been through it as an
+ * allocator with no pages: kmalloc() returns NULL, and it returns it before it
+ * reads this_cpu_id(), so a call made before percpu_setup() cannot index the
+ * per-CPU magazines with an unestablished CPU number. Nothing in this file
+ * depends on a cache's fields being non-zero to be safe: every field that would
+ * otherwise become a loop bound or a divisor is range-checked against the
+ * slab's own capacity before it is used, so a zeroed cache produces a NULL
+ * rather than a four-billion-iteration write loop. An allocation failure is
+ * therefore always an answer this file can give.
+ *
+ * The `size` argument of kfree() is advisory. It selects a first candidate
+ * cache, and the slab header decides the truth: a block is returned to the
+ * class it was carved from, never to the class the caller happened to name.
  */
 
 #include <vmm.h>
@@ -46,6 +61,10 @@
 
 /* Objects per cache per CPU, per docs/src/memory/per-cpu-caches.md. */
 #define KMALLOC_MAG_SIZE	64
+
+/* Objects a refill asks the cache for at once. A refill takes a slab's worth,
+ * and no slab holds more than this, so the two numbers only meet at the top. */
+#define KMALLOC_MAG_REFILL	8
 
 /* Slabs are grown until one holds at least this many objects, so the slab
  * header's fixed cost is never a large fraction of the slab. */
@@ -78,7 +97,21 @@ struct kmalloc_slab {
 	uint32_t total;		/* objects in this slab */
 	uint32_t free;		/* objects on the freelist */
 	uint32_t first;		/* index of the first free object, or SLAB_NONE */
+	uint32_t class_idx;	/* the cache this slab was carved for */
 };
+
+/*
+ * The class tag is what lets kfree() find the block a pointer came from without
+ * trusting the caller's size. Eight of the ten classes use a 4 KiB slab, so
+ * masking the pointer with slab_bytes distinguishes them not at all: the tag
+ * is the only thing that can.
+ *
+ * It occupies padding that existed anyway. The header was 36 bytes and objects
+ * start at the next 8-byte boundary, so adding a fourth uint32_t costs nothing
+ * and moves no object.
+ */
+STATIC_ASSERT(sizeof(struct kmalloc_slab) <= 40,
+	      "slab header must not grow past the 8-byte-aligned header before it");
 
 struct kmalloc_magazine {
 	uint32_t count;
@@ -111,6 +144,15 @@ static spinlock_t kmag_lock[MAX_CPUS][NUM_KCACHE];
 static u64 stat_allocs;
 static u64 stat_frees;
 static u64 stat_bytes;		/* counted at class size, not request size */
+static u64 stat_size_mismatch;	/* frees whose `size` disagreed with the block */
+static u64 stat_bad_free;	/* frees of a pointer no slab owns */
+
+/*
+ * Set as the last thing kmalloc_init() does. Until it is set, no cache in
+ * kcaches[] describes a usable allocator, and every path that would consume a
+ * cache's geometry returns NULL instead.
+ */
+static bool kmalloc_ready;
 
 /* ---------------------------------------------------------------- helpers --- */
 
@@ -140,6 +182,75 @@ static struct kmalloc_slab *slab_of(const struct kmalloc_cache *c, void *obj)
 	return (struct kmalloc_slab *)((uintptr_t)obj & ~(c->slab_bytes - 1));
 }
 
+/*
+ * Is `obj` an object start inside the slab `s`?
+ *
+ * The mask in slab_of() is only meaningful for the cache the object was carved
+ * from: applied with the wrong slab size it lands on a page that is merely
+ * covered by some other slab, or on payload bytes in the middle of one. Both
+ * are rejected here, by asking the candidate header to identify itself. Two
+ * independent checks, because the wrong candidate can look right: the range
+ * test rejects a pointer past the end of the block or in the header, and the
+ * header test rejects a page of object payload that happens to sit where a slab
+ * head would be.
+ */
+static bool slab_owns(const struct kmalloc_cache *c,
+		      const struct kmalloc_slab *s, const void *obj)
+{
+	size_t off = (size_t)((const char *)obj - (const char *)s);
+	size_t idx = (size_t)(c - kcaches);
+
+	if (!c->size || !c->slab_bytes || !c->per_slab || !c->obj_off)
+		return false;
+	if (idx >= NUM_KCACHE)
+		return false;
+	if (off < c->obj_off || off + c->size > c->slab_bytes)
+		return false;			/* outside the block, or header */
+	if ((off - c->obj_off) % c->size)
+		return false;			/* interior pointer */
+	if (s->class_idx != idx || s->total != c->per_slab)
+		return false;			/* not this cache's slab */
+	if (s->free > s->total)
+		return false;			/* header is not one of ours */
+	return true;
+}
+
+/*
+ * The slab that owns `obj`, found without being told which cache it came from.
+ *
+ * Every cache's mask is tried and the header's own claim decides. Slabs are
+ * disjoint buddy blocks, so at most one cache can own a real object; a second
+ * candidate would mean object payload that coincidentally reads as a header,
+ * and rather than guess, that case is reported as "no owner" so the caller can
+ * refuse the free instead of writing a freelist link into the wrong class.
+ */
+static struct kmalloc_slab *slab_find_owner(void *obj,
+					    struct kmalloc_cache **owner)
+{
+	struct kmalloc_slab *found = NULL;
+	struct kmalloc_cache *fc = NULL;
+
+	for (size_t i = 0; i < NUM_KCACHE; i++) {
+		struct kmalloc_cache *c = &kcaches[i];
+		struct kmalloc_slab *s;
+
+		if (!c->slab_bytes)
+			continue;		/* cache not initialised */
+
+		s = slab_of(c, obj);
+		if (!slab_owns(c, s, obj))
+			continue;
+
+		if (found)
+			return NULL;		/* ambiguous: refuse */
+		found = s;
+		fc = c;
+	}
+
+	*owner = fc;
+	return found;
+}
+
 static int kcache_init_one(struct kmalloc_cache *c, size_t size)
 {
 	size_t obj_off = ALIGN_UP(sizeof(struct kmalloc_slab), 8);
@@ -148,11 +259,33 @@ static int kcache_init_one(struct kmalloc_cache *c, size_t size)
 		size_t bytes = (size_t)PAGE_SIZE << o;
 
 		if ((bytes - obj_off) / size >= KMALLOC_MIN_PER_SLAB) {
+			uint32_t per_slab = (uint32_t)((bytes - obj_off) / size);
+
+			/*
+			 * kfree() decides which tier a pointer came from by one
+			 * bit: vmalloc blocks are page-aligned, slab objects are
+			 * not. That decision is only sound while no object in this
+			 * class lands on a page boundary.
+			 *
+			 * Every class size divides PAGE_SIZE, so the object
+			 * offsets hit a page boundary exactly when the size
+			 * divides obj_off and the first such object still fits
+			 * inside the block. For the current geometry (obj_off 40,
+			 * per_slab 507 for the 8-byte class) the answer is no,
+			 * by one object -- so this is checked rather than
+			 * assumed, because the margin is one object wide and a
+			 * future header size could erase it.
+			 */
+			if (obj_off % size == 0 &&
+			    (PAGE_SIZE - (obj_off % PAGE_SIZE)) / size < per_slab)
+				panic("kmalloc: %u-byte objects would be page-aligned",
+				      (unsigned)size);
+
 			c->size = size;
 			c->order = o;
 			c->slab_bytes = bytes;
 			c->obj_off = obj_off;
-			c->per_slab = (uint32_t)((bytes - obj_off) / size);
+			c->per_slab = per_slab;
 			return 0;
 		}
 	}
@@ -166,8 +299,32 @@ static struct kmalloc_slab *slab_new(struct kmalloc_cache *c)
 	struct kmalloc_slab *s;
 	struct page *p;
 	phys_addr_t phys;
+	uint32_t per_slab;
 
-	p = pmm_alloc_pages(c->order, PG_SLAB);
+	/*
+	 * An allocator with no pages or no size class cannot make a slab. This
+	 * is the check that makes the loop below incapable of running away: it is
+	 * reached with a cache that has not been through kmalloc_init(), where
+	 * per_slab is 0 and the old code threaded a free list from 0xFFFFFFFF
+	 * downwards, indexing a slab whose size class was 0 -- so every
+	 * iteration wrote the same four bytes, four billion times.
+	 */
+	if (!kmalloc_ready || !c->size || !c->per_slab || !c->slab_bytes ||
+	    !c->obj_off)
+		return NULL;
+
+	/*
+	 * And a cache that claims more objects than its own slab can hold is
+	 * refused, whatever it claims. per_slab is derived from slab_bytes and
+	 * size in kcache_init_one(), so this holds for every cache that exists;
+	 * it is here so the bound below is a property of the check and not of the
+	 * caller having initialised the cache first.
+	 */
+	per_slab = c->per_slab;
+	if ((u64)per_slab * c->size > (u64)c->slab_bytes - c->obj_off)
+		return NULL;
+
+	p = pmm_alloc_pages(c->order, GFP_KERNEL);
 	if (!p)
 		return NULL;
 
@@ -175,19 +332,28 @@ static struct kmalloc_slab *slab_new(struct kmalloc_cache *c)
 	s = (struct kmalloc_slab *)phys_to_virt(phys);
 
 	s->page = p;
-	s->total = c->per_slab;
-	s->free = c->per_slab;
+	s->total = per_slab;
+	s->free = per_slab;
+	s->class_idx = (uint32_t)(c - kcaches);
 
 	/*
-	 * Thread the free list through the objects themselves, back to front so
-	 * that allocation hands out ascending addresses. Back to front matters
-	 * for locality the same way forward order does; ascending is simply the
-	 * direction the hardware prefetcher expects.
+	 * Thread the free list through the objects themselves, ascending, so
+	 * that allocation hands out ascending addresses -- which is the direction
+	 * the hardware prefetcher expects, and the order the magazine refill
+	 * below preserves when it pushes a slab's objects onto its tail.
+	 *
+	 * Every object on the list has to carry a link, including the one the
+	 * head points at and the one the tail terminates, so the head is object 0
+	 * and object per_slab-1 is the tail rather than the reverse: a head that
+	 * is never written is a head whose "next" is whatever the page happened
+	 * to contain, and a list built the other way round leaves that same link
+	 * uninitialised while writing each remaining object as a pointer to
+	 * itself.
 	 */
-	s->first = c->per_slab - 1;
-	for (uint32_t i = c->per_slab - 1; i > 0; i--)
-		*(uint32_t *)slab_obj(c, s, i - 1) = i - 1;
-	*(uint32_t *)slab_obj(c, s, 0) = SLAB_NONE;
+	s->first = 0;
+	for (uint32_t i = 0; i + 1 < per_slab; i++)
+		*(uint32_t *)slab_obj(c, s, i) = i + 1;
+	*(uint32_t *)slab_obj(c, s, per_slab - 1) = SLAB_NONE;
 
 	return s;
 }
@@ -200,37 +366,81 @@ static void slab_release(struct kmalloc_cache *c, struct kmalloc_slab *s)
 
 /* ------------------------------------------------- cache-level alloc/free --- */
 
-static void *cache_alloc(struct kmalloc_cache *c)
+/*
+ * Take one object off a slab's free list.
+ *
+ * `first` is an index into the block, and SLAB_NONE is a legal value for it, so
+ * the two ways of running off the end -- an exhausted free count and a
+ * terminated list -- are both checked here rather than used as addresses. A
+ * slab whose last object has just gone out moves to the full list, which is
+ * what keeps an exhausted slab from being rediscovered by the next allocation.
+ */
+static void *slab_take(struct kmalloc_cache *c, struct kmalloc_slab *s)
 {
-	struct kmalloc_slab *s;
 	void *obj;
 
-	if (list_empty(&c->partial)) {
-		s = slab_new(c);
-		if (!s)
-			return NULL;
-		list_add_tail(&s->node, &c->partial);
-	} else {
-		s = list_entry(c->partial.next, struct kmalloc_slab, node);
-	}
+	if (s->free == 0 || s->first == SLAB_NONE || s->first >= s->total)
+		return NULL;
 
 	obj = slab_obj(c, s, s->first);
 	s->first = *(uint32_t *)obj;
 	s->free--;
 
-	/* The last object just went out; the slab has no way to satisfy another
-	 * request without growing, so it moves to the full list now rather than
-	 * being rediscovered empty on the next call. */
 	if (s->free == 0)
 		list_move(&s->node, &c->full);
 
 	return obj;
 }
 
+static void *cache_alloc(struct kmalloc_cache *c)
+{
+	struct kmalloc_slab *s;
+	void *obj;
+
+	if (!list_empty(&c->partial)) {
+		s = list_entry(c->partial.next, struct kmalloc_slab, node);
+		obj = slab_take(c, s);
+		if (obj)
+			return obj;
+		/* Unreachable while slab_take() moves an exhausted slab to the
+		 * full list. Kept so that a partial list which somehow holds one
+		 * grows the cache instead of handing out an index past the end
+		 * of a block. */
+	}
+
+	s = slab_new(c);
+	if (!s)
+		return NULL;
+	list_add_tail(&s->node, &c->partial);
+
+	obj = slab_take(c, s);
+	if (obj)
+		return obj;
+
+	/* A slab that cannot give up its first object is not usable. Unreachable
+	 * -- slab_new() refuses a geometry with no objects -- but returning the
+	 * pages is cheaper than leaving a dead block on the partial list. */
+	list_del(&s->node);
+	pmm_free_pages(s->page, c->order);
+	return NULL;
+}
+
 static void cache_free(struct kmalloc_cache *c, void *obj)
 {
 	struct kmalloc_slab *s = slab_of(c, obj);
 	bool was_full = (s->free == 0);
+
+	/*
+	 * A partial detector for freeing the same pointer twice. It is not
+	 * complete -- an object sitting in a magazine is invisible here, so a
+	 * double free that lands in a magazine still duplicates the pointer --
+	 * but it costs nothing and it turns the detectable case from freelist
+	 * corruption into a counted refusal.
+	 */
+	if (s->free >= s->total) {
+		__atomic_fetch_add(&stat_bad_free, 1, __ATOMIC_RELAXED);
+		return;
+	}
 
 	*(uint32_t *)obj = s->first;
 	s->first = obj_index(c, s, obj);
@@ -282,6 +492,22 @@ void kmalloc_init(void)
 		if (kcache_init_one(c, size) < 0)
 			panic("kmalloc: no slab order fits a %u-byte class", (unsigned)size);
 	}
+
+	/*
+	 * The magazines are BSS, so a zeroed spinlock is already an unlocked
+	 * ticket lock, but they are initialised like the cache locks anyway: a
+	 * lock that is usable by accident is a lock whose invariant nobody
+	 * wrote down.
+	 */
+	for (unsigned cpu = 0; cpu < MAX_CPUS; cpu++)
+		for (size_t i = 0; i < NUM_KCACHE; i++)
+			spinlock_init(&kmag_lock[cpu][i]);
+
+	/*
+	 * Last, and only here. Until this assignment the caches are described
+	 * but not usable, and kmalloc() reports that by returning NULL.
+	 */
+	kmalloc_ready = true;
 }
 
 /* ----------------------------------------------------------------- kmalloc --- */
@@ -290,16 +516,31 @@ void *kmalloc(size_t size)
 {
 	struct kmalloc_magazine *m;
 	struct kmalloc_cache *c;
-	unsigned cpu = this_cpu_id();
+	unsigned cpu;
+	unsigned batch;
+	unsigned n = 0;
 	int idx;
 	void *obj;
+	void *objs[KMALLOC_MAG_REFILL];
 	u64 flags;
+
+	/*
+	 * Before kmalloc_init(). This has to come first, and it has to be a
+	 * plain test rather than a check of the cache geometry it is protecting:
+	 * the per-CPU magazines are indexed by this_cpu_id(), which is not a
+	 * meaningful number until percpu_setup() has run, and asking for one
+	 * anyway is how a call made from a console initialiser turns into an
+	 * out-of-bounds index instead of a NULL.
+	 */
+	if (!kmalloc_ready)
+		return NULL;
 
 	idx = class_for(size);
 	if (idx < 0)
 		return vmalloc(size);
 
 	c = &kcaches[idx];
+	cpu = this_cpu_id();
 
 	/* Fast path: this CPU has a spare object. */
 	m = &kmags[cpu][idx];
@@ -312,16 +553,35 @@ void *kmalloc(size_t size)
 		return obj;
 	}
 
-	/* Slow path: refill this CPU's magazine a slab's worth at a time. */
+	/*
+	 * Slow path: refill this CPU's magazine a slab's worth at a time.
+	 *
+	 * The batch is one slab's worth because that is what the cache has to
+	 * hand out. Asking for more walks past the end of the current slab into
+	 * cache_alloc's growth path, which creates a block and returns a single
+	 * object from it -- so a refill that wants eight objects from a
+	 * seven-object slab spends a whole second block to park one object in it.
+	 */
+	batch = c->per_slab < KMALLOC_MAG_REFILL ? c->per_slab : KMALLOC_MAG_REFILL;
+	if (batch == 0)
+		return NULL;		/* no geometry: nothing to refill from */
+
 	flags = spinlock_irqsave(&c->lock);
-	for (int i = 0; i < 8; i++) {
+	for (unsigned i = 0; i < batch; i++) {
 		obj = cache_alloc(c);
 		if (!obj)
 			break;
-		/* Round-robin into the tail so a refill does not undo the
-		 * ascending-address order the slab builder established. */
-		m->objects[m->count++] = obj;
+		objs[i] = obj;
+		n++;
 	}
+	/*
+	 * Pushed in reverse, because mag_pop() takes the tail. The caller then
+	 * receives objects in ascending address order, which is the order
+	 * slab_new() built the free list in and the order this cache's own
+	 * comment claims it preserves.
+	 */
+	while (n > 0)
+		m->objects[m->count++] = objs[--n];
 	spinlock_unlock_irqrestore(&c->lock, flags);
 
 	obj = mag_pop(m);
@@ -355,21 +615,72 @@ void *kcalloc(size_t n, size_t size)
 void kfree(void *ptr, size_t size)
 {
 	struct kmalloc_magazine *m;
-	struct kmalloc_cache *c;
-	unsigned cpu = this_cpu_id();
+	struct kmalloc_cache *c = NULL;
+	unsigned cpu;
 	int idx;
 	u64 flags;
 
 	if (!ptr)
 		return;
 
-	idx = class_for(size);
-	if (idx < 0) {
+	/*
+	 * A non-NULL free before kmalloc_init() is not a failure this file can
+	 * absorb: nothing could have been allocated, so the pointer did not come
+	 * from here and there is nowhere to return it to. Saying so beats
+	 * returning it to whatever cache happens to match its size.
+	 */
+	if (!kmalloc_ready)
+		panic("kfree: non-NULL free before kmalloc_init()");
+
+	/*
+	 * Which tier the pointer came from is decided by the pointer, not by
+	 * `size`. vmalloc hands out page-aligned blocks (VMALLOC_AREA is aligned
+	 * and every size is rounded up to PAGE_SIZE), while a slab object starts
+	 * at obj_off past a page-aligned header and so is never page-aligned.
+	 * One bit therefore separates the two, and it is a property of the
+	 * allocator rather than of any caller's bookkeeping.
+	 */
+	if (!((uintptr_t)ptr & (PAGE_SIZE - 1))) {
+		if (class_for(size) >= 0)
+			__atomic_fetch_add(&stat_size_mismatch, 1,
+					  __ATOMIC_RELAXED);
 		vfree(ptr);
 		return;
 	}
 
-	c = &kcaches[idx];
+	/*
+	 * `size` picks the first cache to try. It is the caller's best guess and
+	 * it is not trusted: the slab header has to agree before the block is
+	 * accepted, so freeing a 4 KiB object with size=1 returns it to the 4 KiB
+	 * slab rather than parking it in the 8-byte magazine, where it would be
+	 * handed out a second time and the 4 KiB object's freelist link would be
+	 * written over live data.
+	 */
+	idx = class_for(size);
+	if (idx >= 0) {
+		struct kmalloc_slab *s = slab_of(&kcaches[idx], ptr);
+
+		if (slab_owns(&kcaches[idx], s, ptr))
+			c = &kcaches[idx];
+	}
+
+	if (!c) {
+		struct kmalloc_slab *s = slab_find_owner(ptr, &c);
+
+		if (!s || !c) {
+			/*
+			 * No slab holds this pointer. Returning it to a cache
+			 * anyway is what turns a bad free into a corrupt slab,
+			 * so it is counted and dropped instead of guessed at.
+			 */
+			__atomic_fetch_add(&stat_bad_free, 1, __ATOMIC_RELAXED);
+			return;
+		}
+		__atomic_fetch_add(&stat_size_mismatch, 1, __ATOMIC_RELAXED);
+	}
+
+	idx = (int)(c - kcaches);
+	cpu = this_cpu_id();
 
 	/* Fast path: park the object on this CPU. */
 	m = &kmags[cpu][idx];
@@ -416,9 +727,14 @@ void *krealloc(void *ptr, size_t old_size, size_t new_size)
 
 char *kstrdup(const char *s)
 {
-	size_t n = strlen(s) + 1;
-	char *p = kmalloc(n);
+	size_t n;
+	char *p;
 
+	if (!s)
+		return NULL;
+
+	n = strlen(s) + 1;
+	p = kmalloc(n);
 	if (p)
 		memcpy(p, s, n);
 	return p;

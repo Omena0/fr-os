@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/Omena0/fr-docs/main/config.schema.json",
-  "project_name": "Os",
-  "copyright_holder": "CHANGE_ME",
+  "project_name": "Fr OS",
+  "copyright_holder": "Omena0",
   "project_url": "",
   "site_path_prefix": "/",
   "src_dir": "src",
