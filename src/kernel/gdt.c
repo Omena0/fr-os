@@ -40,15 +40,28 @@ struct gdtr {
  * the total alone: a struct that is the right size with the fields in the
  * wrong places is exactly the failure these checks exist to catch.
  */
+/*
+ * The 64-bit TSS, not a 32-bit one with wider fields.
+ *
+ * This was a 32-bit layout: 7 IST slots of 4 bytes each, giving an 80-byte
+ * structure. In 64-bit mode the IST slots are 8 bytes each and the structure is
+ * 104 bytes. The CPU does not accept the 32-bit shape -- `LTR` raises #GP with
+ * the TSS selector in the error code -- and the register it was being loaded
+ * into is the one that tells the CPU where RSP0 lives, so the whole
+ * ring-0-entry mechanism is dead until this is right.
+ *
+ * The offsets are architectural, not ours to choose. They are asserted below
+ * because the IDT stubs read RSP0 at TSS+4 and IST pointers at TSS+0x24.
+ */
 struct tss {
 	uint32_t reserved0;   /* 0x00 */
 	uint64_t rsp0;        /* 0x04 — 64 bits in long mode, not 16 */
 	uint64_t rsp1;        /* 0x0C */
 	uint64_t rsp2;        /* 0x14 */
 	uint64_t reserved1;   /* 0x1C */
-	uint32_t ist[7];      /* 0x24 — 32-bit each, fixed by the architecture */
-	uint64_t reserved2;   /* 0x40 */
-	uint64_t iomap_base;  /* 0x48 */
+	uint64_t ist[7];      /* 0x24 — EIGHT bytes each in 64-bit mode */
+	uint64_t reserved2;   /* 0x5C */
+	uint64_t iomap_base;  /* 0x64 */
 } __attribute__((packed));
 
 _Static_assert(offsetof(struct tss, rsp0) == 4,
@@ -56,9 +69,11 @@ _Static_assert(offsetof(struct tss, rsp0) == 4,
 _Static_assert(offsetof(struct tss, rsp1) == 0x0C, "bad rsp1 offset");
 _Static_assert(offsetof(struct tss, rsp2) == 0x14, "bad rsp2 offset");
 _Static_assert(offsetof(struct tss, ist) == 0x24, "bad IST offset");
-_Static_assert(offsetof(struct tss, iomap_base) == 0x48, "bad iomap offset");
-_Static_assert(sizeof(struct tss) == 80,
-	       "the 64-bit TSS is 80 bytes without an I/O permission bitmap");
+_Static_assert(sizeof(((struct tss *)0)->ist[0]) == 8,
+	       "64-bit IST slots are 8 bytes, not 4");
+_Static_assert(offsetof(struct tss, iomap_base) == 0x64, "bad iomap offset");
+_Static_assert(sizeof(struct tss) == 108,
+	       "a 64-bit TSS is 108 bytes through iomap_base, before any bitmap");
 
 /*
  * Per the docs, each CPU has its own GDT and TSS. The boot CPU is the only one
@@ -117,7 +132,7 @@ void gdt_set_ist_stack(uint8_t ist, void *stack_top)
 		   "be mapped at a low linear address",
 		   stack_top);
 
-	kernel_tss.ist[ist - 1] = (uint32_t)(uintptr_t)stack_top;
+	kernel_tss.ist[ist - 1] = (uint64_t)(uintptr_t)stack_top;
 }
 
 bool gdt_have_ist(uint8_t ist)

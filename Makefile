@@ -58,6 +58,11 @@ LIBC_OBJ := $(patsubst src/%.c,$(OBJ)/%.c.o,$(LIBC_SRC)) \
 # discarding the other without saying which.
 INIT_MAIN_SRC := $(sort $(wildcard src/userspace/init/*.c))
 INIT_ELF := build/init.elf
+# hello is Fr Userland's smoke test. It is built with the same flags as init
+# and goes into the same initrd; nothing in the kernel runs it automatically,
+# because there is no shell yet to type its name at.
+HELLO_SRC := $(sort $(wildcard src/userspace/hello/*.c))
+HELLO_ELF := build/hello.elf
 INITRD := build/initrd.img
 
 DISK := build/os.img
@@ -153,9 +158,16 @@ $(BUILD)/stage2.elf: $(STAGE2_OBJ) src/boot/stage2.ld
 # The generating script is a prerequisite. tools/initrd.py decides the container
 # format, so editing it changes the output bytes; without the dependency the
 # blob would keep the old layout until something unrelated forced a rebuild.
-$(INITRD): $(INIT_ELF) tools/initrd.py
+$(HELLO_ELF): $(HELLO_SRC) $(LIBC_OBJ) $(BUILD)/libc.a src/include/version.h
 	@mkdir -p $(dir $@)
-	python3 tools/initrd.py --out $@ --program init=$(INIT_ELF)
+	$(HOST_CC_64) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $(HELLO_SRC) \
+		$(BUILD)/libc.a $(KERNEL_VERSION_DEFS)
+	$(HOST_OBJCOPY) $(STRIP_DEBUG) $@
+
+$(INITRD): $(INIT_ELF) $(HELLO_ELF) tools/initrd.py
+	@mkdir -p $(dir $@)
+	python3 tools/initrd.py --out $@ --program init=$(INIT_ELF) \
+		--program hello=$(HELLO_ELF)
 
 # version.h supplies KERNEL_VERSION/KERNEL_GIT_REV/KERNEL_BUILD_STAMP, which
 # reach the image as -D flags on the link line rather than through a header

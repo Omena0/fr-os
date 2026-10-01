@@ -273,6 +273,27 @@ void kmain(uint64_t bootinfo_phys)
 	syscall_init();
 
 	/*
+	 * The scheduler's per-CPU state, before anything can enter it.
+	 *
+	 * sched_init() is the only place that creates the idle task and publishes
+	 * per_cpu(current), per_cpu(idle_task) and per_cpu(in_scheduler). It is
+	 * also the only caller of syscall_set_kernel_stack() -- its own comment
+	 * says the syscall entry path "needs a kernel stack to land on, and the
+	 * idle task is what is running", so without it the first SYSCALL from
+	 * userspace lands on a null kernel stack.
+	 *
+	 * Nothing called it. process_create_init() below runs first and builds
+	 * the first user process; it needs a kernel stack for the task, and it
+	 * needs per_cpu(current) to be coherent when it runs. So this belongs
+	 * *before* process_create_init(), not immediately before sched_start().
+	 *
+	 * Note the ordering that falls out of it: gdt/tss/idt/syscall, then the
+	 * scheduler's per-CPU state, then PID 1. Anything that runs before
+	 * sched_init() is running with per_cpu(current) unset.
+	 */
+	sched_init();
+
+	/*
 	 * The first user process, created before sched_start() because
 	 * sched_start() never returns: it hands the CPU to the first runnable
 	 * task and the kernel stops being a boot sequence. Anything belonging to

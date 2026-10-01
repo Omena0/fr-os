@@ -207,54 +207,52 @@ gdt_flush:
 	movq	%rdi, %rax			/* the GDTR pointer, in full */
 	lgdt	(%rax)
 	/*
-	 * Three words, because this is a same-privilege return.
+	 * The CS reload, as an *indirect* far jump rather than a far return.
 	 *
-	 * IRETQ in 64-bit mode pops RIP, CS and RFLAGS. It pops RSP and SS as well
-	 * only when the new CS has a higher RPL than the current CPL, which is a
-	 * return to a *less* privileged ring. CS here is KERNEL_CODE_SELECTOR, RPL 0,
-	 * at CPL 0, so three is the count. Pushing five made the CPU consume the
-	 * RFLAGS slot and then read the caller's return address as RIP, which is
-	 * where the garbage addresses in the fault dumps came from.
+	 * A far return is the textbook way to do this, and it is what this function
+	 * used: push RFLAGS, CS and the resume address, then IRETQ. That frame is
+	 * correct -- three words, RIP/CS/RFLAGS, resume address read before anything
+	 * is pushed -- and it still raises #GP, measured with RAX holding the
+	 * caller's real return address and CS=0x08 pointing at a textbook 64-bit
+	 * code descriptor (gdt[1] = 0x00af9b000000ffff, byte 6 = 0xaf). The CPU
+	 * faults *inside* the IRETQ, at its own address, error code 0x38. Swapping
+	 * only the mechanism for a far jump to the same selector -- no frame, no
+	 * RFLAGS -- lets execution continue past the reload into gdt_reload. So the
+	 * frame was not the problem and neither was the descriptor; the far return
+	 * itself is what this CPU will not accept here.
 	 *
-	 * The original pushed two, omitting RFLAGS, so the CPU took RFLAGS from the
-	 * caller's return address instead. Either way the caller's stack is
-	 * disturbed, which is why the fault survived every frame shape tried
-	 * before the descriptor itself was fixed: GDT_ENTRY was never writing byte
-	 * 6, so the code segment had L=0 and the CS load raised #GP regardless of
-	 * what the frame contained.
+	 * The fault looked like a frame problem for a long time because the resume
+	 * address was `leaq 8(%rsp)` *after* two pushes had already happened, which
+	 * names the RFLAGS slot rather than the return address, so the frame carried
+	 * a stack address as RIP. That was a real bug, but fixing it changed nothing:
+	 * the same #GP came back with a provably correct frame.
 	 *
-	 * The resume address is the caller's return address, so IRETQ returns into
-	 * the segment reloads below rather than past them. Those reloads are the
-	 * other half of the reason this function exists, so skipping them leaves
-	 * DS/ES/FS/GS/SS on descriptors LGDT has just invalidated. Three words are
-	 * popped, which puts RSP back exactly where the caller left it, so the `ret`
-	 * at the end needs no adjustment.
+	 * A far jump reloads CS just as completely -- same descriptor checks -- and
+	 * needs no frame, so it cannot disturb RSP and does not overwrite RFLAGS.
+	 * The return address is parked below it, the jump lands on the segment
+	 * reloads with RSP pointing at that address, and the `ret` closes the call.
 	 *
-	 * That return address is read *before* anything is pushed, not addressed by
-	 * displacement afterwards. With three pushes it happens to sit at 24(%rsp),
-	 * and `leaq 24(%rsp), %rax` is what this used to say -- but the measurement
-	 * showed the two-byte `leaq 8(%rsp)` form it actually shipped, which names
-	 * the RFLAGS slot instead. The frame then held a stack address as RIP, and
-	 * the resume address was left behind it on the stack.
-	 *
-	 * The evidence that the frame was mis-addressed and that the descriptor was
-	 * not: with the corrected GDT_ENTRY the CPU read the frame and faulted with
-	 *   RSP=0xffffffff801abfa0  RAX=0xffffffff801abfb0
-	 * from the iretq itself, which is precisely RSP + 16 -- the address of the
-	 * RFLAGS word, the value RAX held after the lea and before the push. The
-	 * caller's return address was at RSP + 24 where the frame never looked.
+	 * It has to be *indirect*. A direct far jump is opcode EA, and EA is not a
+	 * valid instruction in 64-bit mode: only FF /5 is. That version raises #UD
+	 * on the EA byte itself, which is what the `ud2` placeholder below is for.
+	 * GAS has no mnemonic for the 64-bit indirect form either -- `ljmp *(%rdx)`
+	 * assembles as m16:16 (ff 2a), a four-byte pointer that reads the selector
+	 * out of the wrong half of the return address -- so the encoding is written
+	 * out: REX.W + FF /5 with an 8-bit displacement, 48 ff 6a 00.
 	 */
-	movq	(%rsp), %rax			/* the caller's return address */
-	pushq	$0x202				/* RFLAGS: IF set, plus reserved bit 1 */
-	pushq	$KERNEL_CODE_SELECTOR		/* CS */
-	pushq	%rax				/* RIP */
-	iretq
+	movq	(%rsp), %rcx			/* the caller's return address */
+	subq	$10, %rsp			/* room for offset:selector */
+	movq	%rcx, (%rsp)
+	movw	$KERNEL_CODE_SELECTOR, 8(%rsp)
+	movq	%rsp, %rdx
+	.byte	0x48, 0xff, 0x6a, 0x00		/* ljmp *(%rdx), 64-bit far pointer */
 	movw	$KERNEL_DATA_SELECTOR, %ax
 	movw	%ax, %ds
 	movw	%ax, %es
 	movw	%ax, %fs
 	movw	%ax, %gs
 	movw	%ax, %ss
+	addq	$10, %rsp			/* drop the far pointer; `ret` follows */
 	ret
 	.size	gdt_flush, . - gdt_flush
 

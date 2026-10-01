@@ -18,7 +18,15 @@ cd "$(dirname "$0")"
 
 IMAGE="${IMAGE:-build/os.img}"
 MEM="${MEM:-4G}"
-SMP="${SMP:-18}"
+# One CPU, and deliberately so.
+#
+# sched_init() is per-CPU: it allocates sched_runqueues[cpu] and publishes
+# per_cpu(current), per_cpu(idle_task) and per_cpu(in_scheduler) for that CPU
+# alone. Nothing else calls it -- there is no secondary-CPU bring-up path in the
+# tree -- so a second CPU would come up with a NULL run queue and fault on its
+# first touch. SMP=N is honoured for experimentation and is not currently
+# correct.
+SMP="${SMP:-1}"
 
 # The serial log. Named here because the QEMU arguments below need it and the
 # reporting at the end needs it, and a path written in three places is a path
@@ -59,53 +67,31 @@ QEMU_ARGS=(
 	-no-reboot
 )
 
-# KVM when it is usable, TCG otherwise. -cpu host is only valid under KVM:
-# under TCG the host CPU model does not exist and QEMU rejects it outright.
+# Accelerator.
 #
-# This is not just a speed choice, and the difference is not cosmetic. The
-# kernel writes MSR_GS_KERNEL_BASE (0xC0000102) unconditionally at the top of
-# kmain. TCG's -cpu max accepts it; KVM with -cpu host passes the MSR through
-# to hardware, where it is Intel-only, so on this AMD host the wrmsr takes a #GP
-# at 0xffffffff80000196 -- 22 instructions into the kernel, before any banner.
-# Same image, same flags, and the only difference is which CPU model QEMU was
-# told to present.
+# KVM when /dev/kvm is usable, TCG otherwise. This was the opposite for most of
+# a day: `-enable-kvm -cpu host` failed at the kernel's first instruction with a
+# #GP on `wrmsr` to IA32_GS_BASE, while TCG with `-cpu max` booted the same
+# image -- so the script pinned TCG by default and said why in a long comment.
 #
-# That is a kernel bug and it belongs to whoever owns kmain.S, not here. What
-# belongs here is that the run script does not quietly pick a configuration that
-# changes the result. FORCE_TCG=1 pins TCG, which is what the reference boot
-# command uses and what every measurement on this project has been taken with.
-: "${FORCE_TCG:=}"
-: "${USE_KVM:=}"
-
-# KVM is opt-in, not automatic.
+# That failure is fixed. The cause was the GS base, not the accelerator: the
+# kernel installed it with WRMSR, which KVM services, and the value it wrote was
+# malformed. It now prefers WRGSBASE (which KVM does not intercept) behind
+# CR4.FSGSBASE, set by the loader where the rest of the CPU state is set up.
+# Both accelerators boot the current image, verified.
 #
-# With `-enable-kvm -cpu host` the kernel does not get past its first
-# instruction: `wrmsr` to IA32_GS_BASE (0xC0000101) raises #GP and the machine
-# lands in the bootstrap reporter. Under TCG with `-cpu max` the same image
-# boots and runs. That is reproducible here, and the loader has already proved
-# long mode is genuinely active at that point -- it read EFER.LMA back as set --
-# so this is not the loader handing over in the wrong mode.
-#
-# Writing IA32_GS_BASE at CPL 0 in long mode is unconditional on x86-64 and
-# there is no known reason for it to fault, so the cause is not understood.
-# What *is* understood is that defaulting to KVM makes `./run.sh` fail on a
-# machine where the same run under TCG works, which is the worst possible
-# default: it turns an unexplained hardware-interaction question into "the
-# project doesn't boot".
-#
-# So: TCG unless KVM is explicitly asked for, and say so either way.
-if [ -n "$USE_KVM" ] && [ -z "$FORCE_TCG" ] && [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
-	QEMU_ARGS+=(-enable-kvm -cpu host)
-	echo "run.sh: USE_KVM=1 requested, using KVM (see the note in this file)" >&2
-else
-	if [ -n "$FORCE_TCG" ]; then
-		echo "run.sh: FORCE_TCG set, using TCG" >&2
-	elif [ -n "$USE_KVM" ]; then
-		echo "run.sh: USE_KVM set but /dev/kvm is unusable, using TCG" >&2
-	else
-		echo "run.sh: using TCG; set USE_KVM=1 to try KVM (it currently #GPs in kmain.S)" >&2
-	fi
+# FORCE_TCG=1 pins TCG. That is worth knowing about: every measurement taken
+# while the GS bug was live came from TCG, so a difference between the two is
+# more likely to be a real difference than a configuration artefact.
+if [ -n "${FORCE_TCG:-}" ]; then
 	QEMU_ARGS+=(-cpu max)
+	echo "run.sh: FORCE_TCG=1, using TCG emulation" >&2
+elif [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+	QEMU_ARGS+=(-enable-kvm -cpu host)
+	echo "run.sh: using KVM (-cpu host); FORCE_TCG=1 to compare under emulation" >&2
+else
+	QEMU_ARGS+=(-cpu max)
+	echo "run.sh: /dev/kvm not usable, falling back to TCG emulation" >&2
 fi
 
 # Serial to the terminal and to a log file. The log is what a test or a bug
@@ -142,6 +128,11 @@ QEMU_ARGS+=(
 
 # A graphical display only when there is somewhere to put it. The kernel drives
 # the framebuffer directly, so QEMU needs no extra video device.
+# A VGA device explicitly. The kernel drives the framebuffer directly, and this
+# BIOS offers no linear framebuffer, so the only thing that can appear in the
+# window is the VGA text buffer -- which needs the device to exist.
+QEMU_ARGS+=(-device VGA)
+
 if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
 	QEMU_ARGS+=(-display gtk)
 else
