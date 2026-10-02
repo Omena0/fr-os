@@ -1281,6 +1281,98 @@ __noreturn void process_enter_user(struct task *t, u64 entry, u64 sp)
 
 /* ---------------------------------------------------------------- init ------ */
 
+/*
+ * The linked-in blob is an *initrd container*, not a bare ELF.
+ *
+ * Passing it straight to the ELF loader hands elf_validate() the container's
+ * four magic bytes where it expects 0x7f "ELF", so the load fails with
+ * -ENOEXEC. A bare ELF is returned unchanged, so a caller holding one does not
+ * have to know which form it has.
+ *
+ * This was inline in process_create_init() only. sys_execve() passed the raw
+ * container to exec_load_and_run() and could therefore never succeed -- not on
+ * a corrupt image, not on an unknown path, on any input at all. The failure was
+ * silent until the execve error logging landed, which is the better order: the
+ * bug was invisible while the code around it was also silent.
+ */
+static const unsigned char *initrd_find_init_elf(const void *blob,
+						unsigned long blob_size,
+						unsigned long *out_size)
+{
+	const unsigned char *img = blob;
+	unsigned long elf_size = blob_size;
+
+	*out_size = 0;
+
+	if (blob_size >= INITRD_HEADER_SIZE &&
+	    initrd_le64((const uint8_t *)img) == INITRD_MAGIC) {
+		unsigned long total = initrd_le64((const uint8_t *)img + 16);
+		unsigned int entries;
+		unsigned long pos = INITRD_HEADER_SIZE;
+		unsigned long payload;
+		unsigned long off = 0, size = 0;
+		int found = 0;
+
+		if (total > blob_size || total < INITRD_HEADER_SIZE) {
+			PROC_LOG(KLOG_FATAL,
+				 "initrd total_len %lu exceeds blob %lu",
+				 total, blob_size);
+			return NULL;
+		}
+
+		/*
+		 * The header records an entry count, and it has to: every entry's
+		 * offset is relative to the payload, while the payload follows the
+		 * index, so without a count the payload base is uncomputable. Walking
+		 * until a zero name_len -- the first guess at this -- reads the first
+		 * bytes of an ELF header as a 20-byte index entry and treats them as
+		 * one, which puts the payload base inside the file and yields a
+		 * garbage ELF that happens to pass the magic check some of the time.
+		 *
+		 * Entry names are not padded or aligned; the bytes follow the fixed
+		 * part immediately, so `pos` advances by exactly name_len.
+		 */
+		entries = initrd_le32((const uint8_t *)img + 12);
+		for (unsigned int e = 0; e < entries && pos + INITRD_ENTRY_SIZE <= total; e++) {
+			unsigned int name_len = initrd_le16((const uint8_t *)img + pos);
+			unsigned long esz = initrd_le64((const uint8_t *)img + pos + 4);
+			unsigned long eoff = initrd_le64((const uint8_t *)img + pos + 12);
+
+			pos += INITRD_ENTRY_SIZE;
+			if (name_len == 0 || pos + name_len > total)
+				break;
+
+			if (!found && name_len == 4 &&
+			    !memcmp(img + pos, "init", 4)) {
+				off = eoff;
+				size = esz;
+				found = 1;
+			}
+			pos += name_len;
+		}
+		payload = pos;
+
+		if (!found) {
+			PROC_LOG(KLOG_FATAL,
+				 "initrd has no entry named \"init\" (%lu bytes)",
+				 blob_size);
+			return NULL;
+		}
+		if (off + size > total) {
+			PROC_LOG(KLOG_FATAL,
+				 "initrd \"init\" payload out of range: off %lu size %lu",
+				 off, size);
+			return NULL;
+		}
+
+		img = img + payload + off;
+		elf_size = size;
+	}
+
+	*out_size = elf_size;
+	return img;
+}
+
 struct task *process_create_init(void)
 {
 	static char arg0_init[] = "init";
@@ -1312,82 +1404,14 @@ struct task *process_create_init(void)
 		return NULL;
 	}
 
-	const unsigned char *elf = (const unsigned char *)init_image;
-	unsigned long elf_size = init_image_size;
+	unsigned long elf_size = 0;
+	const unsigned char *elf = initrd_find_init_elf(init_image,
+							init_image_size,
+							&elf_size);
 
-	/*
-	 * The linked-in blob is an *initrd container*, not a bare ELF.
-	 *
-	 * Passing it straight to the ELF loader hands elf_validate() the four
-	 * bytes "DNDU" where it expects 0x7f "ELF", so PID 1 never starts. Not a
-	 * corner case: every boot, and total.
-	 */
-	if (init_image_size >= INITRD_HEADER_SIZE &&
-	    initrd_le64((const uint8_t *)init_image) == INITRD_MAGIC) {
-		unsigned long total = initrd_le64((const uint8_t *)init_image + 16);
-		unsigned int entries;
-		unsigned long pos = INITRD_HEADER_SIZE;
-		unsigned long payload;
-		unsigned long off = 0, size = 0;
-		int found = 0;
-
-		if (total > init_image_size || total < INITRD_HEADER_SIZE) {
-			PROC_LOG(KLOG_FATAL,
-				 "initrd total_len %lu exceeds blob %lu",
-				 total, (unsigned long)init_image_size);
-			task_put(t);
-			return NULL;
-		}
-
-		/*
-		 * The header records an entry count, and it has to: every entry's
-		 * offset is relative to the payload, while the payload follows the
-		 * index, so without a count the payload base is uncomputable. Walking
-		 * until a zero name_len -- the first guess at this -- reads the first
-		 * bytes of an ELF header as a 20-byte index entry and treats them as
-		 * one, which puts the payload base inside the file and yields a
-		 * garbage ELF that happens to pass the magic check some of the time.
-		 *
-		 * Entry names are not padded or aligned; the bytes follow the fixed
-		 * part immediately, so `pos` advances by exactly name_len.
-		 */
-		entries = initrd_le32((const uint8_t *)init_image + 12);
-		for (unsigned int e = 0; e < entries && pos + INITRD_ENTRY_SIZE <= total; e++) {
-			unsigned int name_len = initrd_le16((const uint8_t *)init_image + pos);
-			unsigned long esz = initrd_le64((const uint8_t *)init_image + pos + 4);
-			unsigned long eoff = initrd_le64((const uint8_t *)init_image + pos + 12);
-
-			pos += INITRD_ENTRY_SIZE;
-			if (name_len == 0 || pos + name_len > total)
-				break;
-
-			if (!found && name_len == 4 &&
-			    !memcmp(init_image + pos, "init", 4)) {
-				off = eoff;
-				size = esz;
-				found = 1;
-			}
-			pos += name_len;
-		}
-		payload = pos;
-
-		if (!found) {
-			PROC_LOG(KLOG_FATAL,
-				 "initrd has no entry named \"init\" (%lu bytes)",
-				 (unsigned long)init_image_size);
-			task_put(t);
-			return NULL;
-		}
-		if (off + size > total) {
-			PROC_LOG(KLOG_FATAL,
-				 "initrd \"init\" payload out of range: off %lu size %lu",
-				 off, size);
-			task_put(t);
-			return NULL;
-		}
-
-		elf = (const unsigned char *)init_image + payload + off;
-		elf_size = size;
+	if (!elf) {
+		task_put(t);
+		return NULL;
 	}
 
 	if (exec_load_and_run(t, elf, elf_size, argv, envp) < 0) {
@@ -1504,7 +1528,19 @@ static long execve_common(struct task *t, u64 path, u64 argv, u64 envp)
 		return n;
 	}
 
-	n = exec_load_and_run(t, init_image, init_image_size, kargv, kenvp);
+	/* Unwrap the container here too. This used to pass init_image straight
+	 * through, so elf_validate() saw the container's magic instead of
+	 * 0x7f "ELF" and every execve returned -ENOEXEC -- on every input, not
+	 * just a bad one. Nothing below this point can succeed without it. */
+	unsigned long elf_size = 0;
+	const unsigned char *elf = initrd_find_init_elf(init_image,
+							init_image_size,
+							&elf_size);
+
+	if (!elf)
+		return -ENOEXEC;
+
+	n = exec_load_and_run(t, elf, elf_size, kargv, kenvp);
 	if (n < 0) {
 		/* exec_load_and_run() logs the stage that failed; this line adds
 		 * the two things it has no way to know -- who asked, and for

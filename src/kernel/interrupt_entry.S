@@ -312,6 +312,29 @@ tss_flush:
 ret_to_user:
 	cld
 
+	/*
+	 * Load the running task's thread pointer into MSR_FS_BASE before the
+	 * iretq frame is built. NULL-safe: before the scheduler starts there is
+	 * no current task, and MSR_FS_BASE is left alone.
+	 *
+	 * Required for every forked child, which resumes at its parent's syscall
+	 * return site with RAX=0 and never re-runs crt1, so nothing will ever
+	 * call arch_prctl on its behalf. Required for a process's first entry
+	 * too, once exec has given it a thread pointer.
+	 *
+	 * Here, above the pushes, and not just before the iretq: at that point
+	 * RSP points at the frame's RIP slot, so the call's return address
+	 * would land inside memory the iretq is about to read, and it would run
+	 * C with a live interrupt frame underneath it. Above the pushes, RSP is
+	 * exactly what the caller left, and the frame is built from an unchanged
+	 * RSP.
+	 *
+	 * Encoding checked in the linked artefact: `e8` with a 32-bit relative
+	 * displacement. Not the `PUSH r/m` trap from the gdt_flush bug above --
+	 * which is the reason to look, every time, at the bytes.
+	 */
+	call	task_load_fs_current
+
 	pushq	$USER_DATA_SELECTOR		/* SS */
 	pushq	%rsi				/* RSP */
 	pushq	%rdx				/* RFLAGS */
