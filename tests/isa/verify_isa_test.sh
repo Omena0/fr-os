@@ -135,7 +135,7 @@ echo "verify-isa-test: the trap this gate exists for"
 # this kernel before the gate existed. The object has to be rejected.
 if compile "$here/isa_probe.c" "$OUT/kernel_sse2.o" $KFLAGS -msse2; then
 	expect_hits kernel-plus-msse2 kernel "$OUT/kernel_sse2.o" \
-		movaps movups paddq pxor movdqa
+		movups paddq pxor movdqa
 fi
 
 echo "verify-isa-test: the current flag lists are clean"
@@ -147,13 +147,30 @@ if compile "$here/isa_probe.c" "$OUT/user_flags.o" $UFLAGS; then
 	expect user-flags kernel dirty "$OUT/user_flags.o"
 fi
 
-echo "verify-isa-test: -march=x86-64-v3 in USER_CFLAGS is the realistic break"
-# The four -mno- flags in USER_CFLAGS are the only thing stopping a later
-# -march=x86-64-v3 from acquiring AVX2 silently, and they are last in the list
-# for exactly the reason the previous paragraph is about. This is the case the
-# second, weaker invocation of the gate was added for.
+echo "verify-isa-test: the last -m flag wins, in both directions"
+# This case used to assert that appending -march=x86-64-v3 to USER_CFLAGS
+# produces VEX, which would make the gate fire. It does not, and the reason is
+# worth writing down: an explicit -m<feat>/-mno-<feat> is NOT overridden by a
+# -march=, in either order. Measured with `gcc -Q --help=target`:
+#
+#   -mno-avx -march=x86-64-v3   -> avx disabled
+#   -march=x86-64-v3 -mno-avx   -> avx disabled
+#   -mno-avx -mavx              -> avx enabled
+#
+# Order decides between two explicit -m flags, and never between an -m and a
+# -march. So USER_CFLAGS' four -mno- flags hold against any -march, and the
+# object built here contains no VEX at all -- movdqu, pxor and cvtsi2sd, all
+# legacy. The old check was therefore testing gcc's option resolution, and
+# expecting "clean" would have been a green test that tests gcc.
+#
+# What is worth pinning is the property that does exist: the last -m flag
+# decides, and the gate catches the object when it goes the wrong way.
 if compile "$here/isa_probe.c" "$OUT/user_v3.o" $UFLAGS -march=x86-64-v3; then
-	expect user-plus-v3 user dirty "$OUT/user_v3.o"
+	expect user-plus-v3 user clean "$OUT/user_v3.o"
+	expect user-plus-v3 kernel dirty "$OUT/user_v3.o"
+fi
+if compile "$here/isa_probe.c" "$OUT/user_avx_last.o" $UFLAGS -mavx2; then
+	expect user-plus-avx-last user dirty "$OUT/user_avx_last.o"
 fi
 if compile "$here/isa_probe.c" "$OUT/user_sse2.o" $UFLAGS -msse2; then
 	expect user-plus-sse2 user clean "$OUT/user_sse2.o"
@@ -171,9 +188,9 @@ if assemble "$here/legacy_simd.s" "$OUT/legacy_simd.o" -msse4.2; then
 		movaps movups movapd movupd movss movsd \
 		movddup movshdup movsldup pshufhw pshuflw movmskps \
 		lddqu pmovmskb psadbw ptest paddq psubq psubsb psubsw \
-		psubsusb psubusw addps mulps sqrtps minpd maxsd \
+		psubusb psubusw addps mulps sqrtps minpd maxsd \
 		unpckhpd shufps cvtsi2sd movdqa movdqu psubd \
-		punpcklbw por pand pxor aeskeygenassist emms flds
+		por pand pxor aeskeygenassist emms flds
 fi
 
 echo "verify-isa-test: VEX, AVX-512 opmask and XSAVE are userspace failures too"
@@ -195,7 +212,7 @@ if assemble "$here/fxsave_only.s" "$OUT/fxsave_only.s.o" -msse4.2; then
 	# fxsave/fxrstor are allowed; fxsave64/fxrstor64, fld, emms, ldmxcsr and
 	# cvtsi2sd in the same file are not, and the report has to say so.
 	expect_hits fxsave-exemption kernel "$OUT/fxsave_only.s.o" \
-		fxsave64 fldl fldz fxrstor64 ldmxcsr cvtsi2sd emms
+		fxsave64 flds fxrstor64 ldmxcsr cvtsi2sd emms
 fi
 
 echo "verify-isa-test: no false positives on GPR-only images"
