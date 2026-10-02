@@ -21,15 +21,18 @@ Consequences, stated so a reader does not have to infer them:
   * A number that is absent is NOT evidence that the bug is fixed. Sixty-six
     numbers are absent for four different reasons and section `A0` below
     separates them. Do not assume the good case.
-  * **Eleven claims in this file have been found to be *wrong* about the tree**,
+  * **Twelve claims in this file have been found to be *wrong* about the tree**,
     in ways that sent other people after bugs that were not there. Section `A1`
     records each correction at the point where the wrong claim would otherwise be
     read. Seven were found by the 03:20 pass — six reported to me, the seventh
     (#15) turning up while verifying the other six. **Four more were found by the
     06:05 pass, all of them status lines rather than findings, and all four
     asserting the *opposite* of the tree: see A1.9.** Two of those four turned
-    out to be fixed and were deleted. The rate has not gone down with more
-    passes, which is the point.
+    out to be fixed and were deleted. **A twelfth (A1.10) was added on
+    2026-10-02 and is a different kind again: a *commit* changed a correct
+    constant on a premise that does not exist, and that premise is now recorded in
+    `STATE.md` §9 under "what nobody should re-derive".** The rate has not gone
+    down with more passes, which is the point.
   * A `>> STATUS:` line that says FIXED is one that was verified against a
     named file:line. Exactly one is left — #150, and it says `FIXED (partial)`.
     Everything else below is OPEN, OPEN (partial), OPEN (amended) or VERIFIED
@@ -295,7 +298,11 @@ Six of the 177 were wrong in ways that cost other people hours, because each
 one described a bug that was not the bug and the real one was hidden behind the
 description. A seventh (A1.7) was found while verifying the first six, and four
 more (A1.9) in the 06:05 pass — all four of those status lines rather than
-findings, and all four wrong in the opposite direction. Every
+findings, and all four wrong in the opposite direction. An eighth (A1.10) was
+found on 2026-10-02 at 07:50, and it is the only one that is wrong about the
+*hardware* rather than about the tree: a commit made a change on a premise that
+does not exist, and promoted the premise into `STATE.md` §9 to stop anyone
+doubting it. Every
 statement below was re-derived from the tree during the pass that reports it; the
 evidence is the file:line given, and where I could only establish part of it,
 that is said.
@@ -538,6 +545,68 @@ The pattern across all four is the same one section 0's opening claims and
 fails loudly. They are sentences that *read* right and are *about* the tree, and
 the only way to tell is to run the command they name.
 
+### A1.10  The IDT gate "size bit" is not a thing, and `0x8F` is a trap gate, not a 64-bit interrupt gate
+
+**The claim** — commit ed8b3cf, `src/kernel/idt.c:52-68`, and `STATE.md` §2 and §9,
+all three agreeing: "Every IDT gate was a 32-bit gate. The low three bits of the
+type field are the gate's size, `0b1110` is the **32-bit** interrupt gate and
+`0b1111` is the 64-bit one. With a 32-bit gate the CPU takes `offset[31:0]` as the
+whole handler address, so a handler linked at `0xffffffff800108c7` is entered at
+`0x000108c7`. `IDT_TYPE_INTERRUPT_GATE` was therefore changed from `0x8E` to
+`0x8F`."
+
+**The truth:** in a 64-bit IDT there are exactly two valid gate types, `0b1110`
+(64-bit **interrupt** gate) and `0b1111` (64-bit **trap** gate), and they differ
+only in whether IF is cleared on entry. `0x8E` *is* the 64-bit interrupt gate.
+There is no size bit, and no 32-bit gate that truncates a handler offset in long
+mode: the 16-bit and 32-bit gate types (`0x6`, `0x7`, `0xE`, `0xF`) belong to the
+32-bit IDT, whose entries are 8 bytes with a 32-bit offset. A 64-bit IDT is
+indexed with a 16-byte stride and its offset field is 64 bits wide, so
+`offset_high` is loaded in full.
+
+**The evidence, none of it a comment:**
+
+  * Linux `arch/x86/include/asm/desc_defs.h` declares `GATE_INTERRUPT = 0xE` and
+    `GATE_TRAP = 0xF` in the same `struct gate_struct` that carries
+    `u32 offset_high` under `CONFIG_X86_64`, and uses `GATE_INTERRUPT` for its
+    64-bit exception gates. Linux boots.
+  * The SDM's 64-bit gate-descriptor table lists `0b1110` as the *64-bit*
+    interrupt gate and `0b1111` as the *64-bit* trap gate. The same type values
+    appear as "16-bit"/"32-bit" only in the 32-bit IDT table, which is the whole
+    source of the confusion: the type value is not a size field, the *IDT format*
+    is.
+  * This tree never needed the offset truncated. `struct idt_entry` (idt.c:42-50)
+    is the correct 16 bytes with the handler address split across three fields,
+    and it was already correct before ed8b3cf — the commit message says so itself.
+
+**What the change therefore did:** nothing was fixed, and a real behavioural
+change was made. `IDT_TYPE_INTERRUPT_GATE` is `0x8F` (idt.c:69), which is a trap
+gate, so it does **not** clear IF. `interrupt_entry.S` has no `cli`/`sti` in the
+entry stub, and `iretq` is the only thing that restores flags, so with `0x8F` an
+exception handler runs with interrupts **enabled** where with `0x8E` it ran with
+them disabled for its whole duration. No IST is installed, so a handler runs on
+the interrupted stack, and `idt_init()` calls `pic_unmask(0)` (idt.c:736) and
+programs the PIT at 100 Hz. A tick can land inside a page-fault handler, and a
+`#PF` inside the `#PF` handler now recurses immediately instead of being
+contained — the triple-fault path, with no dedicated stack to take it on. **This
+is a reading of the mechanism, not an observed fault:** no handler has run long
+enough yet for a tick to land in one, and the current blocker (0.31) is earlier.
+
+**Why this one is in A1 rather than in section 0.** Section 0 records fixes. This
+is the inverse: a change that was made *because of* a false mechanism, whose
+written-up reasoning is now the most protected text in the tree. `STATE.md` §9 is
+titled "WHAT NOBODY SHOULD RE-DERIVE" and lists this claim there, which means the
+next person to notice it is told not to. That is how a wrong belief survives a
+fix: not by being doubted, but by being promoted. The same false text is
+corrected in `docs/src/kernel/privilege-levels.md`, which is the normative
+document for the IDT.
+
+**The generalisable error, and it is the same one as the GDT descriptor.** A
+four-bit field with two legal values was read as one of them being "the 32-bit
+one", because that reading makes a story: a wrong constant, an unreachable
+handler, silent reboots. Nothing in the story was checked against anything. The
+check that would have caught it in under a minute is `grep -rn "0x8E\|0x8F" /usr/src/linux` — the answer is Linux's own header, and it is public.
+
 **The rule:** a status line is a claim, and a claim about code is the same class
 of thing as a finding about code. It gets re-derived, or it gets deleted. It does
 not get left because it is short.
@@ -549,10 +618,10 @@ not get left because it is short.
 The 177 findings below are the state at b1df707. These are the defects that were
 *not* in it — found afterwards, mostly by instrumenting a boot that would not
 finish — and which no finding in the list records. Each one is here with the
-mechanism and, more usefully, with why it was silent. **Twenty-seven** of them,
-of which twenty-five are fixed; 0.26 is a documentation residue and 0.27 is
-open, and it is in this section rather than the queue because no finding records
-it.
+mechanism and, more usefully, with why it was silent. **Thirty-one** of them,
+of which twenty-nine are fixes; 0.30 is a change that was made for the wrong
+reason and is therefore *not* a fix (see **A1.10**), and 0.31 is the current
+blocker. 0.26 is a documentation residue.
 Of the fourteen found in the first pass, eleven produced no diagnostic of any
 kind, and of the three that did, two reported the wrong fault. That ratio is the
 recurring theme and it is worth stating plainly: on this tree the most expensive
@@ -574,7 +643,16 @@ asserting the arrangement 0.25 just removed (0.25). **Writing these four up as
 four fixes would have been four more claims that the tree does not support**,
 which is the thing **A1.9** is about and the thing **P** says to stop doing.
 0.26 is the one place the *documents* are still wrong about the code, which is the
-residue of #35. 0.27 is the current blocker and is reported-but-unverified.
+residue of #35.
+
+**0.28-0.31 were added on 2026-10-02 at 07:50, from commits ed8b3cf and 2a9e372.
+0.27 was the blocker and it is now closed; it was two independent defects and
+neither was what 0.27 said.** Read 0.27 first and then 0.28, because the entry
+that reported it and the entry that explains it disagree, and the disagreement is
+the lesson. 0.30 records a change that was made for a false reason and must not be
+read as a fix. Every line number in 0.28-0.30 was re-derived with `grep -n` on
+2026-10-02 at 07:45, against the tree as ed8b3cf and 2a9e372 left it; the rest of
+this file's citations still carry the header's warning.
 
 Reading this section is how you avoid re-introducing any of them.
 
@@ -1169,40 +1247,223 @@ disagrees about everything else — so "resolved" was doing more work than it ha
 earned. A disagreement is not resolved when one side is chosen; it is resolved
 when the other two sides are re-derived and found to match.
 
-### 0.27  OPEN, NOT FIXED, and not in any finding: the kernel dies in `gdt_reload` on a non-canonical RIP
+### 0.27  CLOSED: the `gdt_reload` blocker — and neither half of it was what this entry said
 
-This is the one item in section 0 that is **not** a fix, and it is here because
-it is the current top of the queue and **no finding in this file records it** —
-`grep -n 'non-canonical\|gdt_reload\|lretq' MEGA_AUDIT.md` returns two hits, both
-about the *TSS descriptor's* base being non-canonical (0.16), which is a
-different bug that happens to share a word.
+This was the top of the queue, and it is closed. It is kept rather than deleted
+because **the entry and the fix disagree, and that disagreement is the point** —
+0.27's own text asserted the frame was shaped correctly and that a non-canonical
+RIP was the outstanding problem, and both assertions were wrong. The mechanism is
+in **0.28** (two defects, three lines) and **0.29** (a third, in the caller). What
+follows is only the correction to this entry.
 
-**What is reported.** Commit 1401355's message ends: "Still outstanding: the
-kernel reaches gdt_reload and the fault after it moved to a non-canonical RIP on
-the far return, so the frame is still wrong. Not claiming that fixed." The chain
-around it, from the same day's commits: 8eba98a removed port-0xE9/COM1 markers
-from `main.c` that "still did not appear: the crash happens before gdt_reload
-returns".
+**What 0.27 said, and why both halves of it were wrong.** It reported commit
+1401355's line — "the fault after it moved to a non-canonical RIP on the far
+return, so the frame is still wrong" — and then added, from reading the source,
+that the frame *is* shaped correctly: "`pushq $0x202` (RFLAGS), `pushq
+$KERNEL_CODE_SELECTOR` (CS), `pushq $.Lgdt_flush_resume` (RIP), `lretq`, which
+is the right order for LRETQ's RIP-then-CS-then-RFLAGS pop." **The first half was
+a worse guess than doing nothing**: it named a non-canonical RIP, which is what
+the *other* defect produces, and pointed the reader at the frame. The second half
+was a derivation from the manual that the manual does not support and the machine
+contradicts — see 0.28, and note that this file's own §P rule applies to whoever
+wrote it: a derivation is a hypothesis, and the same session had already got the
+GDT descriptor wrong twice, in opposite directions, by editing correct code.
 
-**What I verified, and what I did not.** I read `gdt_flush` and `gdt_reload` and
-the far-return frame they build, and the frame is *shaped* correctly —
-`pushq $0x202` (RFLAGS), `pushq $KERNEL_CODE_SELECTOR` (CS),
-`pushq $.Lgdt_flush_resume` (RIP), `lretq`, which is the right order for LRETQ's
-RIP-then-CS-then-RFLAGS pop. **I could not reproduce it or find the cause,
-because the tree does not assemble today** (see the header note), and because
-reaching it needs a boot this pass did not do. So: reported, unverified, and
-recorded as an open item rather than as a conclusion.
+**The marker stream that killed the lead, kept because the method is the lesson.**
+One `-no-reboot` run with port-0xE9 markers, then `od -An -tx1`:
 
-**One thing a reader should know before they start, because it is the shape that
-has already wasted time.** `gdt_flush`'s C prototype takes three arguments
-(`gdt_flush(gdt_pointer, code_selector, data_selector)`, gdt.c:95) and the
-assembly **ignores the second and third**, using compile-time immediates
-(`movw $KERNEL_DATA_SELECTOR, %ax`; `pushq $KERNEL_CODE_SELECTOR`) instead. That
-is not the bug — the selectors are constants and both spellings are right today —
-but it means the signature promises a parameterisation the assembly does not
-implement, which is the same kind of lie as a comment that describes a different
-codebase. If the far-return frame is being debugged, that mismatch is where I
-would look second, after confirming what RIP actually was.
+    34 31 41 42 43 44 45 ...
+
+`41 42 43 44 45` is exactly one pass of markers A–E per boot. A re-entering
+`gdt_flush` prints `ABCD` forever within one pass, so `gdt_flush` never re-entered
+itself — the gdb `finish` result that suggested recursion was an artefact, and the
+caveat about `finish` across `lretq` had been written down already and then
+ignored. Marker **E never printed**, so the far return failed and the resume path
+was never reached: the whole diagnosis in six bytes, from the cheapest instrument
+available.
+
+**What is still true from this entry.** `gdt_flush` has a three-argument C
+prototype (gdt.c:96) and the assembly hardcodes both selectors, never reading
+`%rsi`/`rdx`. Harmless today — the only caller passes exactly those two — and a
+trap the moment anything calls it with a different segment. Either use the
+arguments or drop them. **Still open, still unclaimed.**
+
+### 0.28  The far-return frame had three words for a two-word `LRETQ`, and a `$` was missing from the same line
+
+**Mechanism, part one.** `LRETQ` in 64-bit mode pops RIP and CS and **nothing
+else**. It does not restore RFLAGS; only `IRET` pops flags. The frame was the
+32-bit idiom — EFLAGS, CS, EIP, three dwords for a three-dword `LRET` — carried
+into 64-bit code unexamined. Now two words (`interrupt_entry.S:256-257`):
+
+    pushq $KERNEL_CODE_SELECTOR     /* CS */
+    pushq $.Lgdt_flush_resume       /* RIP */
+
+**Carrying the surplus word over is not inert.** It stays on the stack, and the
+`ret` at the resume label (interrupt_entry.S:260) pops it as a return address.
+With the frame as written that is `0x202` — the pushed RFLAGS — so control
+transfers to linear `0x202` and the instruction fetch faults.
+
+**Mechanism, part two, inside the same three lines: the RIP push was missing its
+`$`.** `pushq .Lgdt_flush_resume` is a memory dereference to GAS, which emits
+`ff 34 25 <disp32>` — PUSH r/m — and pushes the *contents* at that address, which
+is the label's own instruction bytes. Reproduced independently of this tree:
+
+    $ as --64 && objdump -d          # pushq .L / pushq $.L, linked at 0xffffffff80010000
+    ffffffff80010000: ff 34 25 07 00 01 80   push   0xffffffff80010007
+    ffffffff80010007: c3                    ret
+
+That is the same trap this tree fell into: objdump prints the memory operand's
+**target**, which is precisely the address a push-immediate would have named, and
+prints no `$` to tell the two apart. The listing line reads correct. The opcode
+does not. This defect fired *first* — the value is not a code address, so the far
+return took a non-canonical RIP and `#GP(0)`'d before the surplus word was ever
+reached.
+
+**Why it was silent — and this is the part worth the entry.** Everything looked
+right. The comment above `gdt_flush` explains the far return correctly and in
+detail, the pushes are in the textbook order, the selector is right, and a
+disassembly of the linked kernel prints a plausible immediate. The third word does
+nothing at all until a `ret` eight bytes later consumes it as an address, and the
+address it picks up is `0x202` — a small, real, *mappable-in-principle* number, not
+an obviously wrong one.
+
+**What would have detected it, which is the part a future reader needs.**
+
+  * **Have the guest print its own RSP at the resume label, rather than reading it
+    out of a debugger.** That is what was done, and it is the whole diagnosis:
+    RSP had advanced **16** and the word sitting at RSP was still the `0x202` that
+    had been pushed, one slot *below* the real return address. Identical under TCG
+    and under KVM — two independent implementations agreeing is the standard to
+    hold on this tree.
+  * **`-d int` on the fault.** It is unambiguous and it names the mechanism: `v=0e
+    e=0010 ... IP=0008:0000000000000202 CR2=0000000000000202`. `e = 0x0010` is
+    bit 4 (instruction fetch) with bits 0-3 clear — a protection violation on a
+    *fetch* at a small address, which is not what "the GDT is wrong" looks like.
+  * **`objdump` the opcode, not the mnemonic.** For anything where an addressing
+    mode and an immediate produce the same listing line, `ff 34 25` versus `68` is
+    the whole question and the listing does not show it.
+  * **`_Static_assert`-shaped check for the frame's arity**, which does not exist
+    yet and is the honest gap: nothing in the tree knows how many words `lretq`
+    pops. See **P.4** for why that shape keeps paying.
+
+**The published pseudocode disagrees with the hardware here, and that is a trap
+for whoever re-derives this.** The SDM's `LRET` description, in its IA-32e-mode
+section, shows a third pop for the 64-bit operand size (`RIP := Pop(); CS :=
+Pop(); tempRFLAGS := Pop();`). The machine says two. The evidence for "two" is the
+measurement above plus the built artefact: `objdump -d build/kernel.elf` shows
+`push $0x8` / `push $0xffffffff80010ccb` / `lretq` / `ret` in `gdt_flush`, and that
+binary boots through `sched_init` to PID 1 and the scheduler, which a three-word
+frame cannot do — the third pop would land inside `gdt_reload`'s own frame
+(`push %rbx; sub $0x10,%rsp`, both visible in the disassembly) and the following
+`ret` would jump to a saved `%rbx`. The standard stack-switching idiom agrees:
+two pushes and `lretq $8`, which would be `$16` if a third word were popped.
+**Do not read the manual here and restore the third push.** That is precisely how
+the two descriptor-layout mistakes in `STATE.md` §8 happened: a derivation that
+disagreed with correct code, and correct code edited to match.
+
+### 0.29  `gdt_flush` destroys `GS.base`, and the fix was not to stop reloading GS
+
+**Mechanism.** `gdt_flush` reloads GS with a selector (`movw %ax, %gs`,
+interrupt_entry.S:222). That is not optional and it is the whole point of the
+function: a MOV to a segment **selector** is the only thing that refreshes a
+segment register's cached descriptor after `LGDT`, and a near jump does not do it.
+It also has a side effect nothing in the sequence undoes — **loading a selector
+replaces the hidden base with the one from the descriptor**, which for a flat
+segment is zero. For FS and GS that hidden base is where the per-CPU pointer
+lives; `this_cpu()` is a GS-relative access through `IA32_GS_BASE`. So the
+correct segment reload invalidates the per-CPU pointer at the exact moment it makes
+the segment registers right.
+
+**Fix.** `percpu_install_gs_base(cpu_id)` (percpu.c:111, declared percpu.h:152),
+called from `gdt_reload()` at gdt.c:199 — between `gdt_flush()` (:186) and
+`tss_flush()` (:201), because the `klog()` at :203 is the next statement and it
+reads `this_cpu_id()`. It **takes the CPU number as an argument** rather than
+calling `this_cpu()` to discover it, and the reason is easy to get backwards:
+`this_cpu()` is precisely what has just been broken, so reading the CPU id there
+would fault on the line written to repair the fault.
+
+**Why it was silent.** The boot log is the evidence and it reads like everything
+else working. `cpuid`, `vmm`, `pmm`, `idt` and `pit` all logged, then the machine
+stopped — at `gdt_reload`'s **own** `klog`, one call after the `gdt_flush()` that
+had just run, with `CR2 = 0000000000000000`. The per-CPU self-check
+(`gs_base_install()`, percpu.c:69-91) had passed every boot, through three
+independent routes, right up to the instruction that invalidated it. A subsystem
+that logs and then dies at the next log statement reads as a logging bug or a heap
+corruption, which is where this was looked first. And the fault is a null-pointer
+write, which is the most ordinary crash there is; nothing in it says "segment
+register".
+
+**What would have detected it.** Deleting `mov %ax, %gs` made the boot work, and
+that is what identifies the instruction — but **it is not a fix and must not be
+committed**: it leaves GS on a descriptor from the loader's table, which is the
+condition the reload exists to prevent. The generalisable rule, and it is the
+inverse of the one this section keeps teaching: **if removing a correct instruction
+makes the symptom go away, the symptom is not where the bug is.** A one-line
+deletion that boots is the most convincing possible evidence and the least
+diagnostic. The check that would have caught it is cheap and specific: after any
+segment reload, re-read the base and compare — `gs_base_install()` already does
+exactly that, through all three routes, and it just needed to be called again.
+
+### 0.30  NOT A FIX: `IDT_TYPE_INTERRUPT_GATE` was changed from 0x8E to 0x8F on a premise that does not exist
+
+This is in section 0 because it is a change to a correct constant, made in the
+same commit as 0.28 and for the same debugging session, and **writing it up as a
+fix is the single most likely way for this file to acquire a twelfth wrong claim
+about the tree.** The full argument is in **A1.10**; the short form:
+
+  * **The claim:** the low three bits of the type field are the gate's size,
+    `0b1110` is the 32-bit interrupt gate, a 32-bit gate truncates the handler
+    offset, and a handler at `0xffffffff800108c7` was being entered at
+    `0x000108c7`.
+  * **The truth:** `0x8E` *is* the 64-bit interrupt gate. In a 64-bit IDT the only
+    two valid types are `0b1110` (interrupt) and `0b1111` (trap), differing only in
+    whether IF is cleared. The "32-bit gate" types belong to the 32-bit IDT, whose
+    entries are 8 bytes. This tree's 16-byte `struct idt_entry` (idt.c:42-50) is
+    correct and was correct before the change.
+  * **So `0x8F` is a trap gate** and the change swapped "clears IF" for "leaves IF
+    set" on all 256 gates. `interrupt_entry.S` has no `cli`/`sti` in the entry stub
+    and no IST is installed, and `idt_init()` calls `pic_unmask(0)` (idt.c:736)
+    against a 100 Hz PIT, so a tick can now land inside a handler running on the
+    interrupted stack and a `#PF` inside the `#PF` handler recurses immediately.
+    **Inferred, not measured** — no handler has run long enough to show it.
+  * **What would have detected it:** one grep of Linux's `desc_defs.h`, which is
+    public and says `GATE_INTERRUPT = 0xE`.
+
+The comment the change added at idt.c:52-68 states that `0x8F` "clears IF on
+entry" — the one thing a trap gate does not do — and `STATE.md` §9 lists the size
+claim under "what nobody should re-derive". **A wrong belief survives a fix by
+being promoted, not by being doubted.** Neither file is this pass's to change; both
+are reported.
+
+### 0.31  OPEN, the current blocker: the kernel stack page is read-only under the faulting write
+
+Reported, with the fault record re-read from the `-d int` log rather than taken on
+trust. The first `schedule()` from `kmain`, switching init → idle, in
+`sched_switch_frame()`'s `fpu_save(prev->fpu_state)`:
+
+    v=0e e=0002 i=0 cpl=0 IP=0008:ffffffff8000b2a6 SP=0010:ffffc00000011f90
+    CR2=ffffc00000011f88   CR3=00000000bdc10000
+    RAX=00000000bdc10000 RDI=ffffc00000012000 RSP=ffffc00000011f90
+
+Three things are easy to get wrong and the entry is useless without them. First,
+`0xffffffff8000b2a6` is the **`call fpu_save`**, not the `fxsave`; `fpu_save` is
+one instruction. Second, **CR2 is RSP − 8**, so the faulting write is the
+*return-address push* — the kernel stack page itself — not the FPU save area.
+`RDI = 0xffffc00000012000` is `prev->fpu_state`, one page up, and was written
+successfully at task creation, so the allocator is producing writable pages.
+Third, `e = 0x0002`: bit 0 clear is a **protection violation** and bit 1 set is a
+**write**, so the page is present and read-only. Nothing in the tree maps anything
+read-only on purpose.
+
+**Why it is silent, so far:** it is not, quite — it produces a clean fault report.
+It is silent about the *cause*, and the cause is the interesting part: two
+adjacent pages from the same allocator differing only in permission, which means
+something between them rewrote a PTE. **Next step, and it is one command:** print
+the PTE for `0xffffc00000011000` and for `0xffffc00000012000` side by side. They
+came from the same allocator and differ only in permission, so the diff is the
+whole answer. Mask every page-table index with `& 0x1ff` — one earlier attempt
+indexed PML4 without masking and produced garbage, which is the *P.1* shape: a
+wrong number that is a plausible number.
 
 --------------------------------------------------------------------------------
 P. THE PATTERN — fourteen bugs, one shape, and what actually finds them
@@ -1226,6 +1487,19 @@ That is the whole shape of the day: thirteen of fourteen bugs were invisible to
 the only instrument available, and the fourteenth pointed somewhere else. **The
 most expensive bugs on this tree are not the ones that crash. They are the ones
 that print a plausible number.**
+
+**The ratio has not improved, and two later entries make the point harder rather
+than softer.** 0.29 produced no diagnostic at all: a correct instruction
+invalidated a pointer, and the only symptom was a null write in the next `klog`.
+0.30 is a new category rather than a new number — a correct constant changed
+because a mechanism was believed and not checked, which is *worse* than a silent
+bug, because it looks like progress and it is written down as progress, and the
+write-up was then promoted into `STATE.md` §9 to stop anyone re-checking it. The
+count that matters is not the ratio; it is that a mechanism believed on faith
+survives a fix and becomes harder to dislodge after one. **0.28 is the exception
+that proves the instrument works**: both of its defects were found by having the
+guest report its own RSP, which is five lines of instrumentation and no reasoning
+at all.
 
 ### P.2  Why "no diagnostic" is the common case, not bad luck
 

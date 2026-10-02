@@ -58,6 +58,46 @@ Descriptors are built by `GDT_ENTRY(flags, base, limit)` in `src/include/gdt.h`,
 - **Code/data segments** are one 8-byte entry; the macro already accounts for the base being split across the low 24 bits and the high byte of the last qword.
 - **The TSS is a system descriptor spanning two GDT slots.** In long mode the TSS base is 64 bits, which does not fit in the 24-bit base field, so the high 8 bits live in the second slot. `GDT_TSS_DESC64(base, limit)` produces the full 16 bytes; the two halves are written as separate 8-byte stores, which is also how they appear in the GDT.
 
+### The Reload Itself
+
+`LGDT` does not take effect on its own. CS keeps its cached descriptor until something reloads it, and a near jump does not do that — the hardware's answer is a far return, which is what `gdt_flush` uses. The frame for a 64-bit far return is **two words**:
+
+```
+    pushq $KERNEL_CODE_SELECTOR     /* CS */
+    pushq $.Lgdt_flush_resume       /* RIP */
+    lretq
+```
+
+`LRETQ` pops RIP and CS and **nothing else**. It does not restore RFLAGS; only `IRET` pops flags. The 32-bit idiom — EFLAGS, CS, EIP, three dwords for a three-dword `LRET` — does not survive the widening, and the surplus word is not inert. It stays on the stack, and the `ret` at the resume label pops it as a return address, so control transfers to whatever was pushed there. With the frame this code was originally written against that is linear `0x202`, and the instruction fetch faults: `#PF`, error code `0x0010` (instruction fetch, protection violation), CR2 = `0x202`.
+
+Measured, not derived: at the resume label the guest printed its own RSP rather than trusting a debugger, and RSP had advanced **16** while the word at RSP was still the `0x202` that had been pushed — one slot *below* the real return address. Identical under TCG and under KVM. The built artefact agrees from the other side: `objdump -d build/kernel.elf` shows `push $0x8` / `push $0xffffffff80010ccb` / `lretq` / `ret` in `gdt_flush`, and that binary boots past the reload into `sched_init`, PID 1 and the scheduler — which a three-word frame cannot do, because the third pop would land in `gdt_reload`'s own frame (`push %rbx; sub $0x10,%rsp`) and the following `ret` would jump to a saved `%rbx`.
+
+**One trap for the next person, because the published pseudocode says otherwise.** The SDM's `LRET` description, in its IA-32e-mode section, shows a third pop — `RIP := Pop(); CS := Pop(); tempRFLAGS := Pop();` for the 64-bit operand size. That does not match the machine, and the machine is what this document is for. Do not read that pseudocode and "restore" the third push; the two measurements above are what the hardware does, and the standard stack-switching idiom agrees (it pushes two words and uses `lretq $8` to discard the old return address, which would be `lretq $16` if a third word were popped). If someone re-derives this from the manual alone, they will produce a confidently wrong three-word frame — which is the defect this section exists to describe.
+
+`interrupt_entry.S:242-255` says all of this in the source, and the reason is worth the comment: the frame is not wrong-looking, the comment above it explained the far return correctly, and the extra word does nothing at all until the following `ret` consumes it.
+
+Two more rules, both properties of the encoding rather than of the source, and both of which have cost real time here:
+
+- **`pushq $sym` and `pushq sym` are different instructions.** With the `$`, GAS emits `68 <imm32>` (PUSH imm). Without it, `pushq .Llabel` is a memory dereference and GAS emits `ff 34 25 <disp32>` (PUSH r/m), which pushes the *contents* at that address — here, the label's own instruction bytes. objdump prints `push 0xffffffff80010aa2` for `ff 34 25 a2 0a 01 80`: it prints the memory operand's **target**, which is exactly the address a push-immediate would have named, and it prints no `$` to tell the two apart. A listing line that looks right is not a check of the encoding — read the opcode and the ModRM byte.
+- **A 64-bit far jump cannot reach the kernel.** The far-jump opcode `EA` carries a 16-bit IP offset, so `ljmp $cs, $label` only works when the target is in the low 64 KiB. That is why the bootloader's far jumps are legal — stage2 runs at `0x8000` — and why the same instruction is unusable for a kernel at `0xffffffff8...`. The mode switch in `stage2_long.S` gets away with it because the jump is *executed* in 32-bit mode and lands low. The hand-built far-return frame above is the mechanism that works at any address, which is the other reason it exists.
+
+### A Segment Reload Destroys That Register's Hidden Base
+
+`gdt_flush` reloads GS with a selector (`interrupt_entry.S:222`). That is not optional: a MOV to a segment **selector** is the only thing that refreshes a segment register's cached descriptor after `LGDT`, and it is exactly what makes the reload real rather than decorative. It also has a side effect that nothing in the source mentions and nothing in the sequence undoes — **loading a selector replaces the hidden base with the one from the descriptor**, which for a flat segment is zero.
+
+For FS and GS that hidden base is not a limit or an access byte, it is the per-CPU pointer: the whole `this_cpu()` mechanism is a GS-relative access through `IA32_GS_BASE`. So the reload that makes the segment registers correct throws the per-CPU area away at the same moment, and the next `this_cpu()` dereferences address 0. Measured: every subsystem logged through `cpuid`, `vmm`, `pmm`, `idt` and `pit`, and then `gdt_reload()`'s **own** `klog()` faulted at `this_cpu()->cpu_id` with CR2 = 0, one call after `gdt_flush()`.
+
+Deleting `mov %ax, %gs` also makes it boot, and **is not a fix**: it leaves GS on a descriptor from the loader's table, which is the condition the reload exists to prevent. The correct sequence is reload-then-reinstall, and the reinstall lives in C where the CPU number is known:
+
+```c
+gdt_flush((uint64_t)&gdtr, KERNEL_CODE_SELECTOR, KERNEL_DATA_SELECTOR);
+percpu_install_gs_base(cpu);          /* gdt.c:199 — the base the reload destroyed */
+tss_flush(TSS_SELECTOR);
+klog(KLOG_INFO, "gdt: cpu %u, …");    /* the very next statement reads this_cpu() */
+```
+
+`percpu_install_gs_base()` (`percpu.c:111`) **takes the CPU number as an argument** rather than calling `this_cpu()` to discover it, for a reason that is easy to get backwards: `this_cpu()` is precisely what has just been broken, so reading the CPU id here would fault on the line written to repair the fault. It is a separate function from `percpu_setup()` for the same reason — a *correct* segment reload destroys the base, and a boot-time setup function cannot be the thing that puts it back after every reload.
+
 ## Task State Segment (TSS)
 
 Each CPU has a TSS. The TSS in 64-bit mode is used exclusively for:
@@ -100,10 +140,13 @@ The IDT handles this rather than assuming: `idt.c` asks `gdt_have_ist()` before 
 
 ```c
 void gdt_reload(uint32_t cpu);      /* build and load the GDT, then LTR the TSS */
+void percpu_install_gs_base(uint32_t cpu);  /* re-install GS.base after a segment reload */
 void tss_set_kernel_stack(void *stack_top);  /* set RSP0 */
 ```
 
 `gdt_reload` is called during boot before the IDT exists, because the TSS supplies `RSP0` for every ring-3 transition: a CPU taking an interrupt with `RSP0` unset loads a null stack and faults inside the fault handler, before it can report anything.
+
+`gdt_reload` also calls `percpu_install_gs_base` immediately after `gdt_flush` and before the `klog()` that follows, because the segment reload destroys `GS.base` — see "A Segment Reload Destroys That Register's Hidden Base" above. Any future code that reloads a segment register has the same obligation, and it is not optional.
 
 `tss_set_kernel_stack` is called again on every context switch, so an interrupt always lands on the stack of the task currently running on that CPU.
 
@@ -129,6 +172,59 @@ Interrupts and exceptions always transition to ring 0, regardless of the current
 - Hardware interrupts: DPL=0 (not callable from user mode via `INT n`).
 - Software breakpoint (vector 3): DPL=3 (callable from user mode for debug purposes).
 
+### The Gate Type Byte: Interrupt Gate vs Trap Gate
+
+The IDT entry's type/attribute byte is `P | DPL | 0 | type`: present in bit 7,
+DPL in bits 6:5, the system bit (0 for a gate) in bit 4, and the four-bit gate
+type in bits 3:0. In long mode there are **exactly two valid gate types**, and
+they differ in one thing only:
+
+| Type | `type_attr` (DPL 0) | Meaning |
+|---|---|---|
+| `0b1110` | `0x8E` | 64-bit **interrupt** gate — clears IF on entry, IRET restores it |
+| `0b1111` | `0x8F` | 64-bit **trap** gate — leaves IF unchanged |
+
+`IDT_TYPE_INTERRUPT_GATE` is `0x8F` (`idt.c:69`), which is the **trap** gate.
+
+**There is no size bit, and no 32-bit gate in a 64-bit IDT.** The gate types that
+are described as "16-bit" (`0x6`, `0x7`) and "32-bit" (`0xE`, `0xF`) belong to the
+*32-bit* IDT, whose entries are 8 bytes and whose offset is 32 bits wide. A 64-bit
+IDT is indexed with a 16-byte stride and its offset field is 64 bits wide, so the
+`offset_high` half is loaded in full. The same type values mean "64-bit" there.
+`0x8E` is the 64-bit interrupt gate; the three sources that agree on this are the
+SDM's 64-bit gate-descriptor table, Linux's `arch/x86/include/asm/desc_defs.h`
+(`GATE_INTERRUPT = 0xE`, `GATE_TRAP = 0xF`, in the same struct that carries
+`offset_high`), and the fact that the 16-byte `struct idt_entry` at `idt.c:42-50`
+splits the handler address across three fields and is correct — there is nothing
+for a gate to truncate.
+
+That last point is worth stating as a warning, because the opposite belief is
+already in this tree's history. The claim that "the low three bits of the type
+field are the gate's size, `0b1110` is the 32-bit gate, and a 32-bit gate enters
+a handler linked at `0xffffffff800108c7` at `0x000108c7`" is false, and it was
+used as the stated reason to change the constant to `0x8F`. Nothing was fixed; a
+correct interrupt gate became a trap gate. The reasoning survives in commit
+`ed8b3cf`, in the comment at `idt.c:52-68` (which states that `0x8F` "clears IF on
+entry", the one thing a trap gate does not do) and in `STATE.md` §2 and §9. See
+correction **A1.10** in [`../../../MEGA_AUDIT.md`](../../../MEGA_AUDIT.md).
+
+**What the difference costs here, and why nothing has shown it yet.** A trap gate
+does not clear IF, and the entry stub in `interrupt_entry.S` has no `cli` and no
+`sti` — `iretq` is the only thing that restores flags, and it restores the flags
+that were saved on entry. So with `0x8F` an exception handler runs with
+interrupts **enabled** for its whole duration, where with `0x8E` it ran with them
+disabled. No IST stack is installed, so a handler runs on the interrupted stack,
+and `idt_init()` unmasks IRQ0 and programs the PIT at 100 Hz. A tick can
+therefore land inside a page-fault handler, and a `#PF` raised inside the `#PF`
+handler recurses immediately instead of being contained — the triple-fault path,
+on a stack with no dedicated alternative.
+
+That is a reading of the mechanism, not a measured fault: the tree has not yet run
+a handler long enough for a tick to land in one, and the current blocker is
+earlier. The generalisation is the one this document keeps having to relearn —
+**a gate type that clears one flag instead of another is a behavioural change with
+no signature at build time and none at boot time either.**
+
 ## User/Kernel Memory Separation
 
 Page table entries carry a `U/S` (User/Supervisor) bit:
@@ -139,15 +235,24 @@ Page table entries carry a `U/S` (User/Supervisor) bit:
 **Neither SMAP nor SMEP is enabled.** Both bits are defined
 (`CR4_SMEP`, `CR4_SMAP` in `src/kernel/include/cpu_features.h`) and neither is
 ever written to CR4. Until they are, a ring-3 process can read and write the
-kernel's per-CPU area: `MSR_GS_BASE` is programmed to `percpu_data`, a
+kernel's per-CPU area: `MSR_GS_BASE` is programmed to `&percpu_data[cpu]`, a
 `GS`-relative access resolves through that MSR regardless of CPL, and both the
 kernel GS-base MSRs are set to the same value, which makes the syscall path's
 `swapgs` a no-op. So `movq %gs:0x0, %rax; movq 0x10(%rax), %rbx` in ring 3 reads
-`percpu_data[0].current` and writes it. This is a direct ring-3 → ring-0
+`percpu_data[cpu].current` and writes it. This is a direct ring-3 → ring-0
 kernel-pointer-write primitive. See finding #61.
 
-The kernel's own boot log reports it:
-`percpu: gs base verification failed`.
+Nothing on the boot path reports the hole, and a boot log is not where to look
+for it. The kernel's own per-CPU self-check (`gs_base_install()`,
+`percpu.c:69-91`) proves the base through three independent routes — the MSR,
+`this_cpu()`, and a `GS`-relative load — and on a correct boot **all three
+pass and it prints nothing**. It used to log `percpu: gs base verification failed`
+and carry on, which is why the message appears in older logs; it now treats a
+failed check as fatal (`percpu.c:143`), because the old behaviour left `online`
+false and `num_cpus` at 0 with no base installed, and every `this_cpu()` caller
+went on reading and writing whatever happened to be mapped at the address it
+returned. That is the quietest shape of failure there is, and none of it says
+anything about SMAP.
 
 ## Related Documents
 
