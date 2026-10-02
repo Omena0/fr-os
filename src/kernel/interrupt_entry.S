@@ -288,10 +288,19 @@ tss_flush:
  * with. The syscall return path uses SYSRET, and that is the fast path; this is
  * the general one.
  *
- * IRETQ pops, in order, RIP, CS, RFLAGS, RSP, SS — so the frame is pushed in
- * reverse. The extra push/pop pair is alignment padding: without it the user's
- * first instruction would see RSP eight bytes off the 16-byte boundary the ABI
- * requires, and every SSE-using libc call would fault.
+ * IRETQ pops, in order, RIP, CS, RFLAGS, RSP, SS -- so the frame is pushed in
+ * exactly that reverse: SS, RSP, RFLAGS, CS, RIP. Five words, no padding.
+ *
+ * The order was wrong. It read SS, CS, RFLAGS, RIP, RSP, which puts CS where
+ * RSP belongs and RIP and RSP last; a trailing `add $8,%rsp` / `popq %rbp` pair
+ * hid the mismatch by absorbing one word, so the sequence looked balanced and
+ * disassembled cleanly. What it actually framed was RIP=RFLAGS, CS=CS,
+ * RFLAGS=SS, with the user's RSP and RIP never reaching the CPU at all, and
+ * the first entry into ring 3 died on the iretq with #GP.
+ *
+ * There is no padding here and there never needed to be: the RSP the user sees
+ * is the value the caller pushed, so its alignment is the caller's business,
+ * not something a frame builder on this side can influence.
  *
  * rcx and r11 are accepted and ignored. Some ABIs want the user to observe
  * RCX=user RIP and R11=user RFLAGS on return, which is why the parameters
@@ -304,14 +313,13 @@ ret_to_user:
 	cld
 
 	pushq	$USER_DATA_SELECTOR		/* SS */
+	pushq	%rsi				/* RSP */
+	pushq	%rdx				/* RFLAGS */
 	pushq	$USER_CODE64_SELECTOR		/* CS — index 5, the 64-bit user
 						 * code descriptor, NOT the 32-bit
 						 * one at index 3 that STAR
 						 * points at. */
-	pushq	%rdx				/* RFLAGS */
 	pushq	%rdi				/* RIP */
-	pushq	%rsi				/* RSP */
-	addq	$8, %rsp			/* pad so the user lands 16-aligned */
 	/*
 	 * Zero the caller-saved registers -- here, *after* the frame has been
 	 * built, because RDX, RDI and RSI are its inputs and clearing them first
@@ -335,7 +343,6 @@ ret_to_user:
 	xorl	%r8d, %r8d
 	xorl	%r9d, %r9d
 	xorl	%r10d, %r10d
-	popq	%rbp				/* padding, discarded */
 	/*
 	 * Past this point the CPU is about to run on memory the process owns.
 	 * Nothing may fault between here and the iretq, so anything that can be
