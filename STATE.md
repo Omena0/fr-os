@@ -36,89 +36,134 @@ error code.
 
 ---
 
-## 2. THE BLOCKER — read this first
+## 2. THE BLOCKER — **CLOSED**. The new blocker is §7.1.
 
-**The kernel boots through vmm → pmm → idt → PIT, and stops inside
-`gdt_flush()` at its far return.** PID 1 never starts, so no userspace runs.
+**The `gdt_flush` far return is fixed and the kernel now boots into userspace.**
+Last known-good output, measured after the fixes:
 
-Last known-good output:
 ```
-idt: 256 entries at ffffffff8002ec30, 4095 bytes
-pic: remapped to 20-30, both lines masked
-pit: ch0 divisor 11931 = 100.0 Hz, IRQ0 on vector 33
-ABCD                      <- markers A-D, E never prints
+[0.000 cpu0 gdt/I] gdt: cpu 0, 8 entries, kcode=8 kdata=10 ...
+[0.000 cpu0 idt/I] idt: 32 exception handlers, double fault without IST1 ...
+[0.000 cpu0 idt/I] idt: 256 entries at ffffffff8002ec30, 4095 bytes
+[0.000 cpu0 idt/I] pit: ch0 divisor 11931 = 100.0 Hz, IRQ0 on vector 33
+[0.000 cpu0 syscall/I] syscall entry installed at ffffffff80010ae8
+[0.000 cpu0 sched/I] scheduler up on cpu 0, idle task pid 0
+[0.000 cpu0 elf/I] loaded TLS block [40aff0,40affc) 8 bytes initialised, tp 40b000
+[0.000 cpu0 elf/I] loaded ELF entry 402020 phdr 400040 count 9 [400000,40e000)
+[0.000 cpu0 process/I] init task created, entry 402020
+init: pid 1 loaded, entering the scheduler
 ```
 
-### The lead: `gdt_flush` re-enters itself
+That is further than this tree has ever reached. **PID 1 exists and the
+scheduler runs.** What comes after that is §7.1.
 
-A gdb run (break at `gdt_flush`, then `finish`) produced:
+### The lead that was wrong, and why it cost so much
+
+STATE.md previously said `gdt_flush` re-entered itself infinitely. **It never
+did.** The port-0xE9 marker stream settles it in one run:
+
 ```
-Breakpoint 1, gdt_flush () at interrupt_entry.S:214   <- first hit
-== entry: rsp=0xffffffff801b8fb8 cs=0x8
-   0xffffffff80010a6e <gdt_flush>:  mov    $0x41,%al
-   0xffffffff80010a70 <gdt_flush+2>: out    %al,$0xe9
-   0xffffffff80010a72 <gdt_flush+4>: mov    %rdi,%rax
-   0xffffffff80010a75 <gdt_flush+7>: lgdt   (%rax)
-
-Breakpoint 1, gdt_flush () at interrupt_entry.S:214   <- SECOND hit
-== returned, rip=0xffffffff80010a6e                       <- its own first instruction
+$ od -An -tx1 dbg          # one boot, -no-reboot
+ 34 31 41 42 43 44 45 ...
 ```
-**The breakpoint hit twice and `finish` returned to `gdt_flush`'s entry.**
-Infinite recursion there exhausts the stack silently and would explain every
-symptom: no output past the E820 dump, a garbage RIP, dozens of boot cycles.
 
-**Caveat, and it matters:** gdb's `finish` is known to misbehave across an
-unusual control transfer like `lretq`, so this may be a gdb artefact rather than
-real recursion. **Settle it with a counter, not with gdb** — that is the one
-cheap, falsifiable experiment left:
-```asm
-	/* in gdt_flush, first instruction */
-	incq	gdt_flush_entries(%rip)     /* or: movl $1,%eax; outl %eax,$0xE9 */
+`41 42 43 44 45` is exactly one pass of markers A–E per boot. A re-entering
+`gdt_flush` would print `ABCD` forever within one pass. The gdb `finish`
+result that suggested recursion was an artefact — exactly the caveat STATE.md
+itself flagged, which was the right call to record.
+
+Note also what the markers did *not* show: **marker E never printed**, so the
+`lretq` was the failure and the resume path was never reached. That is the
+whole diagnosis in six bytes.
+
+### What was actually wrong: two defects, both invisible in the source
+
+**1. A three-word frame for a two-word instruction.**
+
+`LRETQ` pops RIP and CS and **nothing else**. It does not restore RFLAGS; only
+`IRET` pops flags. The code pushed `RFLAGS, CS, RIP` — the 32-bit idiom
+(EFLAGS, CS, EIP, three dwords) carried over unexamined into 64-bit code.
+
+Measured at the resume label, by having the guest print its own RSP rather than
+trusting gdb, under **both TCG and KVM**:
+
 ```
-If it re-enters, the counter tells you immediately. **Do that before generating
-another hypothesis.**
-
-### Second observation about that run — check this too
-The first instruction is `mov $0x41,%al; out %al,$0xe9`. **Port 0xE9 is QEMU's
-debug-exit port.** Writing it is normally harmless without
-`-device isa-debug-exit`, but it is an unusual thing to do at the top of a
-function and the marker macro is worth removing once the blocker is closed.
-
-### Excluded already, by measurement (do not re-derive these)
-
-| hypothesis | how excluded |
-|---|---|
-| far-return frame wrong | gdb single-step: RIP at `rsp+16`, CS at `rsp+8`, RFLAGS at `rsp` |
-| timer tick landing inside the frame | `cli` across `gdt_reload`, PIT already running → **no change** |
-| faults undeliverable through stage2's IDT | **fixed** — `idt_init()` moved before `gdt_reload`; `IDT=ffffffff8002ec30` |
-| GDT descriptors malformed | `_Static_assert` round-trip on every descriptor in `src/include/gdt.h` |
-| `LTR` refusing the TSS | **fixed** — 64-bit TSS layout, byte 7, `HIGH` narrowed |
-| RSP alignment at `lretq` | entry 8 mod 16 (per SysV), after 3 pushes 0 mod 16 — requirement met |
-
-### Current `gdt_flush`
-```asm
-	movq	%rdi, %rax
-	lgdt	(%rax)
-	movw	$KERNEL_DATA_SELECTOR, %ax ; → %ds/%es/%fs/%gs/%ss
-	pushq	$0x202			/* RFLAGS */
-	pushq	$KERNEL_CODE_SELECTOR	/* CS */
-	pushq	.Lgdt_flush_resume	/* RIP */
-	lretq
-.Lgdt_flush_resume:
-	ret
+f1 02 02 00 00 00 00 00 00 | ed 21 00 80 ff ff ff ff f2
+   ^--RSP+0 = 0x202        ^--RSP+8 = 0xffffffff800021ed
 ```
-Disassembly is `68 02 02 00 00 / 6a 08 / 68 <rip> / 48 cb` — correct.
 
-**Known smell:** `gdt_flush` has a **three-argument C prototype**
-(`gdt.c:95`: `gdt_flush(gdt_pointer, code_selector, data_selector)`) but the
-assembly **hardcodes both selectors and never reads `%rsi`/`%rdx`**. Harmless
-today — the only caller passes exactly those two — and a trap the moment
-anything calls it with a different segment. Either use the arguments or drop
-them from the prototype.
+RSP had advanced **16**, and the word sitting at RSP was still the `0x202` that
+had been pushed — one slot *below* the real return address. The `ret` after the
+label then popped `0x202` as a return address, control went to linear `0x202`,
+and the fetch faulted (`#PF`, error code `0x0010` = instruction fetch,
+protection violation, CR2 = `0x202`).
 
----
+Corroborated three ways, which is the standard to hold here:
+- the Intel `RET` pseudocode, IA-32e section, `RIP := Pop(); CS := Pop();` and no
+  flags pop;
+- TCG measurement;
+- KVM measurement.
+
+**2. The IDT gates were all 32-bit.**
+
+`IDT_TYPE_INTERRUPT_GATE` was `0x8E`. The low three bits of the type field are
+the gate's *size*: `0b1110` is the **32-bit** interrupt gate, `0b1111` is the
+64-bit one. With a 32-bit gate the CPU takes `offset[31:0]` as the whole handler
+address, so a handler linked at `0xffffffff800108c7` is entered at
+`0x000108c7`.
+
+This is the one that explains the long-standing symptom. **Nothing diagnoses
+it.** The table is present and correctly filled, `idt_init()` reports plausible
+numbers, the IDTR is accepted, and the CPU silently never reaches the handler:
+the exception becomes a page fault, that becomes a double fault, and the machine
+resets. That is why the tree showed *dozens of reboot cycles with no panic text
+from any of them*. The `struct idt_entry` was already the correct 16 bytes with
+a full 64-bit offset, so only the type byte was wrong — and the comment above it
+explained 0x8E/0x8F in terms of IF masking, which is true of both and says
+nothing about size.
+
+**3. A missing `$`, inside the same three lines.**
+
+`pushq .Lgdt_flush_resume` — no `$`. GAS reads that as a memory dereference and
+emits `ff 34 25 <disp32>` (PUSH r/m), pushing the *contents* at that address,
+i.e. the label's own instruction bytes. objdump prints the operand as
+`push 0xffffffff80010aa2`, which looks correct in a listing. It faulted with
+`#GP(0)` on a non-canonical address before the surplus word was ever reached.
+
+### Verification of the fix
+
+- The descriptor cache now shows `CS=0008 ... 00af9b00 [-RA]`. The **accessed
+  bit is set**, and only a successful CS reload from the new table can set it —
+  before the fix CS still read `0x9a`, i.e. the loader's descriptor.
+- The reboot cycle is gone (`-no-reboot` boots once and idles).
+- The kernel runs past `gdt_reload` into `sched_init`, loads the init ELF with
+  its TLS block, creates PID 1 and enters the scheduler.
+
+### Still true from the old §2
+
+`gdt_flush` has a **three-argument C prototype** (`gdt.c:95`) but the assembly
+hardcodes both selectors and never reads `%rsi`/`rdx`. Harmless today — the
+only caller passes exactly those two — and a trap the moment anything calls it
+with a different segment. Either use the arguments or drop them.
 
 ## 3. Fixed this session (all committed)
+
+Bootloader / CPU bring-up (this session):
+- **The `gdt_flush` far return** — three-word frame for a two-word `LRETQ`,
+  plus a `pushq` of the target with no `$` on it. See §2 for the full
+  measurement and the three-way corroboration.
+- **The IDT gates were 32-bit.** `0x8E` -> `0x8F`. See §2.
+- **`gdt_flush` destroys `GS.base`.** Loading a *selector* into GS refreshes
+  the cached descriptor, which is the only way to do it, and in doing so
+  replaces the hidden base with the descriptor's — zero, for a flat segment.
+  So the correct segment reload silently invalidates the per-CPU pointer, and
+  the next `this_cpu()` dereferences address 0. New
+  `percpu_install_gs_base(cpu)`, called from `gdt_reload()` immediately after
+  `gdt_flush()`, takes the CPU number as an argument precisely because
+  `this_cpu()` is what has just been broken.
+  Deleting `mov %ax, %gs` also "fixes" it and is **not** a fix: it leaves GS
+  on a descriptor from the loader's table, which is the condition the reload
+  exists to prevent.
 
 Bootloader / CPU bring-up:
 - **PICs are now masked** at the top of `stage2_main`. The BIOS leaves IRQ0
@@ -258,35 +303,119 @@ unchecked** — commit `1401355` moved `interrupt_entry.S` by 43 lines and rotte
 several citations. Nine were fixed; **all 112 were not audited.** Re-derive a
 finding's line before acting on it.
 
-Finding **0.27** is the current blocker (recorded so it is not lost).
+Finding **0.27** was the `gdt_flush` blocker and is now **closed** — it was two
+independent defects and neither was what the finding said. See §2. The mechanism
+worth keeping from it: re-derive the line before acting, and check the claim's
+*kind* as well as its location.
 
 ---
 
 ## 7. KNOWN OPEN, IN PRIORITY ORDER
 
-1. **The blocker** (§2). Count `gdt_flush` entries first.
-2. **The `cli`/`sti` pair** around `gdt_reload` is committed but is **not** the
-   fix — it made no difference. Keep it; it is correct anyway.
-3. `verify-isa` self-test: 4 of 19 checks fail. Three look like wrong
+### 7.1 The new blocker: kernel stack page is read-only
+
+**Where:** `sched.c:931`, `fpu_save(prev->fpu_state)` in `sched_switch_frame()`.
+**Status:** the first `schedule()` from `kmain`, switching init -> idle.
+
+Measured, exactly:
+```
+v=0e e=0002 i=0 cpl=0 IP=0008:ffffffff8000b2a6 SP=0010:ffffc00000011f90
+CR2=ffffc00000011f88   CR3=00000000bdc10000
+RAX=00000000bdc10000 RDI=ffffc00000012000 RSP=ffffc00000011f90
+```
+
+Read it like this, because two things are easy to get wrong:
+- `0xffffffff8000b2a6` is the **`call fpu_save`**, not the `fxsave`. `fpu_save`
+  is one instruction, `fxsave (%rdi)` at `0xffffffff80010805`.
+- `CR2 = RSP - 8`. **The faulting write is the return-address push**, i.e. the
+  kernel stack page itself, not the FPU save area. `RDI = 0xffffc00000012000`
+  is `prev->fpu_state` and lies in the *next* page up, which was written
+  successfully at task creation (`task.c:123`), so the allocator is producing
+  writable pages. Something between the two makes this one read-only.
+- `e = 0x0002`: bit 0 clear = **protection violation**, bit 1 set = write. So
+  the page **is present and is read-only** — not unmapped. Nothing in the tree
+  maps anything read-only on purpose; find what set that bit.
+
+Geometry: kernel stack top `0xffffc00000012000` (`kernel_stack +
+TASK_KERNEL_STACK_SIZE`), RSP one page down, and `fpu_state` immediately above
+the stack. Both come from `kmalloc`/`kstack_alloc` in `task.c`.
+
+**Not yet checked:** the PTE itself. The page-table walk needs the *kernel* PGD's
+virtual address — the fault record's CR3 is `0xbdc10000`, and the direct map
+puts that at `0xffffffffbdc10000`; a first attempt indexed PML4 without masking
+to 9 bits and produced garbage. Mask every index with `& 0x1ff`.
+
+Cheapest next step: print the PTE for `0xffffc00000011000` and for
+`0xffffc00000012000` side by side. They came from the same allocator and differ
+only in permission, so the diff is the whole answer.
+
+### 7.2 The rest, unchanged
+
+1. The `cli`/`sti` pair around `gdt_reload` is correct but is **not** the fix.
+   Keep it. Note it now also covers `percpu_install_gs_base()`, which is
+   correct — but it must be, since `gs_base_install()` verifies through
+   GS-relative addressing.
+2. `verify-isa` self-test: 4 of 19 checks fail. Three look like wrong
    *expectations* in the fixtures; **`user-plus-v3` reporting an AVX object as
    clean may be a real gate hole.** Unowned.
-4. `sys_execve` (`process.c:1343`) returns its error unlogged — only
+3. `sys_execve` (`process.c:1343`) returns its error unlogged — only
    `exec_load_and_run` was instrumented.
-5. `sched.c` never calls `task_save_fs_base`/`task_load_fs_base`, so the FS base
-   does not travel with a task across a switch.
-6. `process.c` never sets `t->fs_base` from `mm->tls_ptr` on exec. `ret_to_user`
-   needs `call task_load_fs_current` before its `iretq` for **fork** (a child
-   never re-runs `crt1`, so nothing else calls `arch_prctl` for it).
-7. `ret_to_user` clears RAX/RCX/R8-R10 but leaves R11 (the frame pointer)
+4. `sched.c` never calls `task_save_fs_base`/`task_load_fs_base`, so the FS base
+   does not travel with a task across a switch. **Higher priority than it was:**
+   `ret_to_user` is now reachable for the first time.
+5. `process.c` never sets `t->fs_base` from `mm->tls_ptr` on exec. `ret_to_user`
+   needs `call task_load_fs_current` before its `iretq` for **fork**.
+6. `ret_to_user` clears RAX/RCX/R8-R10 but leaves R11 (the frame pointer)
    deliberately — worth a second opinion.
-8. `init` will need TLS working before its `getline`/`malloc`.
-
----
+7. `init` will need TLS working before its `getline`/`malloc`. The TLS block now
+   loads with a correct thread pointer, so this may be closer than it looks.
 
 ## 8. MISTAKES MADE HERE — do not repeat them
 
 Every one of these happened to me on this tree. They are listed as **what I did**
 and **what to do instead**, because recognising them is the point.
+
+### Chasing a debugger's opinion of control flow instead of the machine's
+The old STATE.md handed over "gdt_flush re-enters itself" as *the lead*, backed
+by a gdb run showing the breakpoint hit twice with `finish` returning to
+`gdt_flush`'s own entry. It was wrong. One `-debugcon` run and one `od` settled
+it: markers A-E print exactly once per boot. gdb's `finish` misbehaves across
+`lretq` — the caveat was written down and then the conclusion was still drawn
+from the artefact.
+→ **When a story says the CPU did something structurally absurd, check the
+story with the cheapest independent channel first.** Port markers, a serial
+line, `-d int`. One `od` is worth an hour of gdb. And when you hand over a
+lead, hand over *how to falsify it* first.
+
+### Reading a disassembly listing as if it were the encoding
+`objdump` printed `push 0xffffffff80010aa2` for `ff 34 25 a2 0a 01 80`. That
+reads like "push the immediate 0xffffffff80010aa2" and it is not: the opcode is
+`PUSH r/m`, so it pushes the **contents** at that address. objdump prints the
+memory operand's *target*, which is exactly the address a push-immediate would
+have named.
+→ **For anything where an addressing mode and an immediate produce the same
+listing line, read the opcode/ModRM, not the mnemonic.** Same trap with
+`mov $imm` versus `mov` through a displacement.
+
+### Porting an idiom across an ISA generation without re-reading what it pops
+Three words pushed for `LRETQ`, which pops two. It came from 32-bit code where
+`lret` pops three dwords. Nothing in the source is wrong-looking, the comment
+above it explains the far return correctly, and the extra word is inert until
+the following `ret` consumes it as a return address.
+→ **When moving code between 32-bit and 64-bit, the *stack frame shape* changes
+too — not just the register names.** `lret`/`iret` pop different numbers of
+words. `ljmp $cs, $label` has a related trap: in 64-bit mode it assembles to
+`EA` with a **16-bit** IP offset, which works in the bootloader only because its
+target is in the low 64 KiB, and is unusable for a kernel at `0xffffffff8...`.
+
+### Fixing the symptom where the cause is a correct instruction doing its job
+`gdt_flush` reloads GS with a selector. That is required — it is the only thing
+that refreshes the cached descriptor — and it also zeroes the hidden base,
+because loading a selector takes the base from the descriptor. Deleting the
+instruction makes the boot work and makes the kernel wrong.
+→ **If removing a correct instruction makes the symptom go away, the symptom is
+not where the bug is.** See "Papering over instead of fixing" below; this is the
+same failure with a plausible-looking diff.
 
 ### Deriving what code "should" produce, then "fixing" correct code
 The descriptor layout. I was certain byte 7 was `base[31:28]` — four bits —
@@ -384,9 +513,15 @@ change was uncommitted. I had to be told twice.
 These are settled. Re-deriving them is how today was lost.
 
 - The GDT/TSS descriptor layout is **correct and `_Static_assert`-pinned**.
-- The far-return frame in `gdt_flush` is **verified correct by gdb
-  single-stepping**. Do not "fix" it again.
-  - `direct map 0-4 GiB, 1 GiB pages` and the E820 map with
+  Confirmed again this session by dumping the live table from guest RAM: the
+  kernel code descriptor is `0x00af9b000000ffff`, i.e. L=1, D/B=0, G=1, base 0.
+- `gdt_flush` does **not** re-enter itself. Measured, once per boot.
+- **`LRETQ` pops RIP and CS — 16 bytes — and does not restore RFLAGS.** Only
+  `IRET` pops flags. Confirmed by the Intel `RET` pseudocode, by TCG, and by KVM.
+- The IDT gate size bit is in the type field's low three bits; `0x8E` is the
+  32-bit gate and `0x8F` the 64-bit one. Both mask IF. The old comment
+  explaining 0x8E vs 0x8F in terms of trap-vs-interrupt was wrong about size.
+- `direct map 0-4 GiB, 1 GiB pages` and the E820 map with
   `e820[6] fd00000000-ffffffff reserved` as the highest usable entry are both
   correct.
 - A **zero-byte serial log means a bad command, a full filesystem, or a wrong
@@ -398,10 +533,15 @@ These are settled. Re-deriving them is how today was lost.
 
 Branch `main`, clean tree. Recent commits:
 ```
-09c236e kernel: mask interrupts across the descriptor reload
-f77026d kernel, docs: TLS alignment and PT_LOAD fixes; audit reconciled
-fb261ef kernel: finish the sentinel and panic fixes properly
-e87ebf4 kernel: install the IDT before the first GDT reload
+2a9e372 percpu: put GS.base back after the segment reload that destroys it
+ed8b3cf kernel: fix the GDT reload far return and the IDT gate size
+99df2e6 docs: add a past-mistakes section to STATE.md
 ```
-Commit messages in this repo carry the mechanism and the verification, and
-say plainly what is **not** fixed. That convention is worth keeping.
+Commit messages in this repo carry the mechanism and the verification, and say
+plainly what is **not** verified. That convention is worth keeping, and the
+last two commits follow it: `ed8b3cf` states that the IDT handlers running is
+*not* separately verified, because the far return blocked the path to them.
+
+Claims held by `main` in `ownership.json` (release them when done):
+`src/kernel/{gdt.c,idt.c,interrupt_entry.S,main.c,percpu.c}`,
+`src/kernel/include/percpu.h`.
