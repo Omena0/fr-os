@@ -77,9 +77,6 @@ static inline void *boot_ptr(phys_addr_t phys)
 	return (void *)(uintptr_t)phys;
 }
 
-/* TEMPORARY INSTRUMENTATION (gdthang): lossless port-0xE9 trace. */
-extern void gd_trace(uint8_t c);
-
 static void kmain_banner(void);
 static void kmain_report_cpu(void);
 static void kmain_report_memory(void);
@@ -254,7 +251,6 @@ void kmain(uint64_t bootinfo_phys)
 	kmain_report_cpu();
 	kmain_report_framebuffer();
 	kmain_report_memory();
-	gd_trace('4');
 
 	/*
 	 * Privilege and interrupts.
@@ -313,13 +309,9 @@ void kmain(uint64_t bootinfo_phys)
 	 */
 	asm volatile("cli" ::: "memory");
 	gdt_reload(0);
-	gd_trace('5');
 	tss_set_kernel_stack((void *)__kernel_stack_top);
-	gd_trace('6');
 	exceptions_init();
-	gd_trace('7');
 	idt_init();
-	gd_trace('8');
 
 	/*
 	 * Syscall entry. Installed after the IDT so that a user process cannot
@@ -327,7 +319,6 @@ void kmain(uint64_t bootinfo_phys)
 	 * would #UD in user space with no kernel handler to explain it.
 	 */
 	syscall_init();
-	gd_trace('9');
 
 
 	/*
@@ -350,7 +341,6 @@ void kmain(uint64_t bootinfo_phys)
 	 * sched_init() is running with per_cpu(current) unset.
 	 */
 	sched_init();
-	gd_trace(':');
 
 	/*
 	 * The first user process, created before sched_start() because
@@ -359,15 +349,12 @@ void kmain(uint64_t bootinfo_phys)
 	 * user space that is not reachable later belongs here.
 	 */
 	struct task *init = process_create_init();
-	gd_trace(';');
 	if (!init)
 		panic("could not create the init process; there is nothing to run");
 
 	kprintf("init: pid %u loaded, entering the scheduler\n", init->pid);
-	gd_trace('<');
 
 	sched_start();
-	gd_trace('=');
 
 	/* Unreachable: reaching it means the idle task was torn down, leaving no
 	 * valid stack to return into. */

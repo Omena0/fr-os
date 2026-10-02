@@ -21,13 +21,6 @@
 
 KLOG_SUBSYSTEM("gdt");
 
-/* TEMPORARY INSTRUMENTATION (gdthang): trace to BOTH 0xE9 and COM1. */
-void gd_trace(uint8_t c)
-{
-	__asm__ __volatile__("outb %b0, $0xE9" : : "a"(c) : "memory");
-	__asm__ __volatile__("outb %b0, $0x3F8" : : "a"(c) : "memory");
-}
-
 /* ------------------------------------------------- descriptor storage ----- */
 
 /* The pseudo-descriptor handed to LGDT. Ten bytes; the limit is 16 bits and the
@@ -157,7 +150,6 @@ void gdt_reload(uint32_t cpu)
 	 * secondary-CPU startup is a local operation rather than a redesign.
 	 */
 	(void)cpu;
-	gd_trace('1');
 
 	gdt_set(GDT_INDEX_NULL,    0);
 	gdt_set(GDT_INDEX_KCODE,   GDT_LCODE64);
@@ -191,9 +183,7 @@ void gdt_reload(uint32_t cpu)
 	/* CS first, then the TSS. A ring-3 interrupt before the LTR would load
 	 * RSP0 from a TSS the CPU is not using yet and run on a null stack. */
 	gdt_flush((uint64_t)&gdtr, KERNEL_CODE_SELECTOR, KERNEL_DATA_SELECTOR);
-	gd_trace('2');
 	tss_flush(TSS_SELECTOR);
-	gd_trace('3');
 
 	klog(KLOG_INFO, "gdt: cpu %u, %u entries, kcode=%#x kdata=%#x "
 	     "ucode32=%#x udata=%#x ucode64=%#x tss=%#x\n",

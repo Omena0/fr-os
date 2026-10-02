@@ -49,10 +49,24 @@ struct idt_entry {
 	uint32_t reserved;
 } __attribute__((packed));
 
-/* 0x8E is a present interrupt gate: it clears IF on entry, which is what every
- * handler here wants. 0x8F would be a trap gate, leaving interrupts enabled,
- * and is right only for a handler that must not mask them. */
-#define IDT_TYPE_INTERRUPT_GATE  0x8E
+/* 0x8F is a present *64-bit* interrupt gate: it clears IF on entry, which is
+ * what every handler here wants, and -- the part that matters here -- a 64-bit
+ * gate is the only kind that loads the full 64-bit offset. The low three bits
+ * of the type field are the gate's size, and 0b1110 is the *32-bit* interrupt
+ * gate. With that byte the CPU takes offset[31:0] as the whole handler address
+ * and clears the top 32 bits, so a handler linked at 0xffffffff800108c7 is
+ * entered at 0x000108c7, which is unmapped: the exception becomes a page
+ * fault, the page fault becomes a double fault, and the machine resets.
+ *
+ * Nothing in the tree shows that. The gates are all present and correctly
+ * filled in, idt_init() reports a plausible table, and the CPU accepts the
+ * IDTR -- it just never reaches the handler. The only symptom is that the
+ * kernel stops speaking mid-boot and the machine reboots, which looks like a
+ * hang or a crash somewhere else entirely.
+ *
+ * 0xFF is the 64-bit *trap* gate, which leaves IF set; it is right only for a
+ * handler that must not mask interrupts. */
+#define IDT_TYPE_INTERRUPT_GATE  0x8F
 
 static struct idt_entry idt[IDT_ENTRIES] __attribute__((aligned(16)));
 static struct {

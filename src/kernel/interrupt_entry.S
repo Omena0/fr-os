@@ -201,24 +201,13 @@ interrupt_common:
  * in an unusable state, and the C code after this call must not have to know
  * that a reload just happened.
  */
-/* TEMPORARY INSTRUMENTATION (gdthang): port-0xE9 markers, no state, no COM1. */
-	.equ	GDT_E_A,	0x41
-	.equ	GDT_E_B,	0x42
-	.equ	GDT_E_C,	0x43
-	.equ	GDT_E_D,	0x44
-	.equ	GDT_E_E,	0x45
-
 	.globl	gdt_flush
 	.type	gdt_flush, @function
 gdt_flush:
-	movb	$GDT_E_A, %al
-	outb	%al, $0xE9
 
 	movq	%rdi, %rax			/* the GDTR pointer, in full */
 	lgdt	(%rax)
 
-	movb	$GDT_E_B, %al
-	outb	%al, $0xE9
 
 	/*
 	 * Reload the data segments while the old CS is still the one in use, and
@@ -233,19 +222,26 @@ gdt_flush:
 	movw	%ax, %gs
 	movw	%ax, %ss
 
-	movb	$GDT_E_C, %al
-	outb	%al, $0xE9
 
-	movb	$GDT_E_D, %al
-	outb	%al, $0xE9
 
-	pushq	$0x202				/* RFLAGS: IF set, reserved bit 1 */
+/*
+	 * Two words, not three. LRETQ pops RIP and CS and nothing else; it does
+	 * not restore RFLAGS. Only IRET pops flags. The 32-bit idiom this was
+	 * written from -- EFLAGS, CS, EIP, popped by a three-dword LRET -- does
+	 * not survive the widening, and carrying the extra word over is not
+	 * harmless: the surplus RFLAGS stays on the stack and the `ret` below
+	 * pops 0x202 as if it were a return address, so control transfers to
+	 * linear 0x202 and the fetch faults. Verified by measurement, not by
+	 * derivation: at the resume label RSP had advanced 16 and the word at
+	 * RSP was still the 0x202 that had been pushed, under both TCG and KVM.
+	 *
+	 * Not restoring flags is fine here. IF is the caller's business, and
+	 * gdt_reload runs inside the cli/sti pair around it in main.c.
+	 */
 	pushq	$KERNEL_CODE_SELECTOR		/* CS */
-	pushq	.Lgdt_flush_resume		/* RIP */
+	pushq	$.Lgdt_flush_resume		/* RIP */
 	lretq
 .Lgdt_flush_resume:
-	movb	$GDT_E_E, %al
-	outb	%al, $0xE9
 	ret
 	.size	gdt_flush, . - gdt_flush
 
