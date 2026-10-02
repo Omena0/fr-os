@@ -365,11 +365,22 @@ void kmain(uint64_t bootinfo_phys)
 
 static void kmain_banner(void)
 {
-	kprintf("%s (%s, rev %s)\n", KERNEL_VERSION_STRING,
+	/*
+	 * A rule above and below, so the kernel's output is visually separable
+	 * from the loader's. The loader prefixes its lines with "[boot2]" and the
+	 * kernel's with a timestamp, and in a log where the two are interleaved
+	 * with a run of NUL bytes in between, that difference is easy to miss --
+	 * and the mistake is easy to make, because "did the loader say that or did
+	 * the kernel?" changes what a line means.
+	 */
+	kprintf("=========================================================\n");
+	kprintf(" %s (%s, rev %s)\n", KERNEL_VERSION_STRING,
 		KERNEL_BUILD_STAMP, KERNEL_GIT_REV);
-	kprintf("boot: entry 0x%016lx, image 0x%016lx, drive 0x%lx, cmdline '%s'\n",
+	kprintf(" boot: entry 0x%016lx, image 0x%016lx, drive 0x%lx, "
+		"cmdline '%s'\n",
 		boot.kernel_entry, boot.kernel_phys_base, boot.boot_drive,
 		boot.cmdline[0] ? boot.cmdline : "(none)");
+	kprintf("=========================================================\n");
 }
 
 static void kmain_report_cpu(void)

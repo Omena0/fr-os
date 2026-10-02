@@ -58,6 +58,97 @@ static inline void feat_set(uint64_t *f, uint32_t reg, uint32_t bit, uint64_t id
  * deadline interrupts, 1 GiB pages) is based on what the machine reports
  * rather than what the kernel was compiled to expect.
  */
+/*
+ * Measure the TSC against PIT channel 2.
+ *
+ * CPUID leaf 0x15 is the cheap answer and is used when it is there, but plenty
+ * of machines do not implement it -- AMD parts commonly answer 0x16 with a
+ * *base* frequency rather than the TSC, and QEMU's TCG answers neither. With
+ * no frequency, klog's clock is zero, so every line in the log reads
+ * `[    0.000 ...]`: the timestamps look present and carry no information, which
+ * is worse than not having them because it reads like the whole boot took under
+ * a millisecond.
+ *
+ * Channel 2 is the PIT's spare channel, wired to the PC speaker's gate and to
+ * bit 5 of port 0x61. It is programmed in mode 0, so its output goes high when
+ * the count reaches zero, and bit 5 of port 0x61 follows it. That gives a
+ * hardware event to measure against: read the TSC, wait for the bit, read it
+ * again.
+ *
+ * This is not the "delay loop that has no place in code that runs before the
+ * scheduler exists" the old comment called it. Nothing here polls on a
+ * counter of its own making; it waits for a hardware edge, and the wait is
+ * bounded by the PIT count, so it cannot hang. The bound is the point: if the
+ * edge never comes -- no PIT, port 0x61 behaving oddly, virtualised timer --
+ * this returns 0 after a fixed number of reads and the caller keeps the
+ * "unknown frequency" behaviour rather than hanging the boot.
+ *
+ * Accuracy is whatever the PIT's input clock is worth. 1193182 Hz is the
+ * standard value and is accurate to about 0.01%, so a 50 ms window gives
+ * roughly 0.01% frequency error -- far better than the millisecond
+ * resolution klog actually prints, and good enough for scheduling decisions
+ * that are compared against the same TSC.
+ */
+#define PIT_INPUT_HZ    1193182ULL
+#define PIT_CH2_PORT    0x42
+#define PIT_CMD_PORT    0x43
+#define PIT_GATE_PORT   0x61
+/* Mode 0, lobyte/hibyte, channel 2, binary. */
+#define PIT_CH2_MODE0   0xB0
+/* ~50 ms at the standard input frequency. */
+#define PIT_CAL_COUNT   59659
+/* Well past 50 ms of spinning; the bit is expected within a few reads. */
+#define PIT_CAL_MAX_SPIN 2000000UL
+
+static uint64_t calibrate_tsc_against_pit(void)
+{
+	uint8_t gate;
+	uint64_t tsc_before, tsc_after, elapsed_us, delta;
+	unsigned long spin;
+
+	/*
+	 * Port 0x61 bit 0 is GATE2 and must be low for the channel to count, and
+	 * bit 1 is the PC speaker enable and must be left as it was. Saving and
+	 * restoring the whole byte is what keeps this from muting the speaker
+	 * permanently on a machine that has one.
+	 */
+	gate = inb(PIT_GATE_PORT);
+	outb(PIT_GATE_PORT, (uint8_t)((gate & ~0x01) | 0x02));
+
+	outb(PIT_CMD_PORT, PIT_CH2_MODE0);
+	outb(PIT_CH2_PORT, (uint8_t)(PIT_CAL_COUNT & 0xFF));
+	outb(PIT_CH2_PORT, (uint8_t)((PIT_CAL_COUNT >> 8) & 0xFF));
+
+	tsc_before = rdtsc();
+
+	/* The channel is already running, so the only wait is for the edge. */
+	for (spin = 0; spin < PIT_CAL_MAX_SPIN; spin++) {
+		/* Read the whole port: it is a read-back register, and only bit 5
+		 * carries OUT2. */
+		if (inb(PIT_GATE_PORT) & 0x20)
+			break;
+		__asm__ volatile("pause");
+	}
+	tsc_after = rdtsc();
+
+	outb(PIT_GATE_PORT, gate);
+
+	if (spin == PIT_CAL_MAX_SPIN)
+		return 0;	/* no edge: say "unknown" rather than guess */
+
+	delta = tsc_after - tsc_before;
+	if (!delta)
+		return 0;
+
+	/* The PIT's own clock is the reference, so the window's length is known
+	 * exactly in microseconds and the TSC rate follows from the ratio. */
+	elapsed_us = (uint64_t)PIT_CAL_COUNT * 1000000ULL / PIT_INPUT_HZ;
+	if (!elapsed_us)
+		return 0;
+
+	return delta * 1000ULL / elapsed_us;
+}
+
 void cpu_features_init(void)
 {
 	uint32_t a, b, c, d;
@@ -182,14 +273,9 @@ void cpu_features_init(void)
 		}
 	}
 
-	/* TSC frequency. CPUID 0x15 reports a crystal ratio where available. The comment
-	 * used to promise a fallback "to CPUID 0x16 and finally to calibration
-	 * against the PIT" that did not exist in the code; 0x16 reports a base
-	 * frequency, not the TSC, and a PIT calibration needs a delay loop that
-	 * has no place in code that runs before the scheduler exists. So there is
-	 * one source, and tsc_khz is 0 when it does not answer — which klog
-	 * already handles by printing no timestamp rather than dividing by it. */
+	/* TSC frequency. CPUID 0x15 reports a crystal ratio where available. */
 	cpu_features.tsc_khz = 0;
+	cpu_features.tsc_source = 0;
 	if (max_leaf >= CPUID_TSC) {
 		uint32_t denom = 0, numer = 0, ecx = 0;
 
@@ -202,8 +288,16 @@ void cpu_features_init(void)
 		 * not define and which comes back 0, so tsc_khz was 0 on every
 		 * machine and every klog timestamp read [    0.000 ...].
 		 */
-		if (a != 0 && denom != 0 && numer != 0)
+		if (a != 0 && denom != 0 && numer != 0) {
 			cpu_features.tsc_khz = (uint64_t)a * numer / denom;
+			cpu_features.tsc_source = 1;
+		}
+	}
+
+	if (!cpu_features.tsc_khz) {
+		cpu_features.tsc_khz = calibrate_tsc_against_pit();
+		if (cpu_features.tsc_khz)
+			cpu_features.tsc_source = 2;
 	}
 
 	cpu_features.hypervisor = (cpu_features.basic_ecx >> 31) & 1;
@@ -335,9 +429,21 @@ void cpu_features_init(void)
 		klog(KLOG_DEBUG, "cpu: running under a hypervisor\n");
 
 	if (cpu_features.tsc_khz)
-		klog(KLOG_INFO, "cpu: tsc %llu kHz (crystal ratio), invariant=%d\n",
+		klog(KLOG_INFO, "cpu: tsc %llu kHz (%s), invariant=%d\n",
 		     (unsigned long long)cpu_features.tsc_khz,
+		     cpu_features.tsc_source == 1 ? "crystal ratio"
+		     : cpu_features.tsc_source == 2 ? "measured against PIT"
+						     : "unknown source",
 		     cpu_features.invariant_tsc);
+	else
+		/*
+		 * Worth saying out loud. Without a frequency, klog prints no
+		 * timestamp on any line, and a reader who does not know that will
+		 * read the missing numbers as "the whole boot took no time".
+		 */
+		klog(KLOG_WARN,
+		     "cpu: tsc frequency unknown; kernel log lines will carry no "
+		     "timestamp\n");
 
 	klog(KLOG_INFO, "cpu: avx2=%d bmi2=%d erms=%d fsrm=%d clwb=%d rdpid=%d nx=%d\n",
 	     cpu_has(CPU_FEATURE_AVX2), cpu_has(CPU_FEATURE_BMI2),

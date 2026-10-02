@@ -324,7 +324,14 @@ struct cpu_features {
 	 * main.c used to print against cpu_features.c's own `?: 1`.
 	 */
 	uint32_t logical_cpus;
-	uint64_t tsc_khz;            /* from CPUID 0x15 where available, else 0 */
+	uint64_t tsc_khz;            /* TSC frequency; 0 if it could not be measured */
+	/*
+	 * How tsc_khz was obtained, so the log can say so. A measured frequency
+	 * presented as if it came from a crystal ratio is worse than no number:
+	 * a reader has no way to know how much to trust it. 0 = not measured,
+	 * 1 = CPUID 0x15 crystal ratio, 2 = timed against PIT channel 2.
+	 */
+	uint8_t tsc_source;
 	/* CPUID 0x80000007 EDX bit 8. Not 0x80000001 EDX bit 8, which is
 	 * reserved — the old read could never report a constant TSC. */
 	bool     invariant_tsc;
