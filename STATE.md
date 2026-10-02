@@ -344,102 +344,56 @@ worth keeping from it: re-derive the line before acting, and check the claim's
 
 ## 7. KNOWN OPEN, IN PRIORITY ORDER
 
-### 7.1 The new blocker: a ring-3 write the fault path refuses, with a contradiction
+### 7.1 USERSLAND RUNS. What is left is the keyboard.
 
-**Where:** ring 3. init enters user space, makes a syscall, then faults on a store.
-
-```
-#EXC #PF  vector=14 cs=0x002b rpl=3 rip=0x0000000000401f28 err=0x6
-        rsp=0x00007fffffffef10 -> unrecoverable page fault
-CR2=000000000040d158
-```
-
-Three things here, and the first two are easy to get wrong:
-
-- **The faulting address is CR2 = `0x40d158`, not the RIP.** The RIP
-  (`0x401f28`) is inside `__libc_start_c`; it is only where the store was issued.
-  Reading the fault location off the instruction pointer sends you to the ELF
-  loader and never to the missing page.
-- `0x40d158` is in the **`.bss` tail** of the last `PT_LOAD`. That segment is
-  `vaddr 0x40aff0 filesz 0x118 memsz 0x2eb8`, so file-backed content stops at
-  `0x40b108` and everything from there to `0x40dea8` is zero-fill.
-- This is **not** a missing page by the loader's own account. `elf.c:14` says
-  `p_filesz` is left unmapped *on purpose* and "the fault path allocates a zeroed
-  anonymous page for it". The VMA covering it is created `VM_ANON` with
-  `VM_READ|VM_WRITE|VM_USER` (`elf.c:500`), so the anonymous fill path in
-  `mm.c` should service it.
-
-**Measured, and they do not agree:**
-
-- Dumping the live tables over QMP: page `0x40c000` and `0x40d000` are
-  **absent** (`PT[12]` and `PT[13]` both read `0x0000000000000000`), while
-  `0x40b000` — the last file-backed page — is present. So the `.bss` tail is
-  genuinely unmapped, as designed.
-- But the CPU's error code is `0x0006`, and bit 0 is **clear**, which on x86
-  means **protection violation — the page is present**. Bit 0 set (`0x0007`)
-  would be the not-present case.
-- `vmm_handle_page_fault()` returns **-13 (`-EACCES`)**. `-EACCES` has exactly
-  two sources in that function: the early
-  `if (!(error_code & PF_PRESENT)) return -EACCES;`, and `!vma_allows(...)`.
-  With `err=0x6` the early return is the one that fires, and it is *correct for
-  what the CPU reported*.
-
-So either the error code the kernel reads is not the one the CPU pushed, or the
-page is present in some path not visible from `0xbdc10000`. **`PF_PRESENT` is
-defined as `1 << 0` (`interrupt.h:148`), which is the "page not present" bit —
-the name says the opposite of the meaning, which is Linux's naming too and is how
-a polarity slip survives.** Check the stub's error-code push and skip logic
-(`interrupt_entry.S`, `err_stub`/`noerr_stub`) before anything else: if the frame
-carries the wrong word, every conclusion drawn from `err=` in this tree is
-suspect.
-
-### 7.1 The blocker: userspace reaches its first syscall and the kernel dies there
-
-**The `0x40d158` fault is fixed. `init` now runs `__libc_start_c` out of the
-`.bss` gap and takes its first syscall.** The blocker moved:
+`init` boots, prints its banner, and blocks at its prompt:
 
 ```
-#EXC #PF  vector=14 cs=0x0008 rpl=0 rip=0xffffffff80010d08 err=0x0
-        rsp=0xffffc0000001cf50 -> unrecoverable page fault
-cr2 0xffffffff8017a340   cr3 0x00000000bdc10000   cr4 0x0000000000010220
+Fr Init: Fr Init 0.1.0 (build ..., rev 00ef05b)
+Fr Init: Fr OS system bring-up -- pid 1, page size 4096 bytes
+Fr Init: running on Fr Core 0.1.0
+Fr Init: type 'help' for the command list, EOF to stop
+Fr Init>
 ```
 
-`src/kernel/syscall_entry.S:204`, in `syscall_entry`:
+Everything from the reset loop to here is in section 3. The last blocker was
+the subtlest of the lot and is worth reading in full: **the interrupt stub
+saved rdi, rsi, rdx, rcx, r8-r11 -- the System V caller-saved set *minus RAX*.**
+RAX is caller-saved, so every C handler destroyed the interrupted code's RAX,
+and IRETQ does not restore general-purpose registers. From ring 0 that is
+nearly invisible; from ring 3 it silently re-executes a faulting instruction
+with a different register than it had. The measurement that pinned it: a
+breakpoint on init's allocator store and one on the kernel's sysretq together,
+showing the kernel putting 0x200000015000 in RAX, the user arriving with
+0x200000015000, and the *same instruction* next reached with 0.
 
-```asm
-	rdmsr
-	movq	%rax, %rbp		/* GS.base */
-	shlq	$32, %rdx
-	orq	%rdx, %rbp
-	movl	(%rbp), %ebp		/* cpu_id  <-- faults */
+**The next blocker is the PS/2 controller, and it is a separate subsystem.**
+To drive the REPL, keystrokes are injected with QEMU's `sendkey` over QMP.
+The keyboard interrupt *is* delivered -- `-d int` shows `INT=0x21`, vector 33 --
+but **one interrupt per injected burst**, not one per key, and no character
+reaches the tty. The boot log carries the reason:
+
+```
+[198.098 cpu0 tty/W] tty: 8042 answered 0xaa where an ack was expected
+[200.005 cpu0 tty/I] tty: rings 4096 bytes each, 8042 up, keyboard on vector 34
 ```
 
-`nm` says `0xffffffff8017a340` is exactly `percpu_data`, so **GS.base is
-correct**. The fault is a *supervisor read* (`err=0x0`: bits 0, 1 and 2 all
-clear) of a page the tables show **present, writable, supervisor, no NX, no
-reserved bits** (`PT[378] = 0x000000000027a063`). That combination cannot fault.
-So one of these is wrong, and these are the candidates, none of them yet ruled
-out:
+So the 8042 initialisation sequence is not completing: something expected an
+acknowledgement and read 0xaa (the self-test result byte) instead. Until that
+is fixed, the controller is not in a state where each key raises its own
+interrupt. Start at `ps2_write_port()` / `ps2_expect_ack()` in `tty.c` and
+establish which command in the sequence loses the ack.
 
-1. **The mapping is 1 MiB out.** The kernel window maps `0xffffffff80000000` to
-   physical `0x100000` — confirmed, since `0xffffffff80010a00` resolves to
-   physical `0x110000`. So `percpu_data`'s page should be physical **`0x17a000`**.
-   The PTE says **`0x27a000`**: exactly `0x100000` too high. This is a real
-   defect whatever else is true, and at least one page of kernel `.bss` is
-   backed by the wrong frame. **Check the whole window, not just this page.**
-2. CR3 is not `0xbdc10000` at the fault — and `panic_regs` may itself be reading
-   CR3 wrongly.
-3. A stale TLB entry. Check that every path which unmaps or repurposes a frame
-   invalidates it, and that `pmm_free_pages` cannot hand out a frame whose TLB
-   entries survive in another address space.
-4. The `rdmsr` is reading the wrong MSR because ECX is not what you think at
-   that point.
+Two things already fixed here and worth not re-breaking:
+- `tty_read()` must enable interrupts across its `hlt` with **`sti`**, not with
+  `irq_restore()` given flags whose IF is clear. `irq_restore()` only ever
+  enables; it does nothing when IF was clear. Getting that wrong stops the CPU
+  with nothing able to wake it, and the symptom is that *no* interrupt fires.
+- `noerr_stub` / `irq_stub` push the error code **first** and the vector
+  **second**, so the vector lands at the lower address and therefore at
+  FRAME_VECTOR. The reverse order dispatches every IRQ as vector 0.
 
-Two agents are on (1) and (4) in parallel. **Take the CR3 from the same run you
-are inspecting** — using a previous run's panic dump is a mistake already made
-once here and it cost an hour.
-
-### 7.1a Why the previous blocker went away, and what it really was
+### 7.1a What the earlier contradiction actually was, for the record
 
 The `.bss` tail fault was **not** a missing demand fill. It was
 `vmm_handle_page_fault()` gating demand paging on bit 0 of the error code:
@@ -682,21 +636,24 @@ These are settled. Re-deriving them is how today was lost.
 Branch `main`, clean tree, ahead of origin. Recent commits:
 
 ```
+d9830de tty: a blocking read was reporting EOF, and I had broken every IRQ's label
+00ef05b interrupt: RAX was the one caller-saved register the stub did not save
+80635f8 syscall: the return value was being destroyed, and kmain never called tty_init
+f96a6a5 log: real timestamps, guaranteed newlines, and a loader/kernel separator
 96a8b3e panic, vmm, entry: let a VMA decide faults, stop panic faulting, fix the frame
-8192929 process: unwrap the initrd container in execve too; load FS base before ring 3
-a5de84f docs: STATE.md -- the ring-3 fault has a contradiction in it, say so
-606d4b2 check: fix the four stale self-test expectations; make check is green
-a56d287 docs: STATE.md -- correct the IDT gate claim, record four more blockers closed
 57432e5 interrupt_entry: build the ring-3 frame in the order IRETQ pops it
 afb4bbf vmm: propagate the user bit to every level of a translation
 f3fef61 process: log every sys_execve failure, and take the thread pointer from the new mm
 d4b4e61 idt: revert the gate type to 0x8E -- 0x8F is a trap gate, not a 64-bit one
 ```
 
-**Where userspace gets to:** `init` enters ring 3, executes libc startup
-including the `.bss` gap, and takes its first syscall. The kernel dies in
-`syscall_entry` dereferencing GS.base. **Hello world is not reached yet.** See
-§7.1.
+**Where userspace gets to:** `init` runs to its prompt and blocks there. **The
+REPL cannot be driven yet** because keystrokes do not reach the tty -- the 8042
+initialisation does not complete. See §7.1. That is the whole of what is left
+on this path; everything behind it (syscalls, demand paging, the segment
+reload, TLS, the C library's allocator) works.
+
+**`make check` is green: 21 checks, 0 failing** (was 19 with 4 failing).
 
 **`make check` is green: 21 checks, 0 failing** (was 19 with 4 failing).
 
