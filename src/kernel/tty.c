@@ -20,6 +20,8 @@
 #include <spinlock.h>
 #include <tty.h>
 #include <types.h>
+#include <cpu_features.h>
+#include <drivers/serial.h>
 
 KLOG_SUBSYSTEM("tty");
 
@@ -242,15 +244,49 @@ static void tty_in_push(char c)
  * halted core. The conditional below is the only part that changes: the ring
  * operations and the return value are already what a blocked reader needs.
  */
+/*
+ * Move anything the serial port has received into the input ring.
+ *
+ * COM1 is the console's primary channel -- run.sh's own header is a page about
+ * why -- and it can receive the entire time. Nothing read it. `serial_getc()`
+ * exists, works, and has no callers: the only consumer of COM1 was the transmit
+ * side, so the console could print to the terminal and could not be typed at.
+ * That is the gap this closes.
+ *
+ * This is a missing feature rather than a workaround for the PS/2 problem
+ * alongside it. The two input paths are independent -- a keyboard and a serial
+ * line are both legitimate sources for the same ring -- and a console with two
+ * working channels is better than one with two broken ones.
+ *
+ * Polled, not interrupted. COM1's receive interrupt is IRQ4, which nothing here
+ * routes or unmasks, and giving the 8250 an interrupt is a larger change than
+ * the tty needs in order to become usable. The read loop already halts between
+ * checks and the PIT wakes it ten times a second, so this costs one port read
+ * per wakeup and nothing at all when no byte is waiting.
+ */
+static void tty_poll_serial(void)
+{
+	char c;
+
+	while (serial_getc(&c))
+		tty_in_push((uint8_t)c);
+}
+
 size_t tty_read(char *buf, size_t count, bool block)
 {
 	if (!buf || count == 0)
 		return 0;
 
 	for (;;) {
-		u64 flags = spinlock_irqsave(&in_lock);
-		size_t n = ring_pop(&in_ring, (u8 *)buf, count);
+		u64 flags;
+		size_t n;
 
+		/* Serial first, so a byte that arrived while the ring was empty is
+		 * seen before deciding the ring is empty at all. */
+		tty_poll_serial();
+
+		flags = spinlock_irqsave(&in_lock);
+		n = ring_pop(&in_ring, (u8 *)buf, count);
 		spinlock_unlock_irqrestore(&in_lock, flags);
 
 		if (n != 0)
@@ -348,8 +384,6 @@ u64 tty_read_dropped(void)
 #define PS2_CFG_TRANSLATE 0x40   /* translate set 2 into set 1 scancodes */
 
 /*
- * A bounded wait on a status bit.
- *
  * Every 8042 handshake here is a poll, and a poll with no bound is a hang: a
  * controller that is absent, wedged, or a machine with no PS/2 at all answers
  * nothing and never will. Every wait below is therefore a wait that can fail,
@@ -358,16 +392,47 @@ u64 tty_read_dropped(void)
  */
 #define PS2_SPIN_LIMIT (1u << 20)
 
+/*
+ * How long a 8042 handshake is waited for, in microseconds.
+ *
+ * This used to be a spin count -- 1 << 20 iterations, each with a port write in
+ * `io_wait()` -- which is not a bound on anything. Under emulation a port write
+ * is not free, and one timed-out wait was measured at **7.2 seconds**, with the
+ * kernel stalled between `syscall entry installed` and the first `tty:` line.
+ * Everything after it looked like a hang, and a boot that appears to freeze in
+ * tty_init is indistinguishable from one that froze for a reason worth looking
+ * at.
+ *
+ * A deadline in real time is what the caller actually means by "bounded", and it
+ * behaves the same on every machine and under every accelerator. A millisecond is
+ * far longer than any real 8042 takes to answer -- the parts are specified in
+ * microseconds -- and far shorter than anyone can notice if it expires.
+ */
+#define PS2_WAIT_US 1000
+
+/* Microseconds to TSC ticks, from the frequency cpu_features_init() measured.
+ *
+ * Falls back to a plausible constant when the frequency is unknown rather than
+ * returning 0: a zero-length deadline would turn every wait into an immediate
+ * failure, which looks like a missing controller rather than a missing
+ * measurement. */
+static u64 ps2_us_to_tsc(u64 us)
+{
+	if (!cpu_features.tsc_khz)
+		return us * 3000;	/* ~3 GHz, the common case */
+	return us * cpu_features.tsc_khz / 1000;
+}
+
 static bool ps2_wait(uint8_t mask, bool set)
 {
-	unsigned int spin = PS2_SPIN_LIMIT;
+	u64 deadline = rdtsc() + (u64)ps2_us_to_tsc(PS2_WAIT_US);
 
 	for (;;) {
 		uint8_t status = inb(PS2_STATUS);
 
 		if (!!(status & mask) == set)
 			return true;
-		if (--spin == 0)
+		if (rdtsc() >= deadline)
 			return false;
 		io_wait();
 	}
