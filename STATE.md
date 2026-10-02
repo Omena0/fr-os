@@ -283,7 +283,105 @@ Finding **0.27** is the current blocker (recorded so it is not lost).
 
 ---
 
-## 8. WHAT NOBODY SHOULD RE-DERIVE
+## 8. MISTAKES MADE HERE — do not repeat them
+
+Every one of these happened to me on this tree. They are listed as **what I did**
+and **what to do instead**, because recognising them is the point.
+
+### Deriving what code "should" produce, then "fixing" correct code
+The descriptor layout. I was certain byte 7 was `base[31:28]` — four bits —
+because I had already "fixed" it that way once, then reasoned my way back.
+Both times I was wrong; the original eight-bit form was right, and the compiled
+immediates in `kernel.elf` were correct while I edited them. **Twice, in opposite
+directions, on the same question.**
+→ **Disassemble. Then let the compiler check you: `_Static_assert`.** The asserts
+I added afterwards caught each error within seconds and never missed one.
+
+### Reading an empty result as a result
+`grep -c pattern empty-file` prints **nothing**. I read that as "0 exceptions" and
+reported it. It was a 0-byte file; `/tmp` had hit its quota and every serial log
+under it was empty. I then retracted it — after spending a long time acting on
+the bad number.
+→ **A missing value is not a value.** If a command that should print something
+prints nothing, find out why before believing anything downstream.
+
+### Believing a command ran when it did not
+- `-serial chardev=s0` instead of `chardev:s0` — QEMU rejects it, writes a
+  0-byte log, and I read that as "the guest printed nothing".
+- Wrapping the `qemu-system_x86_64` invocation in `flock` swallowed the run
+  entirely; I concluded the boot was silent when no boot had happened.
+→ **Run the command bare, look at what it prints, and read the error output.**
+One line of QEMU stderr explained in a second what I spent an hour inferring.
+
+### Acting on a stale build
+Repeatedly "verifying" fixes against binaries `make` had not rebuilt. At one
+point I declared a fix verified while the object still contained the old
+constant.
+→ **`make clean && make -j8`, always.** The `.d` files were correct and make
+still got it wrong, because it cannot see a dependency when a header mtime is
+*rewound*. That is fixed now, but the habit is not: clean-build before claiming.
+
+### Timing as proof of position
+My boot markers used `klog`, which buffers. They never appeared, so I concluded
+the crash was earlier than it was — and sent an agent hunting the wrong function.
+Direct `serial_puts` does not buffer and showed exactly where execution stopped.
+→ **Know your logging.** A buffered log is not a timeline. If you need to know
+*where* something died, write straight to the device.
+
+### Overstating what was done
+The audit agent read four of my "done" claims and found all four **partly** true:
+the `vmm_translate` callers still tested the sentinel, `panic.S`'s comment still
+said the offset the assert had rejected, the Makefile still asserted the
+arrangement I had removed, and one path was never instrumented at all.
+→ **State verified and unverified separately.** "I added an API" is not "callers
+use it". If an agent audits your claims, it is doing you a favour.
+
+### Trusting written claims over the code
+Six findings in `MEGA_AUDIT.md` were wrong about the mechanism. So were two agents.
+So was I, about the same descriptor, three times.
+→ **The source and the artefact are evidence. A comment, a finding, a commit
+message and an agent's summary are claims.** "Found in the disassembly" and
+"found in the source" are not the same statement.
+
+### Announcing conclusions before measuring
+I repeatedly told the board something was fixed before re-running the
+measurement. Twice the "verification" was an empty log.
+→ **Measure, then say it.** If you cannot measure, say *inferred*.
+
+### Broad edits near code I did not own
+A range edit deleted the entire CR0.PE set **and** `ljmp $0x08,$protected_mode`
+from `stage2_entry.S` — the mode switch. It took a while to spot because the
+build stayed green.
+→ **`git diff` after every edit, and grep for the neighbours.** A green build
+proves the assembler accepted the file, not that the file still does what it did.
+Two agents were force-claimed out from under me; I then deleted their mode switch
+out from under them. Check `ownership.json` before every edit.
+
+### Editing with shell string replacement instead of the file tools
+Fragile `python -c` / `sed` replacements silently did nothing, or clobbered
+their neighbours, and I spent cycles working out why.
+→ **Use Read/Edit.** They show the surrounding text and fail loudly on a
+mismatch. Shell rewriting is fine for *bulk mechanical* changes across many
+files; it is wrong for surgical ones.
+
+### Papering over instead of fixing
+When KVM `#GP`'d on `WRMSR 0xC0000101` I changed `run.sh` to default away from
+KVM. I was told to fix the actual bug — and the real fix (`CR4.FSGSBASE` +
+`WRGSBASE`) was better *and* faster, because the fault had been misdiagnosed the
+whole time.
+→ **A default that avoids the failure hides the failure.** If changing a script
+makes a symptom go away, that is evidence you have not found the cause.
+
+### Deleting a whole file to revert one hunk
+`git checkout -- AGENTS.md` reverted the file but **deleted it**, because the
+change was uncommitted. I had to be told twice.
+→ **`git diff -- <file>` first. If the only change is one hunk, revert the hunk.**
+
+---
+
+## 9. WHAT NOBODY SHOULD RE-DERIVE
+
+These are settled. Re-deriving them is how today was lost.
 
 - The GDT/TSS descriptor layout is **correct and `_Static_assert`-pinned**.
 - The far-return frame in `gdt_flush` is **verified correct by gdb
@@ -296,7 +394,7 @@ Finding **0.27** is the current blocker (recorded so it is not lost).
 
 ---
 
-## 9. GIT STATE at hand-off
+## 10. GIT STATE at hand-off
 
 Branch `main`, clean tree. Recent commits:
 ```
