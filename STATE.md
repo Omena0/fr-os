@@ -104,23 +104,37 @@ Corroborated three ways, which is the standard to hold here:
 - TCG measurement;
 - KVM measurement.
 
-**2. The IDT gates were all 32-bit.**
+**2. A false claim about the IDT gates, which was a regression, not a fix.**
 
-`IDT_TYPE_INTERRUPT_GATE` was `0x8E`. The low three bits of the type field are
-the gate's *size*: `0b1110` is the **32-bit** interrupt gate, `0b1111` is the
-64-bit one. With a 32-bit gate the CPU takes `offset[31:0]` as the whole handler
-address, so a handler linked at `0xffffffff800108c7` is entered at
-`0x000108c7`.
+This was recorded here for several commits as a *fix* and was wrong. It said the
+low three bits of the gate type field are the gate's **size**, that `0x8E` is the
+**32-bit** interrupt gate, and that every handler was therefore entered at
+`offset[31:0]` — a handler linked at `0xffffffff800108c7` entered at
+`0x000108c7` — faulting into a double fault and a reset.
 
-This is the one that explains the long-standing symptom. **Nothing diagnoses
-it.** The table is present and correctly filled, `idt_init()` reports plausible
-numbers, the IDTR is accepted, and the CPU silently never reaches the handler:
-the exception becomes a page fault, that becomes a double fault, and the machine
-resets. That is why the tree showed *dozens of reboot cycles with no panic text
-from any of them*. The `struct idt_entry` was already the correct 16 bytes with
-a full 64-bit offset, so only the type byte was wrong — and the comment above it
-explained 0x8E/0x8F in terms of IF masking, which is true of both and says
-nothing about size.
+None of that is how the encoding works. In long mode the type field has exactly
+two valid values: `0x0E`, the 64-bit **interrupt** gate, and `0x0F`, the 64-bit
+**trap** gate. Gate width is the width of the *IDT entry*, not a field in it; the
+32-bit gate types belong to a 32-bit IDT's 8-byte entries. `struct idt_entry` here
+is already the 16-byte form, so these were always 64-bit gates and handler offsets
+were never truncated.
+
+Acting on the false premise changed the constant from `0x8E` to `0x8F`, which
+turned all 256 interrupt gates into **trap** gates — gates that do **not** clear
+IF. Nothing in the entry stub issues a `cli`, so every handler would run with
+interrupts enabled against a PIC line not yet acknowledged, with a 100 Hz PIT
+underneath. Reverted in `d4b4e61`.
+
+Nothing was ever broken here. The exception-delivery symptom I attributed to it
+was the far return above and the GS base in §3, and no handler ever ran to
+demonstrate that the gate change was needed, or harmless, or harmful. It was
+untested when it was made and is now untested again.
+
+The lesson is §8's, and it is the expensive one: **I wrote a confident claim into
+a commit message, a handoff document and an audit file, and three of them agreed
+because they were the same claim.** A peer agent checked the constant against the
+encoding and against Linux's gate definitions instead of against my text, and that
+is the only reason it was caught.
 
 **3. A missing `$`, inside the same three lines.**
 
@@ -152,7 +166,25 @@ Bootloader / CPU bring-up (this session):
 - **The `gdt_flush` far return** — three-word frame for a two-word `LRETQ`,
   plus a `pushq` of the target with no `$` on it. See §2 for the full
   measurement and the three-way corroboration.
-- **The IDT gates were 32-bit.** `0x8E` -> `0x8F`. See §2.
+- **`mm_create` dropped PML4[384].** The kernel PGD has exactly three populated
+  PML4 entries — 256 (direct map), **384 (vmalloc)**, 511 (kernel window) — and
+  only 256 and 511 were shared. Every task struct, kernel stack and `kmalloc()`
+  over 4096 lives at `VMALLOC_AREA` = PML4[384], so a process address space had
+  no kernel heap in it at all: fine until CR3 is switched, then the first thing
+  the scheduler does faults. The shared set is now one list, `mm_shared_pml4`,
+  used by both the copy and the teardown.
+- **`build_missing_tables` left U/S clear on every level.** A clear U/S in any
+  upper-level entry overrides the leaf PTE's and makes the whole translation
+  supervisor-only, so user pages were unreachable from ring 3 while looking
+  correctly mapped. Symptom: the first instruction fetch out of ring 3 faults at
+  the entry address with error code `0x0015`. Existing levels are now promoted
+  as well as created.
+- **`ret_to_user` built the ring-3 frame in the wrong order** — `SS, CS, RFLAGS,
+  RIP, RSP` where IRETQ pops `RIP, CS, RFLAGS, RSP, SS`. A trailing
+  `add $8,%rsp` / `popq %rbp` pair consumed one word and hid it. The user's RIP
+  and RSP never reached the CPU and the first ring-3 entry died on the iretq.
+- **The IDT gate change was a regression, not a fix.** `0x8E` was correct; `0x8F`
+  is a trap gate and does not clear IF. Reverted in `d4b4e61`. See §2.
 - **`gdt_flush` destroys `GS.base`.** Loading a *selector* into GS refreshes
   the cached descriptor, which is the only way to do it, and in doing so
   replaces the hidden base with the descriptor's — zero, for a flat segment.
@@ -312,42 +344,49 @@ worth keeping from it: re-derive the line before acting, and check the claim's
 
 ## 7. KNOWN OPEN, IN PRIORITY ORDER
 
-### 7.1 The new blocker: kernel stack page is read-only
+### 7.1 The new blocker: a not-present user page that demand paging does not fill
 
-**Where:** `sched.c:931`, `fpu_save(prev->fpu_state)` in `sched_switch_frame()`.
-**Status:** the first `schedule()` from `kmain`, switching init -> idle.
+**Where:** ring 3. init executes user code, makes its first syscall, then faults.
 
-Measured, exactly:
 ```
-v=0e e=0002 i=0 cpl=0 IP=0008:ffffffff8000b2a6 SP=0010:ffffc00000011f90
-CR2=ffffc00000011f88   CR3=00000000bdc10000
-RAX=00000000bdc10000 RDI=ffffc00000012000 RSP=ffffc00000011f90
+#EXC #PF  vector=14 cs=0x002b rpl=3 rip=0x0000000000401f28 err=0x6
+        rsp=0x00007fffffffef10 -> unrecoverable page fault
 ```
 
-Read it like this, because two things are easy to get wrong:
-- `0xffffffff8000b2a6` is the **`call fpu_save`**, not the `fxsave`. `fpu_save`
-  is one instruction, `fxsave (%rdi)` at `0xffffffff80010805`.
-- `CR2 = RSP - 8`. **The faulting write is the return-address push**, i.e. the
-  kernel stack page itself, not the FPU save area. `RDI = 0xffffc00000012000`
-  is `prev->fpu_state` and lies in the *next* page up, which was written
-  successfully at task creation (`task.c:123`), so the allocator is producing
-  writable pages. Something between the two makes this one read-only.
-- `e = 0x0002`: bit 0 clear = **protection violation**, bit 1 set = write. So
-  the page **is present and is read-only** — not unmapped. Nothing in the tree
-  maps anything read-only on purpose; find what set that bit.
+`err=0x0006` is write + **not-present** + user. That is a real missing page, not
+a permission problem — unlike the previous ring-3 fault, which was `err=0x0015`
+and turned out to be a U/S problem.
 
-Geometry: kernel stack top `0xffffc00000012000` (`kernel_stack +
-TASK_KERNEL_STACK_SIZE`), RSP one page down, and `fpu_state` immediately above
-the stack. Both come from `kmalloc`/`kstack_alloc` in `task.c`.
+The ELF load announced `entry 402020 phdr 400040 count 9 [400000,40e000)`, so
+`0x401f28` is *inside* the image, one page below the entry point. Page `0x402000`
+is mapped; page `0x401000` is not. So either a `PT_LOAD` was not mapped, or
+demand paging was supposed to bring it in on the fault and did not.
 
-**Not yet checked:** the PTE itself. The page-table walk needs the *kernel* PGD's
-virtual address — the fault record's CR3 is `0xbdc10000`, and the direct map
-puts that at `0xffffffffbdc10000`; a first attempt indexed PML4 without masking
-to 9 bits and produced garbage. Mask every index with `& 0x1ff`.
+Read the error code before theorising: `0x0006` versus `0x0015` is the whole
+difference between "the page is missing" and "the page is there and supervisor-only",
+and they look identical until you decode them.
 
-Cheapest next step: print the PTE for `0xffffc00000011000` and for
-`0xffffc00000012000` side by side. They came from the same allocator and differ
-only in permission, so the diff is the whole answer.
+**Next:** walk the mm's page tables for `0x401000` and compare with `0x402000`,
+and check whether any VMA covers `0x401000`. If a VMA covers it, the fault path
+is failing to fill; if none does, the ELF loader dropped a segment.
+
+**Worth fixing at the same time:** `panic()` does not stop. Every run above ends
+in an unbounded loop of `unrecoverable page fault` / `kernel panic` alternating
+forever, which buries the first fault under thousands of identical lines and
+makes the log much harder to read than it needs to be. It should halt.
+
+### 7.1b Closed this session, in the order it was found
+
+1. `gdt_flush`'s far return — §2.
+2. `gdt_flush` destroying `GS.base` — §3.
+3. `mm_create` dropping PML4[384], so no process had vmalloc mapped — §3.
+4. `build_missing_tables` leaving U/S clear at every level, so no user page was
+   reachable from ring 3 — §3.
+5. `ret_to_user` building the IRETQ frame in the wrong order — §3.
+
+Each was verified by reading the artefact, not by reasoning forward from the
+source: the PML4 entries were dumped over QMP, the U/S bits read off the live
+PTEs, and the frame order read off the linked disassembly.
 
 ### 7.2 The rest, unchanged
 
@@ -518,12 +557,16 @@ These are settled. Re-deriving them is how today was lost.
 - `gdt_flush` does **not** re-enter itself. Measured, once per boot.
 - **`LRETQ` pops RIP and CS — 16 bytes — and does not restore RFLAGS.** Only
   `IRET` pops flags. Confirmed by the Intel `RET` pseudocode, by TCG, and by KVM.
-- The IDT gate size bit is in the type field's low three bits; `0x8E` is the
-  32-bit gate and `0x8F` the 64-bit one. Both mask IF. The old comment
-  explaining 0x8E vs 0x8F in terms of trap-vs-interrupt was wrong about size.
+- **IDT gate types: in long mode `0x0E` is the 64-bit *interrupt* gate and
+  clears IF; `0x0F` is the 64-bit *trap* gate and does not. There is no gate-size
+  bit** — width is the IDT entry's, not the type field's. `0x8E` is correct here.
+  This replaces the wrong claim that used to sit in this list; do not re-add it.
 - `direct map 0-4 GiB, 1 GiB pages` and the E820 map with
   `e820[6] fd00000000-ffffffff reserved` as the highest usable entry are both
   correct.
+- A clear **U/S in any upper-level entry overrides the leaf PTE's** and makes the
+  whole translation supervisor-only. Every level needs it, and existing levels
+  need promoting as well as creating.
 - A **zero-byte serial log means a bad command, a full filesystem, or a wrong
   path — not a healthy guest.** Check `df`, check the colon, check the path.
 
