@@ -635,6 +635,21 @@ void tty_init(void)
 			irq_restore(flags);
 			return;
 		}
+
+		/*
+		 * The controller answers the self test twice: 0x55 for the result,
+		 * and then 0xAA, the power-on self-test byte. Only the first was
+		 * being read, so 0xAA stayed in the data register and was picked up
+		 * as the reply to the *next* command -- which is where
+		 *
+		 *   "tty: 8042 answered 0xaa where an ack was expected"
+		 *
+		 * came from. The reply the sequence was actually reading was never
+		 * the reply to anything it had sent, so every ack after this point
+		 * was compared against the wrong byte and every keyboard command
+		 * after it was misjudged as unacknowledged.
+		 */
+		(void)ps2_read_data();
 	} else {
 		klog(KLOG_WARN, "tty: 8042 did not answer; keyboard input "
 		     "disabled\n");
@@ -644,8 +659,19 @@ void tty_init(void)
 
 	/* A reset leaves the controller with scanning off and the config byte
 	 * cleared, so both have to be re-established after it. */
+	/*
+	 * 0xFF sent to the *keyboard* is not acknowledged with 0xFA. It makes the
+	 * keyboard run its basic atomic test, and the reply is 0xAA -- the BAT
+	 * completion code. 0xFA belongs to the interface commands that follow, and
+	 * asking for it here is how this step got reported as unacknowledged even
+	 * once the leftover self-test byte had been accounted for.
+	 */
 	if (ps2_write_port(PS2_DATA, KBD_CMD_RESET))
-		ps2_expect_ack();
+		(void)ps2_read_data();		/* BAT completion, 0xAA */
+
+	/* Drain anything the reset produced before the next command. */
+	ps2_flush();
+
 	if (ps2_write_port(PS2_CMD, PS2_CMD_ENABLE_KBD))
 		ps2_expect_ack();
 
