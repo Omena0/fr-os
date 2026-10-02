@@ -80,6 +80,11 @@ mkdir -p "$(dirname "$LOG")"
 # Override with RUN_TIMEOUT=0 for an unbounded interactive run, or
 # RUN_TIMEOUT=60 for a slower machine. SIGINT (^C) is handled the same way, so
 # interrupting the script still produces a complete log.
+#
+# Other switches: DEBUG=1 restores the script's own diagnostics, IMAGE= and
+# LOG= change what is booted and where the serial log lands, FORCE_TCG=1 pins
+# emulation, SMP=N is honoured for experimentation only, and HEADLESS=1 keeps
+# QEMU off the display.
 RUN_TIMEOUT="${RUN_TIMEOUT:-30}"
 
 # acpi=off: the kernel has no ACPI or power-management support yet, so the
@@ -160,7 +165,18 @@ QEMU_ARGS+=(
 # window is the VGA text buffer -- which needs the device to exist.
 QEMU_ARGS+=(-device VGA)
 
-if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+# HEADLESS=1 forces -display none even with a display available.
+#
+# Worth having as an explicit switch rather than only as the absence of DISPLAY:
+# a desktop session has DISPLAY set, so "unset it to go headless" means editing
+# the environment of whatever invoked the script, which is not something you can
+# do from a Makefile or a CI wrapper. And a window per run is a poor trade for a
+# serial log -- the framebuffer is the same bytes, arriving later and over the top
+# of everything else.
+if [ -n "${HEADLESS:-}" ]; then
+	QEMU_ARGS+=(-display none)
+	note "HEADLESS=1, no display"
+elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
 	QEMU_ARGS+=(-display gtk)
 else
 	QEMU_ARGS+=(-display none)
