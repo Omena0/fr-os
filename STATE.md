@@ -393,20 +393,74 @@ a polarity slip survives.** Check the stub's error-code push and skip logic
 carries the wrong word, every conclusion drawn from `err=` in this tree is
 suspect.
 
-**Next, in order:**
-1. Confirm the error code the CPU actually pushed — `err_stub` pushes `0` and the
-   no-error stub skips the slot; a mismatch between the two paths is exactly the
-   shape of this bug. `#EXC` prints `err=0x6`, which is *not* 0, so some path is
-   pushing something.
-2. Only then decide whether the fault path or the loader is at fault. If the
-   error code turns out to be `0x7`, the anonymous fill path is the bug and the
-   `pmm_alloc_page`/`vmm_map_page` pair in `mm.c` is where to look.
+### 7.1 The blocker: userspace reaches its first syscall and the kernel dies there
 
-**Also worth fixing, independent of all this:** `panic()` does not stop. Every run
-ends in an unbounded loop of `unrecoverable page fault` / `kernel panic`
-alternating forever, which buries the first fault under thousands of identical
-lines. Fix it before chasing anything else — it costs one edit and it makes the
-next twenty log lines readable.
+**The `0x40d158` fault is fixed. `init` now runs `__libc_start_c` out of the
+`.bss` gap and takes its first syscall.** The blocker moved:
+
+```
+#EXC #PF  vector=14 cs=0x0008 rpl=0 rip=0xffffffff80010d08 err=0x0
+        rsp=0xffffc0000001cf50 -> unrecoverable page fault
+cr2 0xffffffff8017a340   cr3 0x00000000bdc10000   cr4 0x0000000000010220
+```
+
+`src/kernel/syscall_entry.S:204`, in `syscall_entry`:
+
+```asm
+	rdmsr
+	movq	%rax, %rbp		/* GS.base */
+	shlq	$32, %rdx
+	orq	%rdx, %rbp
+	movl	(%rbp), %ebp		/* cpu_id  <-- faults */
+```
+
+`nm` says `0xffffffff8017a340` is exactly `percpu_data`, so **GS.base is
+correct**. The fault is a *supervisor read* (`err=0x0`: bits 0, 1 and 2 all
+clear) of a page the tables show **present, writable, supervisor, no NX, no
+reserved bits** (`PT[378] = 0x000000000027a063`). That combination cannot fault.
+So one of these is wrong, and these are the candidates, none of them yet ruled
+out:
+
+1. **The mapping is 1 MiB out.** The kernel window maps `0xffffffff80000000` to
+   physical `0x100000` — confirmed, since `0xffffffff80010a00` resolves to
+   physical `0x110000`. So `percpu_data`'s page should be physical **`0x17a000`**.
+   The PTE says **`0x27a000`**: exactly `0x100000` too high. This is a real
+   defect whatever else is true, and at least one page of kernel `.bss` is
+   backed by the wrong frame. **Check the whole window, not just this page.**
+2. CR3 is not `0xbdc10000` at the fault — and `panic_regs` may itself be reading
+   CR3 wrongly.
+3. A stale TLB entry. Check that every path which unmaps or repurposes a frame
+   invalidates it, and that `pmm_free_pages` cannot hand out a frame whose TLB
+   entries survive in another address space.
+4. The `rdmsr` is reading the wrong MSR because ECX is not what you think at
+   that point.
+
+Two agents are on (1) and (4) in parallel. **Take the CR3 from the same run you
+are inspecting** — using a previous run's panic dump is a mistake already made
+once here and it cost an hour.
+
+### 7.1a Why the previous blocker went away, and what it really was
+
+The `.bss` tail fault was **not** a missing demand fill. It was
+`vmm_handle_page_fault()` gating demand paging on bit 0 of the error code:
+
+```c
+	if (!(error_code & PF_PRESENT))
+		return -EACCES;
+```
+
+`PF_PRESENT` is `1 << 0`, and on x86 bit 0 set means **not present** — so the
+constant's name is the opposite of its meaning, which is Linux's naming too and
+is how a polarity slip survives. The CPU reported `0x6`, bit 0 clear, and the
+page was provably absent, so a page that is missing got refused for being
+"present".
+
+The fix is not to swap the bit — it is that **the VMA is the authority, not that
+bit**. Linux's `handle_mm_fault()` does not consult the P bit either: it looks
+the address up and lets `vma->vm_flags` decide. "The page is present" and "this
+process may write here" are different questions, and only the second is a
+permission decision. The kernel-side refusal is kept for faults at or above
+`MM_USER_LIMIT` and for reserved-bit violations.
 
 ### 7.1b Closed this session, in the order it was found
 
@@ -416,6 +470,25 @@ next twenty log lines readable.
 4. `build_missing_tables` leaving U/S clear at every level, so no user page was
    reachable from ring 3 — §3.
 5. `ret_to_user` building the IRETQ frame in the wrong order — §3.
+6. **`vmm_handle_page_fault()` gating demand paging on error-code bit 0.** The
+   VMA is the authority; the P bit is not. See §7.1a.
+7. **`panic_emit()` faulting on its own first character.** Its VGA guard was
+   `if ((uintptr_t)0xB8000 < 0x100000)` — two constants, always true — and
+   `0xB8000` is not mapped as a virtual address, only its direct-map alias is.
+   So every panic faulted, never reached the `hlt` at the end of
+   `panic_common()`, and the machine never stopped. The thousands of identical
+   `unrecoverable page fault` / `kernel panic` lines in every log were **a panic
+   that could not finish printing**, not a loop in the fault path. The log for
+   one boot went from ~10,000 lines to 93.
+8. **Two frame-layout bugs**, found by dumping a live frame instead of reading
+   the code. `save_regs` pushed `rdi` first, and a push decrements RSP first, so
+   `rdi` landed at offset 56 and `r11` at offset 0 — backwards from both the
+   `FRAME_*` block and `struct interrupt_frame`. Every frame the kernel has ever
+   reported had its eight argument registers reversed; save/restore were a
+   matched pair, so nothing crashed. And `noerr_stub`/`irq_stub` pushed the zero
+   before the vector, putting zero at `FRAME_VECTOR` and the vector at
+   `FRAME_ERROR_CODE`, so every no-error exception and every IRQ was dispatched
+   as vector 0.
 
 Each was verified by reading the artefact, not by reasoning forward from the
 source: the PML4 entries were dumped over QMP, the U/S bits read off the live
@@ -609,14 +682,21 @@ These are settled. Re-deriving them is how today was lost.
 Branch `main`, clean tree, ahead of origin. Recent commits:
 
 ```
+96a8b3e panic, vmm, entry: let a VMA decide faults, stop panic faulting, fix the frame
+8192929 process: unwrap the initrd container in execve too; load FS base before ring 3
+a5de84f docs: STATE.md -- the ring-3 fault has a contradiction in it, say so
 606d4b2 check: fix the four stale self-test expectations; make check is green
 a56d287 docs: STATE.md -- correct the IDT gate claim, record four more blockers closed
 57432e5 interrupt_entry: build the ring-3 frame in the order IRETQ pops it
 afb4bbf vmm: propagate the user bit to every level of a translation
 f3fef61 process: log every sys_execve failure, and take the thread pointer from the new mm
 d4b4e61 idt: revert the gate type to 0x8E -- 0x8F is a trap gate, not a 64-bit one
-2f7c3be build: stop tracking tools/__pycache__
 ```
+
+**Where userspace gets to:** `init` enters ring 3, executes libc startup
+including the `.bss` gap, and takes its first syscall. The kernel dies in
+`syscall_entry` dereferencing GS.base. **Hello world is not reached yet.** See
+§7.1.
 
 **`make check` is green: 21 checks, 0 failing** (was 19 with 4 failing).
 
@@ -645,6 +725,6 @@ agent's summary are **claims**, and the built artefact is evidence. Both agents
 whose claims I checked had done exactly that, and the one that caught my error
 had checked a *constant* against the spec rather than against my text.
 
-Claims held by `main` in `ownership.json`: `src/kernel/{gdt.c,idt.c,interrupt_entry.S,
-main.c,percpu.c,sched.c,vmm.c,kmalloc.c,task.c,context.S,mm.c,elf.c}` and
-`src/kernel/include/percpu.h`. Release them when done.
+Claims currently held: `main` has most of `src/kernel/`; `syscallswarm` has
+`syscall_entry.S` and `percpu.c`; `mapfixswarm` has `vmm.c` and `src/boot/`.
+Check `ownership.json` before editing anything — several agents are live.
