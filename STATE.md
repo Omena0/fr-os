@@ -384,64 +384,80 @@ is fixed, the controller is not in a state where each key raises its own
 interrupt. Start at `ps2_write_port()` / `ps2_expect_ack()` in `tty.c` and
 establish which command in the sequence loses the ack.
 
-**An intermittent failure, separate from the above and not yet explained.**
-Roughly one KVM run in four dies like this, and TCG has not been observed to do
-it at all in the runs taken since:
+**The 8042 sequence is fixed; input is not.** The warning that was in the log,
+`tty: 8042 answered 0xaa where an ack was expected`, was the controller's
+power-on self-test byte being read as if it were a reply to the next command.
+Two defects produced it: the self test answers `0x55` *and* `0xAA`, but some
+implementations (QEMU among them) answer with `0x55` alone, so consuming "the
+second byte" swallows a later command's real reply; and `0xFF` sent to the
+*keyboard* replies `0xAA` (the BAT code), not the `0xFA` an ack check wants. Both
+readings were tried and neither is reliable, so the self test is gone and the data
+register is drained instead -- it is diagnostic, not setup, and an absent
+controller leaves the port unreadable, which the bounded waits already report
+rather than hang on.
+
+What is measured now, rather than guessed. With the ack check naming the command,
+the sequence reports:
+
+```
+tty: 8042 command 0xae answered 0x00, expected 0xfa
+```
+
+`0xAE`, enable-keyboard-interface, written to the **command** port, gets no reply
+at all. The constants are right (`0x64`/`0x60`, `0xAE`, `0xF4`), the config byte
+is read and written through `0x20`/`0x60`, and `0xF4` -- enable scanning, written
+to the **data** port -- *is* acknowledged. **Command-port writes are the ones
+going unanswered while data-port writes work.** That is the next thing to
+establish, and it is a lead rather than a guess.
+
+Input is still broken. Keystrokes injected with QEMU's `sendkey` produce no
+scancode at all, so `keyboard_irq()` never runs past its output-buffer check.
+Verified with a single key held 600 ms and with a five-key burst; both give one
+`INT=0x21` and no scancode. The handler's drain loop is already correct -- reading
+the status port clears the controller's interrupt line, so a handler that takes
+one byte and returns drops the rest of the burst behind it.
+
+**An intermittent failure, separate from the above and now partly explained.**
+
+Roughly one KVM run in four used to die like this:
 
 ```
 #EXC #PF  vector=14 cs=0x0008 rpl=0 rip=0xffffffff8000f10a err=0x2 -> kernel panic
 cr2 0x0000000000000000
 ```
 
-`0xffffffff8000f10a` is `ring_push()` at `tty.c:87`, `r->buf[r->head] = src[i]`,
-with `cr2 = 0` -- and it happens on init's *first* write, before the banner.
-`out_ring.buf` is NULL there. But `tty_init()` demonstrably ran first: the log
-carries `tty: rings 4096 bytes each, 8042 up` at 577 ms, and the assignment
-`out_ring.buf = out_storage` is a few lines above that klog call.
+`rip` is `ring_push()` -- `r->buf[r->head] = src[i]` -- with `cr2 = 0`, on init's
+*first* write, because `out_ring.buf` is NULL. And `tty_init()` had demonstrably
+run: the log carried `tty: rings 4096 bytes each` with the assignment a few lines
+above that klog call.
 
-So a `.bss` object that was written and then read back as its initial value.
-`out_ring`'s initialiser is all zeros, so it lives in `.bss` and there is nothing
-about the store that could be reordered past a following call.
+What it actually was: **`tty_init()` not always completing.** Runs that failed
+stopped the log between `syscall entry installed` and the first `tty:` line, with
+no panic and no exception -- and `-no-reboot` makes a triple fault exit QEMU,
+which in a log is indistinguishable from a hang. Note the trap in that: the
+truncation was twice mistaken for a stale build before a real rebuild cleared it.
 
-Ruled out so far:
-- **Not a race on the ring itself.** `tty_write()` and `tty_drain()` both take
-  `out_lock` via `spinlock_irqsave()`, and the drain releases it before calling
-  `console_write_raw()`. `ring_push()` cannot write out of bounds: `n` is clamped
-  to `TTY_RING_CAP - r->count` and `head` wraps at the capacity, so the only way
-  to overflow is `r->count > TTY_RING_CAP`, which nothing in either path can
-  produce.
-- **Not a disagreement between the fill's address and the PTE's.**
-  `page_to_phys()` is `(page - page_array) << PAGE_SHIFT` and `phys_to_virt()` is
-  `PHYS_DIRECT_MAP + phys`, and the PTE stores the same `page_to_phys()` result,
-  so the demand fill's `memset` and the mapping agree.
+It is now pinned rather than explained. `tty_init()` reads both ring pointers back
+and logs FATAL if the storage did not attach -- the only point at which
+"attached" can be checked, since the rings are declared `.buf = NULL` -- and
+`ring_push()` refuses a detached ring instead of storing through a null pointer.
+Neither has fired since, and the intermittency has not reproduced. **That is a
+pin, not a fix, and the cause is still unknown.**
 
-Also ruled out since: **the store being lost.** A gdb hardware watchpoint on
-`out_ring.buf` never fired across six KVM runs -- but that experiment is void
-and must not be read as evidence. The watchpoint was installed while the CPU was
-still at reset with paging off, and QEMU does not attach a watchpoint to a page
-that does not exist yet. A control watchpoint on `klog_counts` fired correctly,
-which is how the void was found. If this is pursued, the watchpoint has to be
-installed *after* `kmain` (break `*0xffffffff80000280` first, then `watch`).
+Two theories that are dead, recorded so neither is re-derived:
 
-**The demand-fill theory is also dead.** `out_ring` is in `.bss`, so the tempting
-story was a stray 4 KiB `memset` from `vmm_handle_page_fault()` erasing it. It
-does not hold: `page_to_phys()` is `(page - page_array) << PAGE_SHIFT`,
-`phys_to_virt()` is `PHYS_DIRECT_MAP + phys`, and the PTE stores the same
-`page_to_phys()` result, so the memset and the mapping name the same frame. And
-the frame is inside `pmm: reserving kernel image 100000-2b9000`, so the allocator
-cannot hand it out at all.
-
-**The theory now in the tree is not a fix, it is a pin.** `tty_init()` reads the
-two ring pointers back and logs FATAL if the storage did not attach -- the only
-point at which "attached" can be checked, since the rings are declared
-`.buf = NULL` -- and `ring_push()` refuses a detached ring instead of storing
-through a null pointer. Neither check fired on 8 consecutive headless runs, so
-the invariant held on every one of them, and **the intermittency has not
-reproduced since**. That is a real result and it is not an explanation: the
-failure is still unexplained, and the checks exist so that if it returns it
-arrives as a located message rather than as a write to address 0.
-
-Two things already fixed here and worth not re-breaking:
+- **The demand fill zeroing the wrong frame.** It names the same frame as the PTE
+  (`page_to_phys()` is `(page - page_array) << PAGE_SHIFT`, `phys_to_virt()` is
+  `PHYS_DIRECT_MAP + phys`, and the PTE stores the same `page_to_phys()` result),
+  and that frame is inside `pmm: reserving kernel image 100000-2b9000`, so the
+  allocator cannot hand it out at all.
+- **The store being lost.** A gdb hardware watchpoint on `out_ring.buf` never fired
+  across six KVM runs -- but that experiment is void and must not be read as
+  evidence. The watchpoint was installed while the CPU was still at reset with
+  paging off, and QEMU does not attach a watchpoint to a page that does not exist
+  yet. A control watchpoint on `klog_counts` fired correctly, which is how the
+  void was found. If this is pursued, the watchpoint must be installed *after*
+  `kmain` (break `*0xffffffff80000280` first, then `watch`).Two things already fixed here and worth not re-breaking:
 - `tty_read()` must enable interrupts across its `hlt` with **`sti`**, not with
   `irq_restore()` given flags whose IF is clear. `irq_restore()` only ever
   enables; it does nothing when IF was clear. Getting that wrong stops the CPU
