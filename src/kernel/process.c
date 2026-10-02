@@ -1080,6 +1080,71 @@ static int build_user_stack(struct address_space *mm, char *const argv[],
 	return 0;
 }
 
+/*
+ * Reject a thread pointer this kernel is not willing to install.
+ *
+ * The value checked here is elf.c's, and elf.c is where the arithmetic lives:
+ * mm->tls_ptr is ALIGN_UP(p_vaddr + p_memsz, p_align), *not* the unaligned
+ * end of the block. That distinction is the one in §3 of STATE.md and it
+ * cannot be re-checked from this side, because neither `mm` nor `elf_info`
+ * carries p_align -- a p_align of 1 is legal for a block of chars, so the
+ * kernel genuinely cannot tell an aligned thread pointer from an unaligned one
+ * by looking at the number. What it *can* do is refuse the states that are
+ * wrong regardless of alignment, so they fail here where there is a log line
+ * rather than in ring 3 where there is none:
+ *
+ *   - a block with bytes in it and no thread pointer. libc's crt1 asks the
+ *     kernel for the pointer and refuses to start when the answer is 0, so
+ *     this is caught with a diagnosis instead of by a #PF on the first
+ *     `%fs:-16` access;
+ *   - a thread pointer with no block behind it, which is a loader that
+ *     computed one and forgot to store it;
+ *   - a thread pointer at or below the block's own size, so `tp - tls_size`
+ *     -- the first byte of the block, which is what the negative-displacement
+ *     addressing is measured against -- would underflow into the top of the
+ *     address space;
+ *   - a thread pointer outside the user half. MSR_FS_BASE is per-CPU and
+ *     shared with whatever runs next, so a base that #GPs every access through
+ *     it leaves the machine unable to run any process until something else
+ *     writes it. syscall.c's fs_base_acceptable() enforces the same rule on
+ *     the arch_prctl path; this is the exec path's copy of it.
+ *
+ * Not checked, and deliberately so: that the pointer is p_align-aligned. See
+ * above -- it is not derivable here, and inventing a fixed alignment
+ * requirement would be a false invariant rather than a check.
+ */
+static int exec_thread_pointer_ok(const struct address_space *mm)
+{
+	if (mm->tls_size == 0)
+		/* No PT_TLS. 0 is the honest answer and is what libc treats as
+		 * "this image has no __thread storage", not a missing value. */
+		return mm->tls_ptr == 0 ? 0 : -EINVAL;
+
+	if (mm->tls_ptr == 0)
+		return -EINVAL;
+	if (mm->tls_ptr < mm->tls_size)
+		return -EINVAL;
+	if (mm->tls_ptr >= USER_ADDRESS_MAX)
+		return -EINVAL;
+	return 0;
+}
+
+/*
+ * The thread pointer must survive the trip from `mm` to the per-task field
+ * unchanged. These are widths, not values, which is the only part of the
+ * contract a _Static_assert can express -- but it is the part that fails
+ * silently: a narrowed field would still compile, still assign, and would
+ * truncate a 64-bit thread pointer to 32 bits, and every access through it
+ * would land somewhere in the middle of nowhere rather than faulting at the
+ * assignment.
+ */
+STATIC_ASSERT(sizeof(virt_addr_t) == sizeof(u64),
+	      "the thread pointer is a 64-bit address; virt_addr_t must be too");
+STATIC_ASSERT(sizeof(((struct address_space *)0)->tls_ptr) ==
+	      sizeof(((struct task *)0)->fs_base),
+	      "mm->tls_ptr and task::fs_base must be the same width, or the "
+	      "thread pointer is truncated on its way to MSR_FS_BASE");
+
 int exec_load_and_run(struct task *t, const void *image, size_t size,
 		      char *const argv[], char *const envp[])
 {
@@ -1134,6 +1199,19 @@ int exec_load_and_run(struct task *t, const void *image, size_t size,
 		return r;
 	}
 
+	/* Checked before the old address space goes, so that a thread pointer
+	 * this kernel will not install fails with the process still exactly as
+	 * it was -- the same property every other failure above preserves. */
+	r = exec_thread_pointer_ok(new_mm);
+	if (r < 0) {
+		PROC_LOG(KLOG_ERROR,
+			 "exec: refusing thread pointer %#lx for a %lu-byte "
+			 "TLS block: %d", (unsigned long)new_mm->tls_ptr,
+			 (unsigned long)new_mm->tls_size, r);
+		mm_put(new_mm);
+		return r;
+	}
+
 	/* The old address space is only dropped once the new one is complete,
 	 * so a failure above leaves the process exactly as it was. */
 	if (t->mm) {
@@ -1146,6 +1224,35 @@ int exec_load_and_run(struct task *t, const void *image, size_t size,
 	t->user_rip = info.entry;
 	t->user_rsp = sp;
 	t->user_rflags = USER_DEFAULT_RFLAGS;
+
+	/*
+	 * The task's thread pointer comes from the image that was just loaded,
+	 * not from whatever the process had before: exec replaces the address
+	 * space, and the new image's PT_TLS block is somewhere else. Leaving
+	 * `fs_base` alone here would carry the *old* process's thread pointer
+	 * into the new address space, which for an exec of a fresh image is a
+	 * pointer into pages that no longer exist -- and for the very first
+	 * exec, when there was no old process, it would leave it at the zero
+	 * task_alloc() gave it.
+	 *
+	 * The value is elf.c's ALIGN_UP(p_vaddr + p_memsz, p_align), already
+	 * checked by exec_thread_pointer_ok() above. It is *not* loaded into
+	 * MSR_FS_BASE here: exec runs on the old CR3 with the new mm merely
+	 * built, and the register is written by the ring-3 return path
+	 * (`call task_load_fs_current` in ret_to_user) or by the process's own
+	 * arch_prctl once crt1 runs. Writing it here would put a user-space
+	 * address in a per-CPU register belonging to a process that is not
+	 * about to run.
+	 */
+	t->fs_base = new_mm->tls_ptr;
+
+	PROC_LOG(KLOG_INFO,
+		 "exec: \"%s\" entry %#lx sp %#lx, thread pointer %#lx for a "
+		 "%lu-byte TLS block",
+		 t->comm, (unsigned long)t->user_rip,
+		 (unsigned long)t->user_rsp, (unsigned long)t->fs_base,
+		 (unsigned long)new_mm->tls_size);
+
 	t->thread_fn = process_user_start;
 	t->thread_arg = t;
 	return 0;
@@ -1302,7 +1409,35 @@ struct task *process_create_init(void)
 	return t;
 }
 
-long sys_execve(u64 path, u64 argv, u64 envp)
+/*
+ * execve(2), minus the "which task" question.
+ *
+ * The only reason this is not the syscall body itself is that taking the task
+ * as a parameter makes the failure paths inspectable without a live userspace
+ * process: each of them returns an errno and nothing else, so a path taken only
+ * by a failing execve produces no evidence at all until something is already
+ * broken. Every one below writes a line before it returns, which is what makes
+ * "init got -ENOEXEC" distinguishable from "init never called execve".
+ *
+ * Safety of the logging itself, since it runs on the failure path and a
+ * diagnostic that takes the machine down destroys the diagnosis:
+ *
+ *   - klog_emit() allocates nothing. It formats into two fixed stack buffers
+ *     (512 and 640 bytes) and truncates rather than overflowing, so it is safe
+ *     where an allocator failure is the reason for the error being reported.
+ *   - console_write() takes its own lock internally, and no lock is held at
+ *     any point below: the spinlock scopes in copy_string_from_user() and
+ *     exec_load_and_run() have all been released by the time any of these
+ *     lines runs.
+ *   - nothing here calls back into the process, exec or syscall layers, so
+ *     there is no path from a log line back to execve.
+ *   - the only string printed is `kpath`, and only after copy_string_from_user()
+ *     has returned non-negative, which is the only outcome that guarantees it
+ *     is NUL-terminated. copy_string_from_user() leaves the buffer untouched
+ *     when it fails with -EFAULT, so printing it there would read uninitialised
+ *     stack -- not a fault, but garbage in the one line that has to be right.
+ */
+static long execve_common(struct task *t, u64 path, u64 argv, u64 envp)
 {
 	/* Two staging buffers: argv strings and envp strings, so the two
 	 * copies of a long argument cannot run into each other. */
@@ -1311,16 +1446,23 @@ long sys_execve(u64 path, u64 argv, u64 envp)
 	char kpath[MAX_ARG_LEN];
 	char *kargv[MAX_EXEC_ARGS + 1];
 	char *kenvp[MAX_EXEC_ARGS + 1];
-	struct task *t = current_task();
 	size_t used = 0;
 	long n;
 
-	if (!t || !t->mm)
+	if (!t || !t->mm) {
+		PROC_LOG(KLOG_ERROR,
+			 "execve: called by a task with no address space");
 		return -ESRCH;
+	}
 
 	n = copy_string_from_user(kpath, path, sizeof(kpath));
-	if (n < 0)
+	if (n < 0) {
+		/* No path in the message: see the note above. */
+		PROC_LOG(KLOG_ERROR,
+			 "execve: pid %u path is not a readable user string: %ld",
+			 t->pid, n);
 		return (int)n;
+	}
 
 	/*
 	 * There is no filesystem, so there is exactly one executable: the
@@ -1329,8 +1471,13 @@ long sys_execve(u64 path, u64 argv, u64 envp)
 	 * spellings means a libc's exec of its own init works.
 	 */
 	if (strcmp(kpath, "/init") != 0 && strcmp(kpath, "/bin/init") != 0 &&
-	    strcmp(kpath, "/sbin/init") != 0)
+	    strcmp(kpath, "/sbin/init") != 0) {
+		PROC_LOG(KLOG_ERROR,
+			 "execve: pid %u asked for \"%s\", which is not an image "
+			 "this kernel has",
+			 t->pid, kpath);
 		return -ENOENT;
+	}
 
 	memset(kargv, 0, sizeof(kargv));
 	memset(kenvp, 0, sizeof(kenvp));
@@ -1341,13 +1488,35 @@ long sys_execve(u64 path, u64 argv, u64 envp)
 	n = count_user_strings(argv, &argv_buf[1][0], kargv + 1,
 			       MAX_EXEC_ARGS - 1,
 			       (MAX_EXEC_ARGS - 1) * MAX_ARG_LEN, &used);
-	if (n < 0)
+	if (n < 0) {
+		PROC_LOG(KLOG_ERROR,
+			 "execve: pid %u \"%s\" argv is unreadable or too long: "
+			 "%ld", t->pid, kpath, n);
 		return n;
+	}
 
 	n = count_user_strings(envp, &envp_buf[0][0], kenvp, MAX_EXEC_ARGS,
 			       MAX_EXEC_ARGS * MAX_ARG_LEN, &used);
-	if (n < 0)
+	if (n < 0) {
+		PROC_LOG(KLOG_ERROR,
+			 "execve: pid %u \"%s\" envp is unreadable or too long: "
+			 "%ld", t->pid, kpath, n);
 		return n;
+	}
 
-	return exec_load_and_run(t, init_image, init_image_size, kargv, kenvp);
+	n = exec_load_and_run(t, init_image, init_image_size, kargv, kenvp);
+	if (n < 0) {
+		/* exec_load_and_run() logs the stage that failed; this line adds
+		 * the two things it has no way to know -- who asked, and for
+		 * what -- so the pair reads as a cause rather than a symptom. */
+		PROC_LOG(KLOG_ERROR,
+			 "execve: pid %u \"%s\" failed to load: %ld",
+			 t->pid, kpath, n);
+	}
+	return n;
+}
+
+long sys_execve(u64 path, u64 argv, u64 envp)
+{
+	return execve_common(current_task(), path, argv, envp);
 }
