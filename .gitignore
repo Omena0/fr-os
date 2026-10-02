@@ -4,3 +4,5 @@
 # transient shared-tree coordination state; not source
 /ownership.json
 /ownership.json.lock
+__pycache__/
+*.pyc
