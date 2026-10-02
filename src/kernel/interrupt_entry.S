@@ -81,13 +81,17 @@ interrupt_\vec:
 .endm
 
 /*
- * The argument registers, in the order struct interrupt_frame declares them:
- * rdi, rsi, rdx, rcx, r8, r9, r10, r11.
+ * Only the caller-saved registers are saved. R12-R15, RBX and RBP are
+ * callee-saved, so the interrupted code already holds them somewhere safe;
+ * saving them here would cost six stores on every interrupt to preserve values
+ * no handler can have clobbered. RSP and RBP are excluded for the same reason.
  *
- * Only these are saved. R12-R15, RBX and RBP are callee-saved, so the
- * interrupted code already holds them somewhere safe; saving them here would
- * cost eight stores on every interrupt to preserve values no handler can have
- * clobbered. RSP and RBP are excluded for the same reason.
+ * RAX is in the first list and used to be missing from it. The eight that were
+ * saved are the System V caller-saved set *minus RAX* -- not a smaller job,
+ * the same list with the one register every C function may destroy left out.
+ * IRETQ does not restore general-purpose registers, so a handler that clobbers
+ * RAX silently changes the interrupted code's RAX. See the note on
+ * struct interrupt_frame for how that presents.
  *
  * Push order is the *reverse* of the declaration order, and that is load-bearing
  * rather than stylistic: a push decrements RSP first, so the register pushed
@@ -95,8 +99,7 @@ interrupt_\vec:
  * r11 at offset 0 -- exactly backwards from the FRAME_* block below and from
  * struct interrupt_frame. save_regs and restore_regs were a matched pair and so
  * restored correctly, which is why nothing ever crashed: every frame the kernel
- * ever reported had its eight argument registers in reverse order, and
- * `f->rdi` was the interrupted code's r11.
+ * ever reported had its argument registers in reverse order.
  */
 .macro	save_regs
 	pushq	%r11
@@ -107,10 +110,12 @@ interrupt_\vec:
 	pushq	%rdx
 	pushq	%rsi
 	pushq	%rdi
+	pushq	%rax
 .endm
 
 /* The exact inverse, so the two cannot be updated independently. */
 .macro	restore_regs
+	popq	%rax
 	popq	%rdi
 	popq	%rsi
 	popq	%rdx
@@ -398,19 +403,20 @@ ret_to_user:
  * struct interrupt_frame and static-asserts them, so a change here that is not
  * mirrored there fails the build.
  */
-	.set FRAME_RDI,		0
-	.set FRAME_RSI,		8
-	.set FRAME_RDX,		16
-	.set FRAME_RCX,		24
-	.set FRAME_R8,		32
-	.set FRAME_R9,		40
-	.set FRAME_R10,		48
-	.set FRAME_R11,		56
-	.set FRAME_VECTOR,	64
-	.set FRAME_ERROR_CODE,	72
-	.set FRAME_RIP,		80
-	.set FRAME_CS,		88
-	.set FRAME_RFLAGS,	96
-	.set FRAME_RSP,		104
-	.set FRAME_SS,		112
-	.set FRAME_SIZE,		120
+	.set FRAME_RAX,		0
+	.set FRAME_RDI,		8
+	.set FRAME_RSI,		16
+	.set FRAME_RDX,		24
+	.set FRAME_RCX,		32
+	.set FRAME_R8,		40
+	.set FRAME_R9,		48
+	.set FRAME_R10,		56
+	.set FRAME_R11,		64
+	.set FRAME_VECTOR,	72
+	.set FRAME_ERROR_CODE,	80
+	.set FRAME_RIP,		88
+	.set FRAME_CS,		96
+	.set FRAME_RFLAGS,	104
+	.set FRAME_RSP,		112
+	.set FRAME_SS,		120
+	.set FRAME_SIZE,		128

@@ -91,16 +91,35 @@ bool gdt_have_ist(uint8_t ist);
 /*
  * The frame the stubs build, mirrored exactly by interrupt_entry.S.
  *
- * Only the argument registers are saved. R12-R15, RBX and RBP are callee-saved,
+ * Only the caller-saved registers are saved. R12-R15, RBX and RBP are callee-saved,
  * so the interrupted code already holds them somewhere safe and an interrupt
  * handler that clobbers them would be a bug in the handler, not a lost value.
  * RSP and RBP are excluded for the same reason.
+ *
+ * RAX belongs to the first list, not the second, and leaving it out is the
+ * subtlest bug in this file. The eight registers that used to be saved are the
+ * System V caller-saved set *minus RAX* -- not a smaller job, the same list
+ * with the one register every C function is allowed to destroy left out. The
+ * CPU does not restore general-purpose registers on IRETQ, so a handler that
+ * clobbers RAX silently changes the interrupted code's RAX.
+ *
+ * From ring 0 that is nearly invisible: the interrupted code is the kernel, and
+ * a clobbered RAX is usually a return value somebody was going to check anyway.
+ * From ring 3 it is fatal and it is silent -- nothing crashes at the exception,
+ * and the faulting instruction is re-executed with a different RAX than it had.
+ *
+ * Measured: init's allocator stored through a pointer it had just been handed
+ * by mmap(). The store faulted on a not-present page, the demand fill serviced
+ * it correctly, and the CPU re-executed the store at the *same* address with
+ * RAX now 0 rather than the mapping. The page was filled; the process had lost
+ * the only pointer to it, and the next store went to address 0x10000.
  *
  * `rip` through `ss` are the CPU's own IRETQ frame. `rsp` and `ss` describe the
  * interrupted context; they are only meaningful when `cs` shows ring 3, and for
  * a kernel-origin interrupt the CPU pushes a zero SS.
  */
 struct interrupt_frame {
+	uint64_t rax;
 	uint64_t rdi;
 	uint64_t rsi;
 	uint64_t rdx;
@@ -125,19 +144,19 @@ struct interrupt_frame {
  * .set FRAME_* block in the assembly is the same list; the build fails if a
  * field is added or reordered in only one of the two.
  */
-_Static_assert(offsetof(struct interrupt_frame, vector) == 64,
-	       "interrupt_entry.S pushes the vector at offset 64");
-_Static_assert(offsetof(struct interrupt_frame, error_code) == 72,
-	       "interrupt_entry.S pushes the error code at offset 72");
-_Static_assert(offsetof(struct interrupt_frame, rip) == 80,
-	       "interrupt_entry.S starts the CPU frame at offset 80");
-_Static_assert(offsetof(struct interrupt_frame, cs) == 88, "bad cs offset");
-_Static_assert(offsetof(struct interrupt_frame, rflags) == 96,
+_Static_assert(offsetof(struct interrupt_frame, vector) == 72,
+	       "interrupt_entry.S pushes the vector at offset 72");
+_Static_assert(offsetof(struct interrupt_frame, error_code) == 80,
+	       "interrupt_entry.S pushes the error code at offset 80");
+_Static_assert(offsetof(struct interrupt_frame, rip) == 88,
+	       "interrupt_entry.S starts the CPU frame at offset 88");
+_Static_assert(offsetof(struct interrupt_frame, cs) == 96, "bad cs offset");
+_Static_assert(offsetof(struct interrupt_frame, rflags) == 104,
 	       "bad rflags offset");
-_Static_assert(offsetof(struct interrupt_frame, rsp) == 104, "bad rsp offset");
-_Static_assert(offsetof(struct interrupt_frame, ss) == 112, "bad ss offset");
-_Static_assert(sizeof(struct interrupt_frame) == 120,
-	       "the stub pops 16 bytes of vector and error code after 8 saved "
+_Static_assert(offsetof(struct interrupt_frame, rsp) == 112, "bad rsp offset");
+_Static_assert(offsetof(struct interrupt_frame, ss) == 120, "bad ss offset");
+_Static_assert(sizeof(struct interrupt_frame) == 128,
+	       "the stub pops 16 bytes of vector and error code after 9 saved "
 	       "registers; a size change here has to change the stub too");
 
 /* Raised on ring 3 by a POP SS or interrupt, to prevent an attacker from
