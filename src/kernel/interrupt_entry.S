@@ -50,12 +50,19 @@ exception_\vec:
 /*
  * Vectors with nothing on the stack. A zero goes in the error-code slot so the
  * frame is the same size for every vector.
+ *
+ * The vector is pushed *first* so it lands at FRAME_VECTOR, with the zero above
+ * it at FRAME_ERROR_CODE. These two used to be pushed the other way round, which
+ * put the zero at offset 64 and the vector at 72 -- so every no-error exception
+ * and every IRQ was dispatched as vector 0 with the real vector sitting in the
+ * error-code slot. err_stub gets this right by construction, since the CPU has
+ * already placed the error code above the vector; these have to match it.
  */
 .macro	noerr_stub vec
 	.globl	exception_\vec
 exception_\vec:
-	pushq	$0
 	pushq	$\vec
+	pushq	$0
 	jmp	interrupt_common
 .endm
 
@@ -68,8 +75,8 @@ exception_\vec:
 .macro	irq_stub vec
 	.globl	interrupt_\vec
 interrupt_\vec:
-	pushq	$0
 	pushq	$\vec
+	pushq	$0
 	jmp	interrupt_common
 .endm
 
@@ -81,28 +88,37 @@ interrupt_\vec:
  * interrupted code already holds them somewhere safe; saving them here would
  * cost eight stores on every interrupt to preserve values no handler can have
  * clobbered. RSP and RBP are excluded for the same reason.
+ *
+ * Push order is the *reverse* of the declaration order, and that is load-bearing
+ * rather than stylistic: a push decrements RSP first, so the register pushed
+ * last ends up at the lowest address. Pushing rdi first put rdi at offset 56 and
+ * r11 at offset 0 -- exactly backwards from the FRAME_* block below and from
+ * struct interrupt_frame. save_regs and restore_regs were a matched pair and so
+ * restored correctly, which is why nothing ever crashed: every frame the kernel
+ * ever reported had its eight argument registers in reverse order, and
+ * `f->rdi` was the interrupted code's r11.
  */
 .macro	save_regs
-	pushq	%rdi
-	pushq	%rsi
-	pushq	%rdx
-	pushq	%rcx
-	pushq	%r8
-	pushq	%r9
-	pushq	%r10
 	pushq	%r11
+	pushq	%r10
+	pushq	%r9
+	pushq	%r8
+	pushq	%rcx
+	pushq	%rdx
+	pushq	%rsi
+	pushq	%rdi
 .endm
 
 /* The exact inverse, so the two cannot be updated independently. */
 .macro	restore_regs
-	popq	%r11
-	popq	%r10
-	popq	%r9
-	popq	%r8
-	popq	%rcx
-	popq	%rdx
-	popq	%rsi
 	popq	%rdi
+	popq	%rsi
+	popq	%rdx
+	popq	%rcx
+	popq	%r8
+	popq	%r9
+	popq	%r10
+	popq	%r11
 .endm
 
 	noerr_stub 0

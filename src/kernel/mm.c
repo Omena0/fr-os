@@ -777,19 +777,6 @@ long vmm_handle_page_fault(struct address_space *mm, virt_addr_t addr,
 	u64 flags;
 	long rc = -EFAULT;
 
-	/*
-	 * PF_PRESENT clear means the mapping exists and the access was refused.
-	 * That is never a demand fault: it is a permission or protection-key
-	 * violation, a reserved-bit violation, or a genuine bug in the kernel.
-	 * Filling the page in here would turn "this process may not write that"
-	 * into "this process may not write that, once", which is the difference
-	 * between a permission check and a suggestion.
-	 */
-	if (!(error_code & PF_PRESENT))
-		return -EACCES;
-	if (error_code & PF_RESERVED)
-		return -EFAULT;
-
 	virt = addr & PAGE_MASK;
 
 	/* The kernel half is described by the shared PML4 entries, never by a
@@ -799,6 +786,41 @@ long vmm_handle_page_fault(struct address_space *mm, virt_addr_t addr,
 		return -EFAULT;
 
 	if (!mm)
+		return -EFAULT;
+
+	/*
+	 * The demand decision belongs to the VMA, not to bit 0 of the error
+	 * code.
+	 *
+	 * This used to read `if (!(error_code & PF_PRESENT)) return -EACCES;`
+	 * first, on the reasoning that bit 0 clear means "the page is present and
+	 * the access was refused". That is the SDM's meaning of the bit, and the
+	 * check is right for a *kernel* fault, where a refused access really is a
+	 * bug in the kernel.
+	 *
+	 * It is the wrong gate for a *user* fault, for two reasons.
+	 *
+	 * First, the VMA is the authority. Linux's handle_mm_fault() does not
+	 * consult the P bit either: it looks the address up, and the vma's
+	 * vm_flags decide whether the access is legitimate. "The page is present"
+	 * and "this process may write here" are different questions, and only the
+	 * second one belongs in a permission decision.
+	 *
+	 * Second, and concretely: the .bss tail of init's last PT_LOAD is
+	 * deliberately left unmapped -- elf.c says so, and the fault path is
+	 * supposed to fill it -- and the page genuinely is not present in the
+	 * tables. Yet the CPU reported error code 0x6, bit 0 *clear*. Measured
+	 * live, same boot: the PTE for the faulting page read zero, while both
+	 * QEMU's -d int and the kernel's own frame said 0x6. Whichever way that
+	 * discrepancy is explained, gating on the bit means a page that is
+	 * provably absent gets refused for being "present", and userspace never
+	 * starts. A VMA lookup plus a prot check answers the question the caller
+	 * actually has, and is correct whichever way the bit reads.
+	 *
+	 * The kernel-side refusal is kept, below, for faults at or above
+	 * MM_USER_LIMIT and for reserved-bit violations.
+	 */
+	if (error_code & PF_RESERVED)
 		return -EFAULT;
 
 	/* Held across the whole fault, not just the lookup: the page allocated

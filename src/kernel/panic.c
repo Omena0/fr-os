@@ -21,6 +21,7 @@
 #include <kstring.h>
 #include <io.h>
 #include <drivers/serial.h>
+#include <vmm.h>
 
 struct panic_state panic_state;
 
@@ -62,20 +63,83 @@ static void panic_stop_other_cpus(uint32_t cpu)
  */
 static char panic_buf[320];
 
+/*
+ * Whether `addr` has a present, writable, supervisor page in the address space
+ * we are running in right now.
+ *
+ * This exists because panic_emit cannot know whether the VGA text buffer is
+ * mapped. Whether it is depends on how the kernel was brought up, and this code
+ * runs precisely when something has already gone wrong, so it has to ask the
+ * hardware rather than assume.
+ *
+ * The version this replaces was `if ((uintptr_t)0xB8000 < 0x100000)`, a
+ * comparison of two constants: always true, and the store always happened.
+ * 0xB8000 is not mapped as a virtual address in this kernel -- only its
+ * direct-map alias 0xffff800000b8000 is -- so **every** panic faulted on its
+ * first character, died half-written, and re-faulted. The machine never reached
+ * the `hlt` at the end of panic_common() and never stopped. That is where the
+ * thousands of identical `unrecoverable page fault` / `kernel panic` lines in
+ * every log came from: not a loop in the fault path, but a panic that could not
+ * finish printing.
+ *
+ * A bare walk, deliberately: no locks, no allocation, no calls, no dependence
+ * on the vmm, because it has to work from inside an exception handler with the
+ * address space in an unknown state. If the walk itself cannot be trusted --
+ * an entry with the huge-page or reserved bit set, or an absent level -- it
+ * returns false and the mirror is skipped. A missing mirror costs one line of
+ * diagnostics; a panicking panic costs all of them.
+ */
+static bool panic_addr_writable(uint64_t addr)
+{
+	static const unsigned shifts[4] = { 39, 30, 21, 12 };
+	uint64_t table;
+
+	__asm__ volatile("mov %%cr3, %0" : "=r"(table));
+	table &= ~0xFFFULL;	/* the low 12 bits are PCID, not an address */
+
+	for (unsigned level = 0; level < 4; level++) {
+		uint64_t entry;
+		unsigned index = (unsigned)((addr >> shifts[level]) & 0x1FF);
+
+		if (!table)
+			return false;
+		entry = ((volatile uint64_t *)(uintptr_t)phys_to_virt(table))[index];
+		/* Absent, or a huge page where a table was expected: either way
+		 * this walk cannot continue and must not guess. */
+		if (!(entry & 1) || (entry & 0x80))
+			return false;
+		table = entry & 0x000FFFFFFFFFF000ULL;
+	}
+
+	/* The leaf has to be writable as well as present: a read-only VGA
+	 * mapping would fault on the store just the same. */
+	return (table & 0x000FFFFFFFFFF000ULL) &&
+	       (((volatile uint64_t *)(uintptr_t)phys_to_virt(table))[
+			(addr >> 12) & 0x1FF] & 2) != 0;
+}
+
+/* Resolved once, on the first character: the tables do not change under a
+ * panic, and walking them per character would be pure waste. */
+static bool panic_vga_usable = false;
+static bool panic_vga_probed = false;
+
 static void panic_emit(const char *s)
 {
 	for (; *s; s++) {
 		char c = *s;
 
 		serial_putc_blocking(c);
-		/* Mirror onto the VGA text buffer when it is plausibly valid.
-		 * A garbage pointer here would double-fault, so the address is
-		 * range-checked rather than assumed. */
-		volatile uint16_t *vga =
-			(volatile uint16_t *)(uintptr_t)(0xB8000 +
-							  (2 * 80 * 24) - 2);
-		if ((uintptr_t)0xB8000 < 0x100000)
+
+		if (!panic_vga_probed) {
+			panic_vga_usable = panic_addr_writable(0xB8000);
+			panic_vga_probed = true;
+		}
+		if (panic_vga_usable) {
+			volatile uint16_t *vga =
+				(volatile uint16_t *)(uintptr_t)(0xB8000 +
+								  (2 * 80 * 24) - 2);
 			*vga = (uint16_t)(0x4C00 | (uint8_t)c);
+		}
 	}
 }
 
