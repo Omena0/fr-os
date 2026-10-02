@@ -28,6 +28,7 @@
 #include <panic.h>
 #include <percpu.h>
 #include <pmm.h>
+#include <tty.h>
 #include <process.h>
 #include <sched.h>
 #include <task.h>
@@ -319,6 +320,20 @@ void kmain(uint64_t bootinfo_phys)
 	 * would #UD in user space with no kernel handler to explain it.
 	 */
 	syscall_init();
+
+	/*
+	 * The console tty, before anything can hand a process a descriptor that
+	 * points at it. tty_init() attaches the ring storage, installs the
+	 * keyboard handler and turns scanning on; the rings are `.buf = NULL`
+	 * until it runs, so the first write from any process -- and PID 1 writes
+	 * as soon as it starts -- dereferenced a null pointer and took the kernel
+	 * down with CR2 = 0.
+	 *
+	 * After idt_init(), because it calls idt_set_handler() and installs the
+	 * keyboard handler before unmasking the line on purpose. Before
+	 * process_create_init(), for the reason above.
+	 */
+	tty_init();
 
 
 	/*

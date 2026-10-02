@@ -167,32 +167,25 @@ syscall_entry:
 	pushq	%rdi
 	pushq	%rax			/* lowest address == &regs */
 
-	/* RSP is 16-byte aligned here, as the ABI requires at a call site. */
-	movq	%rsp, %rdi
-	call	syscall_dispatch
-
-	/*
-	 * Return path. Everything that still needs the kernel — reading the
-	 * return value out of the frame, and asking whether this frame may be
-	 * returned to at all — happens while RSP is still the kernel stack.
-	 * Adopting the user RSP is the last thing done, immediately before
-	 * SYSRETQ, so no ring-0 instruction ever executes on memory the
-	 * process owns.
-	 *
-	 * &syscall_regs is at (%rsp); the return value is its first field.
-	 */
-	movq	(%rsp), %rax		/* RAX = syscall_dispatch's return */
-
 	/*
 	 * This CPU's slot in syscall_cpus, resolved the same way this_cpu()
 	 * resolves the per-CPU area: RDMSR of the hidden GS base, whose offset
-	 * zero is percpu_data[cpu].cpu_id.
+	 * zero is percpu_data[cpu].cpu_id. Done here, before the call, so that
+	 * RDMSR -- which writes EAX and EDX -- cannot destroy the syscall's
+	 * return value. See the note on the return path.
 	 *
-	 * RDMSR destroys EAX, EDX and ECX. Nothing is live at that point — the
-	 * frame holds every user value and the callee-saved registers are
-	 * restored by the pops below — and RAX in particular is reloaded from
-	 * the frame afterwards, not before.
+	 * The MSR number goes in ECX, immediately before the RDMSR, and it has to
+	 * be written there at all: MSR_GS_BASE was defined at the top of this file
+	 * and never used, so the RDMSR read whatever ECX happened to contain.
+	 * SYSCALL loads the user's RIP into RCX and the entry code above reuses
+	 * RCX as scratch holding that same user RIP, so ECX here is a
+	 * *user-controlled value*. The first syscall of the boot happened to find
+	 * 0xC0000101 left in ECX by earlier boot code and read the right MSR; the
+	 * second read whatever the user had in RCX and got a different MSR's
+	 * contents. It came back as 0x000000008017a340 -- &percpu_data with the
+	 * top half missing -- and the dereference below faulted.
 	 */
+	movl	$MSR_GS_BASE, %ecx
 	rdmsr
 	movq	%rax, %rbp		/* low 32 bits of GS.base */
 	shlq	$32, %rdx		/* high 32 bits. WRMSR takes EDX:EAX, so
@@ -202,15 +195,50 @@ syscall_entry:
 					   two GS bases disagree all day. */
 	orq	%rdx, %rbp		/* &percpu_data[cpu] */
 	movl	(%rbp), %ebp		/* cpu_id; a 32-bit store zero-extends */
-	shlq	$6, %rbp		/* * sizeof(struct syscall_cpu) */
-	leaq	syscall_cpus(%rip), %rdx
-	addq	%rdx, %rbp		/* &syscall_cpus[cpu_id] */
+	shlq	$6, %rbp		/* cpu_id * sizeof(struct syscall_cpu) */
+	leaq	syscall_cpus(%rip), %rdx	/* RDX is scratch: the user's RDX was
+					   pushed into the frame long ago, and
+					   RBP is about to become the final
+					   address, so the offset needs somewhere
+					   to live while it is added. */
+	addq	%rbp, %rdx		/* &syscall_cpus[cpu_id] */
+	movq	%rdx, %rbp		/* kept in a callee-saved register, which
+					   the call below will hand back */
 
+	/* RSP is 16-byte aligned here, as the ABI requires at a call site. */
+	/* Everything that still needs the kernel — asking whether this frame may
+	 * be returned to at all — happens while RSP is still the kernel stack.
+	 * Adopting the user RSP is the last thing done, immediately before
+	 * SYSRETQ, so no ring-0 instruction ever executes on memory the process
+	 * owns.
+	 *
+	 * &syscall_regs is at (%rsp); the return value is its first field.
+	 */
+	movq	%rsp, %rdi
+	call	syscall_dispatch
 	/*
-	 * A handler that does not return (exit, exit_group) cleared this flag
-	 * before switching away. The task's frame is abandoned, so control here
-	 * means something went wrong that no other check caught; it is
-	 * reported rather than turned into a silent hang.
+	 * The only thing left to do on the return path is check whether this
+	 * frame may go back to user space at all. That check needs this CPU's
+	 * syscall_cpus slot, and *nothing* may touch RAX after the call, because
+	 * RAX is the syscall's return value and sysretq hands it to the user.
+	 *
+	 * RDMSR writes EAX and EDX, so it cannot be used here. The slot address
+	 * is therefore computed *before* the call, into RBP -- which is
+	 * callee-saved, so syscall_dispatch() gives it back untouched.
+	 *
+	 * This used to be done after the call, and the return value was simply
+	 * destroyed: `movq %rax, %rbp` overwrote it, and nothing ever put it back.
+	 * The comment claimed "RAX in particular is reloaded from the frame
+	 * afterwards, not before", and it was not. Every syscall returned the low
+	 * half of the GS base to user space. It went unnoticed because the
+	 * commonest syscall is write(), and libc mostly does not check its return.
+	 *
+	 * How it surfaced: crt1 calls get_tls_base() and uses the answer as the
+	 * thread pointer for arch_prctl(ARCH_SET_FS). It got 0x8017a340 --
+	 * &percpu_data with the top 32 bits missing -- and arch_prctl correctly
+	 * refused it with -EPERM, so libc said "no thread pointer, refusing to
+	 * start". A TLS failure caused by a destroyed return value, two syscalls
+	 * removed from the cause.
 	 */
 	cmpl	$0, SC_RET_TO_USER(%rbp)
 	je	.Lsyscall_lost

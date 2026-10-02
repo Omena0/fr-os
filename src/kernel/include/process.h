@@ -215,10 +215,10 @@ __noreturn void process_enter_user(struct task *t, u64 entry, u64 sp);
 
 /* ------------------------------------------------- external dependencies ----- */
 
-/* Console agent (src/kernel/include/tty.h). Declared here because the console
- * file object is the reason process.c exists before a filesystem does. */
-extern size_t tty_read(char *buf, size_t count, bool block);
-extern void tty_write(const char *buf, size_t count);
+/* Console agent. The declarations live in <tty.h>, which now exists; they were
+ * repeated here while it did not, and the copy is exactly how tty_init() ended
+ * up invisible to kmain and never called. */
+#include <tty.h>
 
 /* Interrupt/GDT agent. These now live in <gdt.h> and <interrupt.h>; the
  * declarations are repeated here only so process.c does not need the interrupt

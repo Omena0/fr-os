@@ -18,22 +18,10 @@
 #include <io.h>
 #include <klog.h>
 #include <spinlock.h>
+#include <tty.h>
 #include <types.h>
 
 KLOG_SUBSYSTEM("tty");
-
-/*
- * Public interface, declared here because there is no tty.h to put it in.
- *
- * process.h declares tty_read() and tty_write() for process.c; tty_init() is
- * missing from every header and has to be added to one by whoever owns it. See
- * the report on this file.
- */
-void tty_init(void);
-size_t tty_read(char *buf, size_t count, bool block);
-void tty_write(const char *buf, size_t count);
-u64 tty_write_dropped(void);
-u64 tty_read_dropped(void);
 
 /* ------------------------------------------------------------- rings -------- */
 
