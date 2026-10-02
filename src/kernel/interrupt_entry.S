@@ -51,18 +51,24 @@ exception_\vec:
  * Vectors with nothing on the stack. A zero goes in the error-code slot so the
  * frame is the same size for every vector.
  *
- * The vector is pushed *first* so it lands at FRAME_VECTOR, with the zero above
- * it at FRAME_ERROR_CODE. These two used to be pushed the other way round, which
- * put the zero at offset 64 and the vector at 72 -- so every no-error exception
- * and every IRQ was dispatched as vector 0 with the real vector sitting in the
- * error-code slot. err_stub gets this right by construction, since the CPU has
- * already placed the error code above the vector; these have to match it.
+ * The order is the one that puts the *vector* at the lower address, because
+ * that is what FRAME_VECTOR and FRAME_ERROR_CODE require: a push decrements
+ * RSP before storing, so the register pushed last ends up lowest. Error code
+ * first, vector second. err_stub gets the same layout for free, since the CPU
+ * has already placed the real error code above the point where the stub's
+ * vector will land.
+ *
+ * This was "corrected" once to the opposite order, on the reasoning that a
+ * frame with a zero at FRAME_VECTOR must be swapped. It was not: the swap
+ * broke it, and the symptom was a divide error reported with error code 0x20 --
+ * vector 0 reading the zero, error code reading 32, which is IRQ0's vector.
+ * Every IRQ was arriving mislabelled as vector 0.
  */
 .macro	noerr_stub vec
 	.globl	exception_\vec
 exception_\vec:
-	pushq	$\vec
 	pushq	$0
+	pushq	$\vec
 	jmp	interrupt_common
 .endm
 
@@ -75,8 +81,10 @@ exception_\vec:
 .macro	irq_stub vec
 	.globl	interrupt_\vec
 interrupt_\vec:
-	pushq	$\vec
-	pushq	$0
+	pushq	$0			/* error-code slot, so the frame is the
+					 * same size for every vector */
+	pushq	$\vec			/* vector, which therefore lands *below*
+					 * the error code and at FRAME_VECTOR */
 	jmp	interrupt_common
 .endm
 

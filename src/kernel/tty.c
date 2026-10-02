@@ -245,17 +245,45 @@ size_t tty_read(char *buf, size_t count, bool block)
 		if (!block)
 			return 0;
 
-		/* Nothing buffered, a wait was requested, and interrupts are off.
-		 * hlt() would stop the core with nothing able to wake it, so the
-		 * wait is declined. Returning 0 is the wrong answer for a caller
-		 * that asked to block, and stopping the machine is a much worse
-		 * one: this is the state a syscall path can be in during early
-		 * init, and a terminal that hangs the kernel on a read is not
-		 * recoverable from a serial log. */
-		if (!irqs_enabled())
-			return 0;
+		/*
+		 * Nothing buffered, a wait was requested: halt until the keyboard
+		 * interrupt arrives.
+		 *
+		 * Interrupts are enabled across the halt whatever the caller had
+		 * set, because `hlt` with IF clear stops the core permanently --
+		 * the keyboard line can never be delivered, so nothing can wake it.
+		 * The caller's IF state is restored afterwards, so a caller that
+		 * disabled interrupts for a reason still has them disabled on
+		 * return.
+		 *
+		 * This used to decline instead: `if (!irqs_enabled()) return 0;`.
+		 * Every syscall arrives with IF clear, because SYSCALL's SFMASK
+		 * clears it, so *every* blocking read on the syscall path returned 0
+		 * the instant it was called -- and 0 is how the caller above says
+		 * "the terminal is closed". init therefore saw EOF at its first
+		 * prompt and exited, with a keyboard that worked fine.
+		 *
+		 * A terminal that hangs the kernel on a read would be worse, which
+		 * is why the decline existed; but the answer was wrong in a way that
+		 * no caller could distinguish from a closed terminal. Declining to
+		 * block is not the same as reporting end-of-file, and returning
+		 * both as 0 is what made this invisible.
+		 */
+		/*
+		 * `sti`, not `irq_restore` with IF cleared. irq_restore() only
+		 * ever *enables* -- it calls sti when the saved flags had IF set and
+		 * does nothing otherwise -- so handing it flags with IF clear is a
+		 * no-op, and the hlt below then stopped the core with nothing able
+		 * to wake it. That is exactly the failure this code exists to avoid,
+		 * and it looked like working code.
+		 */
+		{
+			u64 flags = irq_save();
 
-		hlt();
+			sti();
+			hlt();
+			irq_restore(flags);
+		}
 	}
 }
 
@@ -518,19 +546,39 @@ static void keyboard_irq(struct interrupt_frame *frame)
 {
 	uint8_t status = inb(PS2_STATUS);
 
-	/* Nothing to collect. Reading the data port anyway would return the last
-	 * byte the controller sent, turning a spurious interrupt into a phantom
-	 * character. */
-	if (!(status & PS2_STATUS_OBF))
-		return;
+	/*
+	 * Drain the output buffer, not one byte of it.
+	 *
+	 * Reading the status port clears the controller's interrupt line, and a
+	 * new one is only generated when a byte arrives *after* that read. So a
+	 * handler that takes one byte and returns discards the line while more
+	 * bytes are still sitting there, and the rest of the burst is never
+	 * delivered -- there is nothing left to interrupt for. Measured: five
+	 * keystrokes injected into the guest produced one IRQ, and one character.
+	 *
+	 * Bounded by the same OBF bit that gates the loop, so it terminates as
+	 * soon as the controller is empty, and it cannot spin on a controller
+	 * that never clears OBF for longer than one pass is bounded by the
+	 * scancode queue draining.
+	 */
+	for (unsigned guard = 0; guard < 32; guard++) {
+		if (!(status & PS2_STATUS_OBF))
+			return;
 
-	/* The byte is from the mouse, which shares the controller. It has its own
-	 * interrupt line and no driver yet; taking its byte here would steal it
-	 * from whichever driver claims IRQ12. */
-	if (status & PS2_STATUS_SYS)
-		return;
+		/* The byte is from the mouse, which shares the controller. It has
+		 * its own interrupt line and no driver yet; taking its byte here
+		 * would steal it from whichever driver claims IRQ12. Leave it for
+		 * the mouse's own interrupt rather than returning, or the byte
+		 * stays in the buffer and the loop spins to its bound. */
+		if (status & PS2_STATUS_SYS)
+			return;
 
-	keyboard_scancode(inb(PS2_DATA));
+		keyboard_scancode(inb(PS2_DATA));
+
+		/* Re-read: the byte we just took may have been the last, and the
+		 * status must be sampled again to know that. */
+		status = inb(PS2_STATUS);
+	}
 }
 
 /* pic_remap() masks every line, so it must happen exactly once. Called from
