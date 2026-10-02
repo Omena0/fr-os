@@ -323,11 +323,11 @@ KERNEL_VERSION_DEFS := -DKERNEL_VERSION=\"$(KERNEL_VERSION)\" \
                        -DKERNEL_BUILD_STAMP=\"$(KERNEL_BUILD_STAMP)\"
 
 .PHONY: all
-# verify-isa-test runs first so a broken gate is reported before the image is
-# assembled rather than after. It is cheap: a dozen small compiles into
-# $(BUILD)/verify-isa and nothing is read from the tree but the two flag
-# lists, so it costs a second and it is the only thing that notices a gate
-# which has quietly stopped recognising an instruction family.
+# verify-isa-test is NOT in `all`. It checks the *checker*, not the tree, and it
+# is not free: it runs a dozen compiles through both profiles. When it sat in
+# front of $(DISK), a stale expectation inside it stopped the kernel being built
+# at all -- a failure mode that is strictly worse than a missing check, because
+# the thing being protected went unbuilt. `make check` runs it.
 # verify-isa-test checks the *checker*, not the tree. It runs a dozen small
 # compiles through both profiles to prove the classifier still recognises each
 # instruction family it claims to. That is worth doing before a release and in

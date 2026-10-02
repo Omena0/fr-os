@@ -332,10 +332,20 @@ static void *user_page(struct address_space *mm, virt_addr_t vaddr, bool write)
 	if (vaddr >= USER_ADDRESS_MAX)
 		return NULL;
 
-	phys_addr_t phys = vmm_translate(mm->pgd, vaddr, NULL);
+	phys_addr_t phys = 0;
 
-	if (phys)
-		return phys_to_virt(phys);
+	/*
+	 * vmm_lookup_page(), not vmm_translate(). The latter returns 0 for "not
+	 * translated", which is indistinguishable from a legitimate mapping of
+	 * physical frame 0 -- and a caller testing it for non-zero is reading a
+	 * *physical address* as a *presence flag*. Frame 0 is not mapped today, so
+	 * the two have not yet collided, but this is a user-supplied address and
+	 * the cost of being wrong is reading a kernel frame.
+	 */
+	if (!vmm_lookup_page(mm->pgd, vaddr, &phys, NULL))
+		return NULL;
+
+	return phys_to_virt(phys);
 
 	uint64_t error = PTE_PRESENT | PTE_USER;
 
@@ -348,8 +358,7 @@ static void *user_page(struct address_space *mm, virt_addr_t vaddr, bool write)
 	if (vmm_handle_page_fault(mm, vaddr, error) != 0)
 		return NULL;
 
-	phys = vmm_translate(mm->pgd, vaddr, NULL);
-	if (!phys)
+	if (!vmm_lookup_page(mm->pgd, vaddr, &phys, NULL))
 		return NULL;
 	return phys_to_virt(phys);
 }

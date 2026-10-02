@@ -796,9 +796,14 @@ long vmm_handle_page_fault(struct address_space *mm, virt_addr_t addr,
 	 * through user_memory_write(), left the page present already. Handing
 	 * back the frame here rather than mapping it is what stops the retry
 	 * from turning into an allocation leak. */
-	if (vmm_translate(mm->pgd, virt, NULL)) {
-		rc = 0;
-		goto out;
+	{
+		/* Presence, not "non-zero physical address" -- see vmm_lookup_page(). */
+		phys_addr_t have = 0;
+
+		if (vmm_lookup_page(mm->pgd, virt, &have, NULL)) {
+			rc = 0;
+			goto out;
+		}
 	}
 
 	/* Zeroed because an anonymous page must read as zero, and pmm's PG_ZEROED

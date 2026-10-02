@@ -65,7 +65,7 @@ panic_regs:
 	 * output looks wrong -- a panic report that names the wrong registers is
 	 * worse than one that omits them, because it is believed.
 	 *
-	 * `cr4` is written to 168 and `cpu_id` to 172; `movl $0, 172(%rdi)` below
+	 * `cr4` is written to 168 and `cpu_id` to 176; `movl $0, 176(%rdi)` below
 	 * clears it for the caller.
 	 *
 	 * CS is deliberately left alone. It has no MOV-source form in 64-bit mode
