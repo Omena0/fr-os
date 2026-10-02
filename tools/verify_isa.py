@@ -41,9 +41,27 @@ user     XMM is legal, everything wider is not. The x86-64 baseline already
          in userland is preserved across a preemption and a VEX one is not.
          This is the profile init.elf and hello.elf are held to, and it is
          what makes USER_CFLAGS' -mno-avx/-mno-avx2/-mno-fma/-mno-f16c a
-         statement rather than a hope: those flags are the *policy*, and a
-         later `-march=x86-64-v3` appended to the list would acquire AVX2
+         statement rather than a hope: those flags are the *policy*, and an
+         explicit `-mavx`/`-mavx2` appended after them would acquire YMM
          without anybody noticing.
+
+         One claim that used to be written here was false, and it is worth
+         keeping the correction because a test was built on it. It said that
+         "the last -m flag for an ISA feature is the one that counts", so a
+         later `-march=x86-64-v3` would silently acquire AVX2. Measured on the
+         toolchain in use (gcc 16.2.1, `gcc -Q --help=target`):
+
+             -mno-avx -march=x86-64-v3      avx disabled
+             -march=x86-64-v3 -mno-avx      avx disabled
+             -mno-avx -mavx                 avx enabled
+             -mavx  -mno-avx                avx disabled
+             -march=x86-64-v3 alone         avx enabled, avx2 enabled
+
+         So order decides between two *explicit* -m flags and nowhere else: an
+         explicit -m<feature>/-mno-<feature> is not overridden by -march= in
+         either order. `-march=x86-64-v3` on its own is therefore not a way to
+         break USER_CFLAGS, and a self-test that asserted it was testing gcc's
+         option resolution, not this gate.
 
 Usage
 -----
@@ -353,9 +371,15 @@ _USER_NOTE = """\
 
   USER_CFLAGS' -mno-avx -mno-avx2 -mno-fma -mno-f16c is the flag side of this.
   The flags are the policy; this check is what makes it true regardless of what
-  is appended to that list later. `-march=x86-64-v3` is the realistic way it
-  breaks, because on x86 the last -m flag for an ISA feature is the one that
-  counts and it silently acquires AVX2 and every YMM user with it.
+  is appended to that list later.
+
+  If you are trying to work out how this list gets broken, note that the order
+  rule is narrower than it looks. On gcc 16.2.1, measured with
+  `gcc -Q --help=target`: an explicit -m<feature> or -mno-<feature> is not
+  overridden by -march= in either order, so appending -march=x86-64-v3 to the
+  list does *not* acquire AVX2. What does acquire it is appending an explicit
+  -mavx, -mavx2, -mfma or -m16c after the -mno- block, or dropping the -mno-
+  block -- order decides between two explicit -m flags, last one wins.
 """
 
 
@@ -409,8 +433,8 @@ _MUST_FLAG_VECTOR = (
 	"fdivrp", "fdivrs", "fdivs", "femms",
 	"fildl", "fildll", "finit", "fistpl",
 	"fistpll", "fisttps", "fld1", "fldcw",
-	"fldenv", "fldl2e", "fldl2t", "fldlg2",
-	"fldln2", "fldpi", "flds", "fldz",
+	"fldenv", "fldl", "fldl2e", "fldl2t", "fldlg2",
+	"fldln2", "fldpi", "flds", "fldt", "fldz",
 	"fmulp", "fmuls", "fnclex", "fnop",
 	"fnstcw", "fnstenv", "fnstsw", "fpatan",
 	"fprem", "fprem1", "fptan", "frndint",
@@ -454,7 +478,8 @@ _MUST_FLAG_VECTOR = (
 	"psrld", "psrldq", "psrlq", "psrlw",
 	"psubb", "psubd", "psubq", "psubsb",
 	"psubsw", "psubusb", "psubusw", "psubw",
-	"ptest", "punpckhbw", "punpckldq", "punpcklqdq",
+	"ptest", "punpckhbw", "punpckhdq", "punpckhqdq",
+	"punpckhwd", "punpcklbw", "punpckldq", "punpcklqdq",
 	"punpcklwd", "pxor", "rcppd", "rcpps",
 	"rcpss", "roundpd", "roundps", "roundsd",
 	"roundss", "rsqrtpd", "rsqrtps", "rsqrtss",
