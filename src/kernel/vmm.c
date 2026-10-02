@@ -419,38 +419,59 @@ void pt_free(phys_addr_t pgd, unsigned count)
  * tables that describe it. User *access* to the pages those tables map is a
  * separate matter, decided per-PTE below.
  */
-static int build_missing_tables(phys_addr_t pgd, virt_addr_t virt)
+static int build_missing_tables(phys_addr_t pgd, virt_addr_t virt, bool user)
 {
+	const unsigned idx[3] = { PML4_ENTRY_OF(virt), PDPT_ENTRY_OF(virt),
+				  PD_ENTRY_OF(virt) };
+	uint64_t want = PTE_PRESENT | PTE_WRITE | (user ? PTE_USER : 0);
 	phys_addr_t table = pgd;
-	phys_addr_t fresh;
+	bool promoted = false;
 
-	/* Level 3 is the PML4 entry, then PDPT, then PD. Stop once a table that
-	 * is already present is reached: everything below it exists. */
-	for (int level = 3; level >= 2; level--) {
-		phys_addr_t next = walk(pgd, virt, level, NULL);
+	/*
+	 * Walk down from the PML4, creating whatever is missing.
+	 *
+	 * `user` has to reach every level, not just the leaf. A clear U/S in
+	 * *any* upper-level entry overrides the U/S in the PTE and makes the whole
+	 * translation supervisor-only, so a leaf marked PTE_USER underneath
+	 * supervisor-only tables is still unreachable from ring 3 -- and the only
+	 * symptom is a #PF on the first user fetch, with error code bit 0 set,
+	 * which is indistinguishable from a page that is genuinely not present.
+	 *
+	 * So an entry that already exists also gets promoted, not just created.
+	 * Without that, a supervisor-only table built for an early mapping keeps
+	 * its U/S clear and every user mapping placed under it is dead on arrival,
+	 * and the mapping that discovers it has no way to tell why.
+	 *
+	 * The old code also left U/S clear here on purpose, on the theory that a
+	 * user process must not be able to reach the tables that describe it. That
+	 * is not what U/S on an upper-level entry does. It does not gate access to
+	 * the tables -- those live in kernel memory, behind the kernel window, and
+	 * their own mapping is what protects them. It gates the *translation*.
+	 *
+	 * The loop covers three entries -- PML4, PDPT, PD -- and no more. There
+	 * are three intermediate tables above the leaf; a fourth level here would
+	 * point a page-table entry at another page table, and it did: the boot
+	 * triple-faulted in sched_init before this stopped. The leaf PTE is the
+	 * caller's to write.
+	 */
+	for (int level = 0; level < 3; level++) {
+		uint64_t *slot = &((uint64_t *)phys_to_virt(table))[idx[level]];
 
-		if (next) {
-			table = next;
-			continue;
+		if (!(*slot & PTE_PRESENT)) {
+			phys_addr_t fresh = pt_alloc_zeroed(1);
+
+			if (!fresh)
+				return -1;
+			*slot = fresh | want;
+		} else if (user && !(*slot & PTE_USER)) {
+			*slot |= PTE_USER;
+			promoted = true;
 		}
-
-		fresh = pt_alloc_zeroed(1);
-		if (!fresh)
-			return -1;
-
-		((uint64_t *)phys_to_virt(table))[
-			(level == 3 ? PML4_ENTRY_OF(virt) : PDPT_ENTRY_OF(virt))] =
-			fresh | PTE_PRESENT | PTE_WRITE;
-		table = fresh;
+		table = *slot & PTE_ADDR_MASK;
 	}
 
-	fresh = pt_alloc_zeroed(1);
-	if (!fresh)
-		return -1;
-	/* Supervisor only, always. A user process must not be able to reach the
-	 * tables that describe it. */
-	((uint64_t *)phys_to_virt(table))[PD_ENTRY_OF(virt)] =
-		fresh | PTE_PRESENT | PTE_WRITE;
+	if (promoted)
+		invlpg(virt);
 
 	return 0;
 }
@@ -466,7 +487,7 @@ int vmm_map_page(phys_addr_t pgd, virt_addr_t virt, phys_addr_t phys,
 
 	table = walk(pgd, virt, 1, &pte);
 	if (!table) {
-		if (build_missing_tables(pgd, virt))
+		if (build_missing_tables(pgd, virt, (prot & VM_USER) != 0))
 			return -1;
 		table = walk(pgd, virt, 1, &pte);
 		if (!table)
