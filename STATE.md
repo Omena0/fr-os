@@ -344,36 +344,69 @@ worth keeping from it: re-derive the line before acting, and check the claim's
 
 ## 7. KNOWN OPEN, IN PRIORITY ORDER
 
-### 7.1 The new blocker: a not-present user page that demand paging does not fill
+### 7.1 The new blocker: a ring-3 write the fault path refuses, with a contradiction
 
-**Where:** ring 3. init executes user code, makes its first syscall, then faults.
+**Where:** ring 3. init enters user space, makes a syscall, then faults on a store.
 
 ```
 #EXC #PF  vector=14 cs=0x002b rpl=3 rip=0x0000000000401f28 err=0x6
         rsp=0x00007fffffffef10 -> unrecoverable page fault
+CR2=000000000040d158
 ```
 
-`err=0x0006` is write + **not-present** + user. That is a real missing page, not
-a permission problem — unlike the previous ring-3 fault, which was `err=0x0015`
-and turned out to be a U/S problem.
+Three things here, and the first two are easy to get wrong:
 
-The ELF load announced `entry 402020 phdr 400040 count 9 [400000,40e000)`, so
-`0x401f28` is *inside* the image, one page below the entry point. Page `0x402000`
-is mapped; page `0x401000` is not. So either a `PT_LOAD` was not mapped, or
-demand paging was supposed to bring it in on the fault and did not.
+- **The faulting address is CR2 = `0x40d158`, not the RIP.** The RIP
+  (`0x401f28`) is inside `__libc_start_c`; it is only where the store was issued.
+  Reading the fault location off the instruction pointer sends you to the ELF
+  loader and never to the missing page.
+- `0x40d158` is in the **`.bss` tail** of the last `PT_LOAD`. That segment is
+  `vaddr 0x40aff0 filesz 0x118 memsz 0x2eb8`, so file-backed content stops at
+  `0x40b108` and everything from there to `0x40dea8` is zero-fill.
+- This is **not** a missing page by the loader's own account. `elf.c:14` says
+  `p_filesz` is left unmapped *on purpose* and "the fault path allocates a zeroed
+  anonymous page for it". The VMA covering it is created `VM_ANON` with
+  `VM_READ|VM_WRITE|VM_USER` (`elf.c:500`), so the anonymous fill path in
+  `mm.c` should service it.
 
-Read the error code before theorising: `0x0006` versus `0x0015` is the whole
-difference between "the page is missing" and "the page is there and supervisor-only",
-and they look identical until you decode them.
+**Measured, and they do not agree:**
 
-**Next:** walk the mm's page tables for `0x401000` and compare with `0x402000`,
-and check whether any VMA covers `0x401000`. If a VMA covers it, the fault path
-is failing to fill; if none does, the ELF loader dropped a segment.
+- Dumping the live tables over QMP: page `0x40c000` and `0x40d000` are
+  **absent** (`PT[12]` and `PT[13]` both read `0x0000000000000000`), while
+  `0x40b000` — the last file-backed page — is present. So the `.bss` tail is
+  genuinely unmapped, as designed.
+- But the CPU's error code is `0x0006`, and bit 0 is **clear**, which on x86
+  means **protection violation — the page is present**. Bit 0 set (`0x0007`)
+  would be the not-present case.
+- `vmm_handle_page_fault()` returns **-13 (`-EACCES`)**. `-EACCES` has exactly
+  two sources in that function: the early
+  `if (!(error_code & PF_PRESENT)) return -EACCES;`, and `!vma_allows(...)`.
+  With `err=0x6` the early return is the one that fires, and it is *correct for
+  what the CPU reported*.
 
-**Worth fixing at the same time:** `panic()` does not stop. Every run above ends
-in an unbounded loop of `unrecoverable page fault` / `kernel panic` alternating
-forever, which buries the first fault under thousands of identical lines and
-makes the log much harder to read than it needs to be. It should halt.
+So either the error code the kernel reads is not the one the CPU pushed, or the
+page is present in some path not visible from `0xbdc10000`. **`PF_PRESENT` is
+defined as `1 << 0` (`interrupt.h:148`), which is the "page not present" bit —
+the name says the opposite of the meaning, which is Linux's naming too and is how
+a polarity slip survives.** Check the stub's error-code push and skip logic
+(`interrupt_entry.S`, `err_stub`/`noerr_stub`) before anything else: if the frame
+carries the wrong word, every conclusion drawn from `err=` in this tree is
+suspect.
+
+**Next, in order:**
+1. Confirm the error code the CPU actually pushed — `err_stub` pushes `0` and the
+   no-error stub skips the slot; a mismatch between the two paths is exactly the
+   shape of this bug. `#EXC` prints `err=0x6`, which is *not* 0, so some path is
+   pushing something.
+2. Only then decide whether the fault path or the loader is at fault. If the
+   error code turns out to be `0x7`, the anonymous fill path is the bug and the
+   `pmm_alloc_page`/`vmm_map_page` pair in `mm.c` is where to look.
+
+**Also worth fixing, independent of all this:** `panic()` does not stop. Every run
+ends in an unbounded loop of `unrecoverable page fault` / `kernel panic`
+alternating forever, which buries the first fault under thousands of identical
+lines. Fix it before chasing anything else — it costs one edit and it makes the
+next twenty log lines readable.
 
 ### 7.1b Closed this session, in the order it was found
 
@@ -571,20 +604,47 @@ These are settled. Re-deriving them is how today was lost.
   path — not a healthy guest.** Check `df`, check the colon, check the path.
 
 ---
-
 ## 10. GIT STATE at hand-off
 
-Branch `main`, clean tree. Recent commits:
-```
-2a9e372 percpu: put GS.base back after the segment reload that destroys it
-ed8b3cf kernel: fix the GDT reload far return and the IDT gate size
-99df2e6 docs: add a past-mistakes section to STATE.md
-```
-Commit messages in this repo carry the mechanism and the verification, and say
-plainly what is **not** verified. That convention is worth keeping, and the
-last two commits follow it: `ed8b3cf` states that the IDT handlers running is
-*not* separately verified, because the far return blocked the path to them.
+Branch `main`, clean tree, ahead of origin. Recent commits:
 
-Claims held by `main` in `ownership.json` (release them when done):
-`src/kernel/{gdt.c,idt.c,interrupt_entry.S,main.c,percpu.c}`,
-`src/kernel/include/percpu.h`.
+```
+606d4b2 check: fix the four stale self-test expectations; make check is green
+a56d287 docs: STATE.md -- correct the IDT gate claim, record four more blockers closed
+57432e5 interrupt_entry: build the ring-3 frame in the order IRETQ pops it
+afb4bbf vmm: propagate the user bit to every level of a translation
+f3fef61 process: log every sys_execve failure, and take the thread pointer from the new mm
+d4b4e61 idt: revert the gate type to 0x8E -- 0x8F is a trap gate, not a 64-bit one
+2f7c3be build: stop tracking tools/__pycache__
+```
+
+**`make check` is green: 21 checks, 0 failing** (was 19 with 4 failing).
+
+Commit messages here carry the mechanism *and* the verification and say plainly
+what is **not** verified. Keep that. `ed8b3cf` is the cautionary one: it bundled
+two changes, one of which was wrong on a premise stated as settled fact, and the
+same claim then appeared in three documents that agreed only because one hand
+wrote all three.
+
+### Working with parallel agents
+
+`ownership.json` prevented every collision this session. What made it work:
+
+- **One claim per file, claimed before dispatch**, and the file list was split so
+  no two agents could touch the same file.
+- **Each agent got the environment traps and the method verbatim** (TMPDIR, the
+  `-no-reboot` + `timeout -s TERM` boot recipe, `/tmp` being full). Without
+  those, two of the three would have burned their budget on environment.
+- **A "report, do not touch" escape hatch.** Both agents that found a problem
+  outside their scope reported instead of editing, which is how the IDT gate
+  error was caught — it would have been overwritten by whichever agent went
+  second.
+
+What to keep: tell agents that a comment, a finding, a commit message and another
+agent's summary are **claims**, and the built artefact is evidence. Both agents
+whose claims I checked had done exactly that, and the one that caught my error
+had checked a *constant* against the spec rather than against my text.
+
+Claims held by `main` in `ownership.json`: `src/kernel/{gdt.c,idt.c,interrupt_entry.S,
+main.c,percpu.c,sched.c,vmm.c,kmalloc.c,task.c,context.S,mm.c,elf.c}` and
+`src/kernel/include/percpu.h`. Release them when done.
