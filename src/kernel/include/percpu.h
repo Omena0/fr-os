@@ -138,6 +138,19 @@ static inline struct percpu_data *this_cpu(void)
  */
 void percpu_setup(uint32_t cpu_id);
 
+/* Re-install GS.base for `cpu_id` and prove it through all three routes.
+ *
+ * Separate from percpu_setup because a *correct* segment reload destroys it.
+ * gdt_flush has to reload GS with a selector to refresh that register's
+ * cached descriptor, and loading a selector replaces the hidden base with the
+ * descriptor's -- zero, for a flat segment. Anything that touches this_cpu()
+ * between that reload and the next percpu_setup() therefore dereferences a null
+ * base, so the caller that knows the CPU number has to put it back.
+ *
+ * Pass the CPU number in rather than reading it: this_cpu() is exactly what
+ * has just been broken, and reading it here would fault. */
+void percpu_install_gs_base(uint32_t cpu_id);
+
 /* Total number of CPUs the kernel is managing. */
 uint32_t percpu_num_cpus(void);
 

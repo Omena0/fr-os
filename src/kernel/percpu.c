@@ -101,12 +101,26 @@ void percpu_setup(uint32_t cpu_id)
 	memset(p, 0, sizeof(*p));
 	p->cpu_id = cpu_id;
 
+	percpu_install_gs_base(cpu_id);
+
+	p->online = true;
+	if (cpu_id + 1 > num_cpus)
+		num_cpus = cpu_id + 1;
+}
+
+void percpu_install_gs_base(uint32_t cpu_id)
+{
+	if (cpu_id >= MAX_CPUS)
+		panic("percpu: gs base for cpu %u, MAX_CPUS is %d",
+		      cpu_id, MAX_CPUS);
+
 	/*
 	 * The kernel's own data must never land in the GS-relative window that
 	 * userspace code could reach through a wild pointer, so the base points
 	 * at a dedicated per-CPU array rather than at anything user-mapped.
 	 */
-	struct gs_check c = gs_base_install((uint64_t)(uintptr_t)p, cpu_id);
+	struct gs_check c = gs_base_install((uint64_t)(uintptr_t)&percpu_data[cpu_id],
+					    cpu_id);
 
 	if (c.step) {
 		/*
@@ -132,10 +146,6 @@ void percpu_setup(uint32_t cpu_id)
 			     "gs-relative cpu_id %u",
 			     c.step, c.want, c.msr, c.fast, c.via_gs);
 	}
-
-	p->online = true;
-	if (cpu_id + 1 > num_cpus)
-		num_cpus = cpu_id + 1;
 }
 
 uint32_t percpu_num_cpus(void)

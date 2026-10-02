@@ -17,6 +17,7 @@
 #include <klog.h>
 #include <kstring.h>
 #include <panic.h>
+#include <percpu.h>
 #include <types.h>
 
 KLOG_SUBSYSTEM("gdt");
@@ -183,6 +184,20 @@ void gdt_reload(uint32_t cpu)
 	/* CS first, then the TSS. A ring-3 interrupt before the LTR would load
 	 * RSP0 from a TSS the CPU is not using yet and run on a null stack. */
 	gdt_flush((uint64_t)&gdtr, KERNEL_CODE_SELECTOR, KERNEL_DATA_SELECTOR);
+
+	/*
+	 * Before the TSS, because it is the first thing after the reload that
+	 * can read a segment register, and GS.base is not what it was.
+	 *
+	 * gdt_flush reloads GS with a selector, which is the only thing that
+	 * refreshes its cached descriptor -- and which also replaces the hidden
+	 * base with the descriptor's, zero for a flat segment. The per-CPU
+	 * pointer is destroyed by the reload that makes the segment registers
+	 * correct, so it goes back here. The very next statement in this
+	 * function is a klog(), which reads this_cpu_id().
+	 */
+	percpu_install_gs_base(cpu);
+
 	tss_flush(TSS_SELECTOR);
 
 	klog(KLOG_INFO, "gdt: cpu %u, %u entries, kcode=%#x kdata=%#x "

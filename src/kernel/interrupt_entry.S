@@ -222,6 +222,21 @@ gdt_flush:
 	movw	%ax, %gs
 	movw	%ax, %ss
 
+	/*
+	 * The GS reload is correct and unavoidable -- a MOV to a segment
+	 * *selector* is the only thing that refreshes the cached descriptor,
+	 * and a near jump does not do it. It also throws the per-CPU area
+	 * away: loading a selector replaces the hidden base with the one from
+	 * the descriptor, which for a flat segment is zero. So the GS selector
+	 * is reloaded here and percpu_install_gs_base() puts the base back
+	 * immediately after, from C, where the CPU number is known.
+	 *
+	 * Leaving the reload out does "fix" it -- klog then works past
+	 * gdt_reload -- and leaves a GS whose cached descriptor came from the
+	 * table the loader installed, which is the bug the whole function
+	 * exists to prevent.
+	 */
+
 
 
 /*
