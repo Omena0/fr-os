@@ -80,8 +80,25 @@ static bool out_dropped_reported;
  * account for; the ring itself has no notion of a drop. */
 static size_t ring_push(struct tty_ring *r, const u8 *src, size_t count)
 {
-	size_t space = TTY_RING_CAP - r->count;
-	size_t n = MIN(count, space);
+	size_t space;
+	size_t n;
+
+	/*
+	 * A ring with no storage is not a ring that should be pushed into, and
+	 * `r->buf[r->head]` on a null buf is a write to address 0 -- which is
+	 * indistinguishable, from the fault that reports it, from a wild store
+	 * anywhere else. Refusing here and saying so is the difference between a
+	 * located fault and a mystery. tty_init() checks the same invariant when
+	 * it attaches the storage, so reaching this means something detached it
+	 * afterwards.
+	 */
+	if (!r->buf) {
+		klog(KLOG_FATAL, "tty: ring push with no storage attached\n");
+		return 0;
+	}
+
+	space = TTY_RING_CAP - r->count;
+	n = MIN(count, space);
 
 	for (size_t i = 0; i < n; i++) {
 		r->buf[r->head] = src[i];
@@ -660,6 +677,29 @@ void tty_init(void)
 	spinlock_init(&in_lock);
 	out_ring.buf = out_storage;
 	in_ring.buf  = in_storage;
+
+	/*
+	 * Read the storage back and complain here if it did not stick.
+	 *
+	 * The rings are declared with `.buf = NULL` and get their storage here, so
+	 * a store that is lost, reordered past the calls below, or aimed at a
+	 * different object leaves a ring that looks initialised and is not. Every
+	 * later symptom is a write to address 0 from ring_push() on some process's
+	 * first write -- which says nothing about where the value went, and has
+	 * been seen to happen on roughly one boot in four and not at all on others.
+	 *
+	 * Checking it here turns that into a located failure at the point where the
+	 * invariant is established, which is the only place it can be checked. It
+	 * costs one load and one compare, once, before interrupts are re-enabled.
+	 */
+	if (out_ring.buf != out_storage || in_ring.buf != in_storage) {
+		klog(KLOG_FATAL,
+		     "tty: ring storage did not attach (out %p expected %p, "
+		     "in %p expected %p)\n",
+		     (void *)out_ring.buf, (void *)out_storage,
+		     (void *)in_ring.buf, (void *)in_storage);
+		return;
+	}
 
 	/*
 	 * Handler before the line is unmasked, in that order and not the other
