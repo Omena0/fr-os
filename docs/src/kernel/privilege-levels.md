@@ -53,10 +53,10 @@ Both computed selectors carry RPL 3, because the additions do not disturb bits 0
 
 ### Descriptor Encodings
 
-Descriptors are built by `GDT_ENTRY(flags, base, limit)` in `src/include/gdt.h`, which packs the raw bit fields so the bootloader and the kernel cannot disagree about an encoding. Two forms exist:
+Descriptors are built by `GDT_ENTRY(access, flags, base, limit)` in `src/include/gdt.h`, which packs the raw bit fields so the bootloader and the kernel cannot disagree about an encoding. **The access byte and the flags/granularity byte are separate arguments**, and conflating them is the defect that 0.15 in [`../../../MEGA_AUDIT.md`](../../../MEGA_AUDIT.md) records: folding the flags nibble into the access byte left every kernel code segment with `L=0`, and each CS load `#GP`ed. The flags are passed in the `GDT_FLAG_*` positions of byte 6 — `GDT_FLAG_GRANULARITY` is the `G` bit (3), `GDT_FLAG_DB` the `B/DB` bit (2), `GDT_FLAG_64BIT`/`GDT_FLAG_LONG_MODE` the `L` bit (1). Two forms exist:
 
 - **Code/data segments** are one 8-byte entry; the macro already accounts for the base being split across the low 24 bits and the high byte of the last qword.
-- **The TSS is a system descriptor spanning two GDT slots.** In long mode the TSS base is 64 bits, which does not fit in the 24-bit base field, so the high 8 bits live in the second slot. `GDT_TSS_DESC64(base, limit)` produces the full 16 bytes; the two halves are written as separate 8-byte stores, which is also how they appear in the GDT.
+- **The TSS is a system descriptor spanning two GDT slots.** In long mode the TSS base is 64 bits, which does not fit in the 24-bit base field, so the high 32 bits live in the second slot. There is no single 16-byte-producing macro: `GDT_TSS_DESC64_LOW(base, limit)` and `GDT_TSS_DESC64_HIGH(base)` build the two halves separately (`gdt.c:175` and `gdt.c:177`) and each is written as one 8-byte store, which is also how they appear in the GDT. `_LOW` carries `base[31:0]`; `_HIGH` carries **`base[63:32]` and nothing else**. Both mistakes here have been made in this tree: byte 7 built as an eight-bit `(base >> 24) & 0xFF` instead of four bits of `base[31:28]`, which double-counts `base[27:24]` and made the reconstructed TSS base non-canonical (0.16); and a `_HIGH` that also carried `base[24:55]`. The round-trip `_Static_assert`s at the bottom of `gdt.h` decode the encoders back into their fields, so a wrong shift is a build failure now — and that is the only reason the second of those was caught in seconds rather than days.
 
 ### The Reload Itself
 
