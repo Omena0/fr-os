@@ -415,13 +415,31 @@ Ruled out so far:
   `PHYS_DIRECT_MAP + phys`, and the PTE stores the same `page_to_phys()` result,
   so the demand fill's `memset` and the mapping agree.
 
-The interesting remaining suspect is something zeroing 4 KiB of physical memory
-that it should not: the demand fill does `memset(phys_to_virt(frame), 0, 4096)`
-once per fault, and `out_ring` sitting in `.bss` is exactly the kind of thing a
-stray 4 KiB zeroing would erase while leaving everything around it working. That
-is a hypothesis, not a finding. The measurement to make it a finding: log
-`page_to_phys()` alongside every demand fill, and check the frame is one the
-allocator believes is free, then look for a second writer.
+Also ruled out since: **the store being lost.** A gdb hardware watchpoint on
+`out_ring.buf` never fired across six KVM runs -- but that experiment is void
+and must not be read as evidence. The watchpoint was installed while the CPU was
+still at reset with paging off, and QEMU does not attach a watchpoint to a page
+that does not exist yet. A control watchpoint on `klog_counts` fired correctly,
+which is how the void was found. If this is pursued, the watchpoint has to be
+installed *after* `kmain` (break `*0xffffffff80000280` first, then `watch`).
+
+**The demand-fill theory is also dead.** `out_ring` is in `.bss`, so the tempting
+story was a stray 4 KiB `memset` from `vmm_handle_page_fault()` erasing it. It
+does not hold: `page_to_phys()` is `(page - page_array) << PAGE_SHIFT`,
+`phys_to_virt()` is `PHYS_DIRECT_MAP + phys`, and the PTE stores the same
+`page_to_phys()` result, so the memset and the mapping name the same frame. And
+the frame is inside `pmm: reserving kernel image 100000-2b9000`, so the allocator
+cannot hand it out at all.
+
+**The theory now in the tree is not a fix, it is a pin.** `tty_init()` reads the
+two ring pointers back and logs FATAL if the storage did not attach -- the only
+point at which "attached" can be checked, since the rings are declared
+`.buf = NULL` -- and `ring_push()` refuses a detached ring instead of storing
+through a null pointer. Neither check fired on 8 consecutive headless runs, so
+the invariant held on every one of them, and **the intermittency has not
+reproduced since**. That is a real result and it is not an explanation: the
+failure is still unexplained, and the checks exist so that if it returns it
+arrives as a located message rather than as a write to address 0.
 
 Two things already fixed here and worth not re-breaking:
 - `tty_read()` must enable interrupts across its `hlt` with **`sti`**, not with
