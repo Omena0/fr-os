@@ -255,15 +255,37 @@ void kmain(uint64_t bootinfo_phys)
 	/*
 	 * Privilege and interrupts.
 	 *
-	 * The GDT is reloaded with a proper TSS before the IDT exists, because the
-	 * TSS supplies RSP0 for every interrupt that arrives from ring 3. A CPU
-	 * taking such an interrupt without one faults on a null stack, inside the
-	 * fault handler, before it can report anything.
+	 * The IDT goes in before the GDT, not after.
+	 *
+	 * This used to be the other way round, with the reasoning that the TSS
+	 * must exist before any ring-3 interrupt can arrive, because a CPU taking
+	 * such an interrupt with no TSS would load RSP0 from nothing and fault
+	 * inside the fault handler. That is sound -- and it is a hazard from
+	 * *ring 3*, which cannot happen yet: there are no user processes and no
+	 * syscall entry installed at this point.
+	 *
+	 * The ordering cost far more than it bought. Everything that faults between
+	 * here and `idt_init()` is delivered through the *bootloader's* IDT, which
+	 * is still installed and whose entries are 16/32-bit stage2 stubs. Run
+	 * against a 64-bit frame those decode as something else entirely, so the
+	 * machine triple-faulted into a non-canonical RIP and RDX=0xE9 rather than
+	 * reporting anything:
+	 *
+	 *     IDT=000000000000b120 00000fff   <- stage2's, not ours
+	 *     RIP=66ee75b003f8ba66  RDX=0xe9
+	 *
+	 * That is what made this fault so hard to read: a bug in the kernel was
+	 * being reported by the bootloader, in the bootloader's own instruction
+	 * set, as an address that belonged to neither.
+	 *
+	 * The TSS still has to exist before anything arrives from ring 3, so
+	 * `tss_set_kernel_stack()` stays between the two. A fault inside
+	 * `gdt_reload` now lands in a real 64-bit handler and is reported.
 	 */
+	idt_init();
 	gdt_reload(0);
 	tss_set_kernel_stack((void *)__kernel_stack_top);
 	exceptions_init();
-	idt_init();
 
 	/*
 	 * Syscall entry. Installed after the IDT so that a user process cannot

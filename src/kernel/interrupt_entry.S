@@ -201,11 +201,22 @@ interrupt_common:
  * in an unusable state, and the C code after this call must not have to know
  * that a reload just happened.
  */
+/* TEMPORARY INSTRUMENTATION (gdthang): port-0xE9 + COM1 markers, no state. */
+	.macro	GDTMARK c8
+	movw	$0x3F8, %dx
+	movb	$(0x30 + \c8), %al	/* OUTB takes AL, not CL */
+	outb	%al, %dx
+	movw	$0xE9, %dx
+	outb	%al, %dx
+	.endm
+
 	.globl	gdt_flush
 	.type	gdt_flush, @function
 gdt_flush:
+	GDTMARK	'A'				/* entered */
 	movq	%rdi, %rax			/* the GDTR pointer, in full */
 	lgdt	(%rax)
+	GDTMARK	'B'				/* lgdt done */
 
 	/*
 	 * Reload the data segments while the old CS is still the one in use, and
@@ -219,40 +230,18 @@ gdt_flush:
 	movw	%ax, %fs
 	movw	%ax, %gs
 	movw	%ax, %ss
+	GDTMARK	'C'				/* segments reloaded */
 
-	/*
-	 * Reload CS with a far return, built as a real three-word frame.
-	 *
-	 * The previous version built a ten-byte far pointer at (%rsp) and jumped
-	 * through it with an instruction placed *before* the stack was cleaned up.
-	 * That has two defects and both are silent.
-	 *
-	 * The jump landed on the caller's return address with %rsp still ten bytes
-	 * below where it started, so from the caller's point of view the function
-	 * returned with a shifted stack: the return address was no longer at [%rsp].
-	 * The caller's own `ret` therefore popped whatever was underneath, and the
-	 * machine jumped there. That is the fault this whole investigation kept
-	 * showing -- an instruction fetch at an address that looks like a kernel
-	 * pointer with its top half replaced, roughly sixteen bytes past the GDT --
-	 * with no exception from the code that was actually running. The stack was
-	 * silently corrupt long before anything noticed.
-	 *
-	 * The segment reloads after the jump were dead code for the same reason,
-	 * so DS/ES/FS/GS/SS also kept stage2's cached descriptors.
-	 *
-	 * LRETQ at CPL 0 with CS also at RPL 0 pops exactly three words -- RIP,
-	 * CS, RFLAGS -- and leaves the caller's frame untouched, so the `ret` below
-	 * is an ordinary, balanced return. It pops the three, leaving RSP exactly
-	 * where it was on entry to this function, and `ret` then pops the return
-	 * address from the right place.
-	 */
+	GDTMARK	'D'				/* about to far-return */
 	pushq	$0x202				/* RFLAGS: IF set, reserved bit 1 */
 	pushq	$KERNEL_CODE_SELECTOR		/* CS */
 	pushq	.Lgdt_flush_resume		/* RIP */
 	lretq
 .Lgdt_flush_resume:
+	GDTMARK	'E'				/* back from lretq */
 	ret
-.size	gdt_flush, . - gdt_flush
+	.size	gdt_flush, . - gdt_flush
+
 
 /*
  * tss_flush — load TR with the TSS selector.
