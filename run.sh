@@ -16,6 +16,33 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# This script's own commentary, off by default.
+#
+# The serial log is the product. It is already delivered twice over, once live
+# to the terminal and once to $LOG, and the two are the same bytes -- so the
+# `tail -n 40 "$LOG"` that used to run at the end was a third delivery of output
+# the user had already watched go past, and the only thing it added was the
+# chance to read a line twice and wonder which copy was current.
+#
+# What is left is short status chatter, and it is worse than it looks: it is
+# interleaved with the kernel's own output on the same stream, so every line
+# the script adds is a line of the boot log that is not the boot log. The one
+# message that is not chatter is the empty-log diagnostic at the end, which only
+# prints when the guest said nothing at all and is kept unconditional.
+#
+# DEBUG=1 restores the diagnostics.
+DEBUG="${DEBUG:-0}"
+
+# Written as a full if rather than `[ ... ] && echo ... || true` because under
+# `set -e` a false test on the left of && makes the whole list return non-zero,
+# and the shell exits on a statement that looks like it should be harmless.
+note() {
+	if [ "$DEBUG" = "1" ]; then
+		echo "run.sh: $*" >&2
+	fi
+	return 0
+}
+
 IMAGE="${IMAGE:-build/os.img}"
 MEM="${MEM:-4G}"
 # One CPU, and deliberately so.
@@ -85,13 +112,13 @@ QEMU_ARGS=(
 # more likely to be a real difference than a configuration artefact.
 if [ -n "${FORCE_TCG:-}" ]; then
 	QEMU_ARGS+=(-cpu max)
-	echo "run.sh: FORCE_TCG=1, using TCG emulation" >&2
+	note "FORCE_TCG=1, using TCG emulation"
 elif [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
 	QEMU_ARGS+=(-enable-kvm -cpu host)
-	echo "run.sh: using KVM (-cpu host); FORCE_TCG=1 to compare under emulation" >&2
+	note "using KVM (-cpu host); FORCE_TCG=1 to compare under emulation"
 else
 	QEMU_ARGS+=(-cpu max)
-	echo "run.sh: /dev/kvm not usable, falling back to TCG emulation" >&2
+	note "/dev/kvm not usable, falling back to TCG emulation"
 fi
 
 # Serial to the terminal and to a log file. The log is what a test or a bug
@@ -140,8 +167,8 @@ else
 fi
 
 if [ "${1:-}" = "--gdb" ]; then
-	echo "run.sh: GDB stub listening on 127.0.0.1:1234" >&2
-	echo "run.sh: in another shell, run: gdb build/kernel.elf" >&2
+	note "GDB stub listening on 127.0.0.1:1234"
+	note "in another shell, run: gdb build/kernel.elf"
 	QEMU_ARGS+=(-s -S)
 fi
 
@@ -176,7 +203,15 @@ stop_qemu() {
 }
 
 cleanup() {
-	[ -n "$watchdog_pid" ] && kill "$watchdog_pid" 2>/dev/null
+	# Every step here is `|| true`, and that is load-bearing rather than
+	# stylistic. Under `set -e`, `[ -n "$x" ] && kill "$x"` is a statement whose
+	# exit status is the status of the whole list: when the variable is empty,
+	# or the process is already gone, the list returns non-zero and the shell
+	# exits -- from inside a trap, on the way to reporting what happened. That
+	# is why a perfectly good bounded run exited 1 with `timed_out=1` already
+	# decided and the "stopped after Ns" message two lines away: the script died
+	# in cleanup, silently, before reaching it.
+	[ -n "$watchdog_pid" ] && kill "$watchdog_pid" 2>/dev/null || true
 	watchdog_pid=""
 	stop_qemu
 	return 0
@@ -191,8 +226,25 @@ qemu_pid=$!
 # Sleep in the background so the wait below is interruptible. Using a subshell
 # rather than `&` on a compound command keeps $! pointing at the sleep, which
 # is what has to be killed on the way out.
+#
+# The watchdog leaves a marker *before* it signals, and the marker is how the
+# parent tells a timeout from a clean exit. It used to be told by testing
+# whether the watchdog was still alive, which is a race: the subshell is still
+# finishing its `kill` when the parent's `wait` returns, so the test usually
+# saw it alive, concluded no timeout, and fell through to `exit "$status"` with
+# whatever QEMU returned. QEMU exits non-zero when it is terminated, so a
+# perfectly good run reported failure -- and a CI job gating on this script's
+# exit code would have failed on every successful boot.
+#
+# The marker is written first, so if QEMU died from the watchdog the marker is
+# already there. That ordering is the whole point: there is no window in which
+# QEMU is dead and the marker does not exist.
+watchdog_marker="${LOG}.watchdog"
+rm -f "$watchdog_marker"
 if [ "$RUN_TIMEOUT" -gt 0 ] 2>/dev/null; then
-	( sleep "$RUN_TIMEOUT"; kill -TERM "$qemu_pid" 2>/dev/null || true ) &
+	( sleep "$RUN_TIMEOUT"
+	  : > "$watchdog_marker"
+	  kill -TERM "$qemu_pid" 2>/dev/null || true ) &
 	watchdog_pid=$!
 fi
 
@@ -204,19 +256,10 @@ while :; do
 		status=$?
 	fi
 
-	# QEMU handles SIGTERM itself and exits 0, so a watchdog stop and a clean
-	# shutdown are indistinguishable by exit code alone -- the watchdog sets a
-	# flag when it fires and that flag is what distinguishes them.
-	#
-	# The test is written as a full if rather than `[ x ] && y=1` on purpose.
-	# Under `set -e` a false `[ ... ]` on the left of && makes the whole list
-	# return non-zero, and because the list is a statement in its own right the
-	# shell exits on it -- which is how a successful run ends up reporting
-	# status 1.
-	if [ "$status" -eq 143 ] || [ "$status" -eq 130 ]; then
-		timed_out=1
-	elif [ -n "$watchdog_pid" ] && ! kill -0 "$watchdog_pid" 2>/dev/null; then
-		# The watchdog has fired and QEMU has already collected the signal.
+	# A watchdog stop and a clean shutdown are indistinguishable by exit code
+	# alone, because QEMU handles SIGTERM itself and reports a non-zero status
+	# for it. The marker is what distinguishes them.
+	if [ -e "$watchdog_marker" ]; then
 		timed_out=1
 	fi
 
@@ -235,18 +278,26 @@ done
 cleanup
 qemu_pid=""
 
-if [ -s "$LOG" ]; then
-	echo "run.sh: ---- $LOG (last 40 lines) ----" >&2
-	tail -n 40 "$LOG" >&2
-	echo "run.sh: ---- end of log, $(wc -l < "$LOG") lines total ----" >&2
-else
+# An empty log is a failure, not a status line, so this one is not behind DEBUG:
+# there is no other way to tell "the guest is still booting" from "the guest
+# never said anything" without reading the file, and an empty file has nothing
+# to read. A non-empty log needs no commentary -- it has already gone to the
+# terminal live.
+if [ ! -s "$LOG" ]; then
 	echo "run.sh: $LOG is empty -- the guest produced no serial output at all," >&2
 	echo "        which usually means it died before stage2's first print" >&2
 	echo "        (check that the image is the one you just built)" >&2
+elif [ "$DEBUG" = "1" ]; then
+	note "---- $LOG (last 40 lines) ----"
+	tail -n 40 "$LOG" >&2
+	note "---- end of log, $(wc -l < "$LOG") lines total ----"
 fi
 
 if [ "$timed_out" -eq 1 ]; then
-	echo "run.sh: stopped after ${RUN_TIMEOUT}s (SIGTERM, so the log above is complete)" >&2
+	# Worth keeping even without DEBUG: a bounded run that ends on the
+	# watchdog is indistinguishable from one that ended on its own, and
+	# "it just stopped" is the more alarming of the two readings.
+	echo "run.sh: stopped after ${RUN_TIMEOUT}s" >&2
 	exit 0
 fi
 exit "$status"
