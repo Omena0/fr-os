@@ -69,6 +69,43 @@ struct chunk {
  * whose size differs from the first -- which is exactly how the previous 16-byte
  * large prefix put `ptr - sizeof(struct chunk)` 16 bytes *below* the mmap base. */
 
+/*
+ * The shim under an aligned_alloc() / posix_memalign() address.
+ *
+ * Those entry points hand back an address that is up to `alignment - 1` bytes
+ * above the block malloc() actually returned, so the block's own header is not
+ * at ptr - sizeof(struct chunk) and free() cannot find the block from the
+ * address alone.  Three words immediately below the aligned address record
+ * what it cannot derive:
+ *
+ *     ptr - 24   alignment   so realloc() can allocate a replacement at the
+ *                            same alignment
+ *     ptr - 16   ALIGN_TAG   so free() can tell an aligned address from an
+ *                            ordinary one (see below)
+ *     ptr -  8   raw         the block to release
+ *
+ * Why ALIGN_TAG cannot be mistaken for an ordinary block: for a pointer this
+ * allocator returned from malloc(), ptr - 16 is chunk->class_idx, and that
+ * field only ever holds a small class index (< NCLASS) or exactly NCLASS for a
+ * large block.  ALIGN_TAG is above NCLASS, so no ordinary block can ever carry
+ * it there.  The bound is asserted rather than argued.
+ *
+ * The words are inside the over-allocated block: the alignment starts at
+ * raw + ALIGN_SHIM_SIZE, so at least ALIGN_SHIM_SIZE bytes always precede the
+ * aligned address.  free() already read 32 bytes below every pointer it was
+ * handed, so recognizing an aligned pointer widens that window to 24 bytes --
+ * three that were already being read, one new word that is inside the same
+ * allocation.  It never reaches outside memory that malloc() gave out.
+ */
+#define ALIGN_SHIM_SIZE  ((size_t)3 * sizeof(void *))
+#define ALIGN_TAG        ((uintptr_t)0xC0FFEE01UL)
+
+_Static_assert(ALIGN_TAG > NCLASS,
+	       "the aligned-allocation tag must not be a value "
+	       "chunk->class_idx can take");
+_Static_assert(sizeof(uintptr_t) == sizeof(size_t),
+	       "the shim assumes uintptr_t and size_t are the same width");
+
 /* -------------------------------- size class cache --------------------------- */
 
 struct tcache {
@@ -168,7 +205,47 @@ static inline int is_large_class(size_t class_idx)
 	return class_idx >= NCLASS;
 }
 
+/*
+ * The malloc() block underneath an aligned_alloc() / posix_memalign() address,
+ * or NULL if ptr is not one.  The caller has already established that the block
+ * header at ptr - sizeof(struct chunk) is not valid, which is what sends it
+ * looking here.
+ */
+static void *aligned_raw(void *ptr)
+{
+	const char *p = ptr;
+
+	if (*(const uintptr_t *)(p - 2 * sizeof(void *)) != ALIGN_TAG)
+		return NULL;
+	return *(void *const *)(p - sizeof(void *));
+}
+
+/*
+ * The alignment an aligned_alloc() / posix_memalign() address was produced
+ * with.  Callers only reach it after aligned_raw() has confirmed the tag.
+ */
+static size_t aligned_alignof(void *ptr)
+{
+	return *(const size_t *)((const char *)ptr - ALIGN_SHIM_SIZE);
+}
+
+/* A complete lookup: NULL unless ptr is a live aligned allocation whose
+ * recorded raw pointer really is a live block.  This is the gate that keeps a
+ * wild pointer from reaching the free list -- the tag alone is a hint, the
+ * magic word on the raw block is the proof. */
+static void *aligned_block(void *ptr)
+{
+	void *raw = aligned_raw(ptr);
+
+	if (!raw || !chunk_is_valid(ptr_to_chunk(raw)))
+		return NULL;
+	return raw;
+}
+
 #define TCACHE_INIT_MAGIC 0xFEEDFACEDEADBEEFUL
+
+/* Defined below, next to the other aligned helpers, but realloc() needs it. */
+static void *aligned_alloc_impl(size_t alignment, size_t size);
 
 
 static void tcache_init(void)
@@ -420,9 +497,25 @@ void free(void *ptr)
 	 * therefore lands here with magic == 0 and aborts, instead of pushing
 	 * the same chunk onto the free list a second time and letting the next
 	 * two mallocs of that class hand the identical address to two owners.
+	 *
+	 * The one pointer that is allowed to arrive without a valid header is
+	 * an aligned_alloc() / posix_memalign() address, whose real header is
+	 * further down; C11 7.22.3.1 and POSIX both require free() to take
+	 * it, and the shim above records enough to release the block.
+	 *
+	 * Note what the large case does *not* do: it unmaps, so a second free
+	 * of the same large pointer faults on the header read below rather
+	 * than reaching the abort.  Both kill the process; the fault is just
+	 * the less legible of the two, and avoiding it would mean not
+	 * unmapping, which is the whole reason that path exists.
 	 */
 	if (!chunk_is_valid(ch)) {
-		abort();  /* Corrupted or already-freed chunk */
+		void *raw = aligned_block(ptr);
+
+		if (!raw)
+			abort();  /* Corrupted or already-freed chunk */
+		ptr = raw;
+		ch = ptr_to_chunk(raw);
 	}
 	class_idx = ch->class_idx;
 	size = ch->size;
@@ -481,7 +574,40 @@ void *realloc(void *ptr, size_t size)
 	}
 	ch = ptr_to_chunk(ptr);
 	if (!chunk_is_valid(ch)) {
-		abort();
+		/*
+		 * An aligned_alloc() / posix_memalign() address: C11 7.22.3.5
+		 * does not list it among the pointers realloc() accepts, but
+		 * glibc accepts it and aborting here would be a needless
+		 * trap.  There is no in-place path for it -- the new block
+		 * has to land on a different address to be aligned, and the
+		 * old one has to be released through the shim -- so allocate
+		 * a replacement, copy, and free the raw block.
+		 */
+		size_t alignment;
+		void *raw = aligned_block(ptr);
+		void *fresh;
+
+		if (!raw)
+			abort();
+		alignment = aligned_alignof(ptr);
+		fresh = aligned_alloc_impl(alignment, size);
+		if (!fresh)
+			return NULL;
+		/*
+		 * The copy is bounded by the raw block's usable size, which
+		 * covers the payload the caller was given plus the alignment
+		 * and shim slack above it.  Reading that far from ptr stays
+		 * inside the block; the bytes past the caller's own size are
+		 * indeterminate, which is exactly what realloc() is entitled
+		 * to produce.
+		 */
+		{
+			size_t room = malloc_usable_size(raw);
+
+			memcpy(fresh, ptr, room < size ? room : size);
+		}
+		free(raw);
+		return fresh;
 	}
 	old_size = ch->size;
 	class_idx = ch->class_idx;
@@ -546,9 +672,19 @@ void *reallocarray(void *ptr, size_t nmemb, size_t size)
  * The two aligned entry points share everything but the C11 rule they have to
  * disagree about: aligned_alloc(7) requires size to be a multiple of alignment
  * and returns NULL when it is not, while posix_memalign(3) has no such
- * requirement and rounds. Both over-allocate alignment + sizeof(void*) bytes so
- * there is room to slide the returned address up and to stash the raw pointer
- * in the sizeof(void*) bytes immediately below it.
+ * requirement and rounds.
+ *
+ * The block is rounded + alignment + ALIGN_SHIM_SIZE bytes, and the aligned
+ * address is found by sliding up from raw + ALIGN_SHIM_SIZE.  Two consequences,
+ * both of which the sizes above are chosen for:
+ *
+ *   - aligned >= raw + ALIGN_SHIM_SIZE, so the shim is inside the block and
+ *     never overlaps malloc()'s header, whatever the alignment is.
+ *   - aligned <= raw + ALIGN_SHIM_SIZE + alignment - 1, so the payload ends
+ *     at worst one byte before the end of the block.  That is why the
+ *     over-allocation is ALIGN_SHIM_SIZE rather than one word: with a single
+ *     word of slack the alignment could land at raw + sizeof(void*) and the
+ *     shim would run off the bottom of the allocation.
  */
 static void *aligned_alloc_impl(size_t alignment, size_t size)
 {
@@ -558,13 +694,15 @@ static void *aligned_alloc_impl(size_t alignment, size_t size)
 
 	if (align_up_checked(size, alignment, &rounded))
 		return NULL;
-	if (rounded > SIZE_MAX - alignment - sizeof(void *))
+	if (rounded > SIZE_MAX - alignment - ALIGN_SHIM_SIZE)
 		return NULL;
-	raw = malloc(rounded + alignment + sizeof(void *));
+	raw = malloc(rounded + alignment + ALIGN_SHIM_SIZE);
 	if (!raw)
 		return NULL;
 	raw_addr = (uintptr_t)raw;
-	aligned = align_up(raw_addr + sizeof(void *), alignment);
+	aligned = align_up(raw_addr + ALIGN_SHIM_SIZE, alignment);
+	*(size_t *)(aligned - ALIGN_SHIM_SIZE) = alignment;
+	*(uintptr_t *)(aligned - 2 * sizeof(void *)) = ALIGN_TAG;
 	*(void **)(aligned - sizeof(void *)) = raw;
 	return (void *)aligned;
 }
@@ -612,8 +750,12 @@ size_t malloc_usable_size(void *ptr)
 	if (!ptr)
 		return 0;
 	ch = ptr_to_chunk(ptr);
-	if (!chunk_is_valid(ch))
-		return 0;
+	if (!chunk_is_valid(ch)) {
+		/* An aligned address: report the block underneath it. */
+		void *raw = aligned_block(ptr);
+
+		return raw ? malloc_usable_size(raw) : 0;
+	}
 	return ch->size;
 }
 

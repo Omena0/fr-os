@@ -180,6 +180,13 @@ static void handle_string(struct fmt_state *st, int width, int left_align,
  * pad, which is exactly the slot `sign` occupies, so they travel the same way.
  * C99 7.21.6.1 p6: "#" has no effect on d, i, u, so no prefix is passed for
  * those.
+ *
+ * The sign survives an empty field. A precision of zero suppresses the *digits*
+ * of a zero value ("%.0d" of 0 is the empty field), not the sign: "The result
+ * of a signed conversion always begins with a plus or minus sign" is a
+ * statement about the conversion, and it does not carve out an exception for
+ * "%.0d". So "%+.0d" of 0 is "+" and "% .0d" of 0 is " ", which is what the
+ * digits-suppressed rule leaves untouched.
  */
 static void handle_signed(struct fmt_state *st, long long value, unsigned base,
 			  int width, int left_align, int zero_pad,
@@ -204,13 +211,28 @@ static void handle_signed(struct fmt_state *st, long long value, unsigned base,
 
 	if (has_precision && precision == 0 && value == 0)
 		len = 0;
-	/* An empty field has no first digit to prefix. */
-	if (len == 0)
-		sign = negative ? "-" : NULL;
 	emit_padded(st, buf, len, (size_t)precision, has_precision, width,
 		    left_align, zero_pad, sign);
 }
 
+/*
+ * C99 7.21.6.1 p6, for "#":
+ *
+ *   x, X  a *nonzero* result has 0x (0X) prefixed to it.  The qualifier is
+ *         part of the condition, so %#x of 0 is "0" and not "0x0", and
+ *         %#.3x of 0 is "000".  A field that is empty for want of digits has
+ *         no first digit to prefix either, so %#.0x of 0 is the empty field.
+ *
+ *   o     it increases the precision, if and only if necessary, to force the
+ *         first digit of the result to be a zero.  There is no separate prefix
+ *         to place: the extra digit is a leading zero like any other, so it is
+ *         expressed by raising the precision floor just enough and letting
+ *         emit_padded() zero-fill.  "Necessary" is the whole rule -- the floor
+ *         only moves when the field would otherwise not start with a zero. So
+ *         "%#o" of 1 is "01" (the "1" needs a zero in front) while "%#3o" of 1
+ *         is "001" (the precision already supplies one), and "%#o" of 0 is "0"
+ *         rather than "00" (the single digit already is that zero).
+ */
 static void handle_unsigned(struct fmt_state *st, unsigned long long value,
 			    unsigned base, int upper, int width, int left_align,
 			    int zero_pad, int precision, int has_precision,
@@ -223,33 +245,32 @@ static void handle_unsigned(struct fmt_state *st, unsigned long long value,
 	 * on the digit count, and the value happens to need none. */
 	if (has_precision && precision == 0 && value == 0)
 		len = 0;
-	/*
-	 * C99 7.21.6.1 p6, for '#': "for o ... increases the precision, if and
-	 * only if necessary, to force the first digit to be a zero". So the
-	 * prefix is not a decoration to bolt on, it is a *digit*: it is needed
-	 * only when the conversion would not otherwise start with one. Two
-	 * cases where it is not needed and was being emitted anyway:
-	 *   %#o of 0     -> "00", the value is already a single leading zero
-	 *   %#.0x of 0   -> "0x", and the field is empty to begin with
-	 */
+
 	if (alternate) {
-		if (len == 0) {
+		if (base == 8) {
 			/*
-			 * For octal the prefix is a *digit* the '#' rule
-			 * restores, so the empty field regains one:
-			 *   %#.0o of 0 -> "0", not "" and not "00".
-			 * For every other base an empty field simply has no
-			 * first digit to prefix, so the prefix goes away:
-			 *   %#.0x of 0 -> "", not "0x".
+			 * The extra digit is needed only if the field does not
+			 * already begin with a zero. A value of 0 prints the
+			 * single digit "0", which is already the leading zero,
+			 * so "%#o" of 0 is "0" and not "00"; the same is true
+			 * of an empty field, which is the zero value at
+			 * precision 0 and so needs one digit back: "%#.0o" of
+			 * 0 is "0". Every other value starts with a nonzero
+			 * digit and needs exactly one more digit in front of
+			 * it, which the precision floor supplies.
 			 */
-			if (base == 8) {
-				buf[0] = '0';
-				len = 1;
+			size_t need = 0;
+
+			if (len == 0)
+				need = 1;
+			else if (buf[0] != '0')
+				need = len + 1;
+			if (need && (!has_precision || (size_t)precision < need)) {
+				precision = (int)need;
+				has_precision = 1;
 			}
 			alternate = NULL;
-		} else if (base == 8 && value == 0) {
-			/* %#o of 0 with room to print: the digit is
-			 * already the leading zero. */
+		} else if (value == 0 || len == 0) {
 			alternate = NULL;
 		}
 	}
@@ -396,8 +417,12 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
 			zero_pad = 0;
 		}
 
-		/* Length modifier. 'z' is a signed size_t, which on this target
-		 * is the same width as 'l'. */
+		/* Length modifier. On this LP64 target 'z' (size_t), 'j'
+		 * (intmax_t) and 't' (ptrdiff_t) all have the same width as
+		 * 'l', so they map onto it; 'z' is signed here only in the
+		 * sense that the *unsigned* conversions are the ones that
+		 * reach for it, and the switch below picks the unsigned or
+		 * signed va_arg to match the conversion character. */
 		for (;;) {
 			if (*p == 'l') {
 				longness++;
@@ -406,7 +431,13 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
 				longness--;
 				p++;
 			} else if (*p == 'z') {
-				longness = 1;
+				longness = LEN_LONG;
+				p++;
+			} else if (*p == 'j') {
+				longness = LEN_LLONG;
+				p++;
+			} else if (*p == 't') {
+				longness = LEN_LONG;
 				p++;
 			} else {
 				break;
@@ -418,12 +449,23 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
 		case 'i': {
 			long long v;
 
-			if (longness >= 2)
+			if (longness >= LEN_LLONG)
 				v = va_arg(st.ap, long long);
-			else if (longness == 1)
+			else if (longness == LEN_LONG)
 				v = va_arg(st.ap, long);
-			else if (longness == -1)
+			else if (longness == LEN_SHORT)
 				v = (short)va_arg(st.ap, int);
+			else if (longness <= LEN_CHAR)
+				/*
+				 * 'hh'. `longness` counts the modifiers, so
+				 * "hh" lands on -2 and a nonsense run like
+				 * "hhhh" further down; both are the same
+				 * conversion and both have to narrow to a
+				 * char. Reaching here with longness == 0 --
+				 * no modifier at all -- is the int case
+				 * above, which must not be narrowed.
+				 */
+				v = (signed char)va_arg(st.ap, int);
 			else
 				v = va_arg(st.ap, int);
 			/* d/i have no alternate form, so '#' adds nothing. */
@@ -461,14 +503,21 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
 					alt_prefix = "0x";
 				else if (*p == 'X')
 					alt_prefix = "0X";
+				else if (*p == 'b')
+					/* %b is this libc's own extension;
+					 * it shares the arm with x/X so it
+					 * follows the same rule. */
+					alt_prefix = "0b";
 			}
 
-			if (longness >= 2)
+			if (longness >= LEN_LLONG)
 				v = va_arg(st.ap, unsigned long long);
-			else if (longness == 1)
+			else if (longness == LEN_LONG)
 				v = va_arg(st.ap, unsigned long);
-			else if (longness == -1)
+			else if (longness == LEN_SHORT)
 				v = (unsigned short)va_arg(st.ap, unsigned int);
+			else if (longness <= LEN_CHAR)
+				v = (unsigned char)va_arg(st.ap, unsigned int);
 			else
 				v = va_arg(st.ap, unsigned int);
 			handle_unsigned(&st, v, base, *p == 'X', width, left_align,
@@ -495,14 +544,15 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
 			unsigned long long v =
 				(unsigned long long)(uintptr_t)va_arg(st.ap, void *);
 			char buf[DIGITS_MAX];
-			char prefix[2] = { '0', 'x' };
 			size_t len = utoa(buf, sizeof(buf), v, 16, 0);
-			size_t pad = len < 16 ? 16 - len : 0;
+			size_t digits = 16;
+			size_t fixed;
+			size_t pad;
 
 			/*
 			 * Pointers are always 0x-prefixed and zero-padded to
-			 * 16 hex digits, because an abbreviated address is a
-			 * debugging trap: `0x1234` from a pointer print is
+			 * at least 16 hex digits, because an abbreviated address
+			 * is a debugging trap: `0x1234` from a pointer print is
 			 * indistinguishable from the integer 0x1234.
 			 *
 			 * This deliberately differs from glibc, which strips
@@ -514,15 +564,32 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
 			 * parses %p output as a fixed-length string is the
 			 * thing this breaks, and it should not exist.
 			 *
+			 * Width and '-' apply on top of that, as they do for
+			 * every other conversion: a field narrower than the
+			 * 18 characters the body needs is never truncated, and
+			 * a wider one is padded with spaces (or, for '0', with
+			 * zeros inside the body where the numeric conversions
+			 * put them -- after the 0x, not after the digits).
+			 *
 			 * Positional parameters (%1$d) are NOT implemented;
 			 * they are passed through as literal text. Nothing in
 			 * the tree uses them and supporting them means
 			 * reordering the va_list, which is a different piece
 			 * of work from anything else in this file.
 			 */
-			sink_put(&st, prefix, sizeof(prefix));
-			sink_repeat(&st, '0', pad);
+			if (zero_pad && width > 2 + 16)
+				digits = (size_t)width - 2;
+			fixed = 2 + digits;
+			pad = (size_t)width > fixed ? (size_t)width - fixed : 0;
+
+			if (!left_align)
+				sink_repeat(&st, ' ', pad);
+			sink_put(&st, "0x", 2);
+			/* len <= 16 for every 64-bit value and digits >= 16. */
+			sink_repeat(&st, '0', digits - len);
 			sink_put(&st, buf, len);
+			if (left_align)
+				sink_repeat(&st, ' ', pad);
 			break;
 		}
 		case '%':
@@ -534,11 +601,20 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
 			continue;
 		default:
 			/*
-			 * Unsupported or unknown conversion: the specifier is
-			 * echoed verbatim so a typo is visible in the output
-			 * instead of silently vanishing, and so %f/%e/%g/%a
-			 * and %L... read as unsupported rather than as a
-			 * format string that happens to consume nothing.
+			 * Unsupported or unknown conversion: "%" followed by the
+			 * conversion character is emitted so a typo is visible
+			 * in the output instead of silently vanishing, and so
+			 * %f/%e/%g/%a and %L... read as unsupported rather
+			 * than as a format string that happens to consume
+			 * nothing. Flags, width, precision and the length
+			 * modifier have already been consumed and are dropped
+			 * -- so "%20.3f" is reported as "%f", not as
+			 * "%20.3f". What identifies the unsupported
+			 * conversion is the character, and that is what is
+			 * kept. C99 7.21.6.1 p9 leaves an invalid conversion
+			 * specification undefined, so glibc's choice to fail
+			 * the whole call with a negative return is the other
+			 * permitted answer, not the required one.
 			 */
 			sink_put(&st, "%", 1);
 			sink_put(&st, p, 1);

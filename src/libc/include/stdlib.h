@@ -4,8 +4,10 @@
  * The allocator is a segregated-list design with a per-thread free-list cache
  * and mmap-backed arenas. Anything larger than 128 KiB bypasses the arena
  * entirely and is handed out by mmap directly, so a single huge allocation
- * cannot fragment a shared arena. Freed memory is zeroed so a use-after-free
- * reads as a null pointer rather than stale data.
+ * cannot fragment a shared arena. Freed memory is poisoned with 0xFE and the
+ * chunk's magic is cleared, so a use-after-free reads as poison rather than as
+ * stale data and a second free() of the same pointer is refused instead of
+ * putting the block on a free list twice.
  */
 #ifndef STDLIB_H
 #define STDLIB_H
@@ -32,21 +34,23 @@ size_t malloc_usable_size(void *ptr);
 int   malloc_trim(size_t pad);
 
 /*
- * aligned_alloc and posix_memalign over-allocate and store the raw pointer in
- * the sizeof(void*) bytes immediately below the address they return.
+ * aligned_alloc and posix_memalign over-allocate and slide the returned address
+ * up to the requested alignment, recording the block malloc() really returned
+ * in the words immediately below the address they hand back. free(), realloc()
+ * and malloc_usable_size() all recognise such an address and act on the block
+ * underneath, so the C11 and POSIX requirement that free() accept the result
+ * is met. See the shim comment in src/libc/src/malloc.c for how a plain malloc()
+ * pointer is told apart from one of these, which is what keeps the recognition
+ * from mistaking a normal block for an aligned one.
  *
- * Consequence, and it is a real limitation rather than an oversight: free()
- * cannot accept the aligned address. free() validates the block by reading the
- * header at `ptr - sizeof(struct chunk)`, and for an aligned pointer those
- * bytes are the stored raw pointer, not a header -- so free() refuses it and
- * aborts instead of corrupting the heap. A program that needs aligned memory
- * that free() can reclaim must ask malloc() for `size + alignment +
- * sizeof(void *)` and do the alignment itself.
+ * Two allocator behaviours a caller can observe and cannot change:
  *
- * C11 7.22.3.1 and POSIX both say free() shall accept the aligned result;
- * neither is satisfied here. Nothing in the tree uses these two functions, so
- * the gap is documented rather than worked around; the fix belongs in the
- * allocator, which is the only code that can find the raw pointer.
+ *   - free() of a block over 128 KiB unmaps it, so a *second* free() of the
+ *     same large pointer faults on the header read instead of calling abort().
+ *     Both end the process; the fault is just the less legible of the two.
+ *   - realloc() of an aligned address may return a different address. It has
+ *     to: the replacement must land on an aligned address and the old block
+ *     must be released through the shim.
  */
 void *aligned_alloc(size_t alignment, size_t size);
 int   posix_memalign(void **memptr, size_t alignment, size_t size);
@@ -57,6 +61,14 @@ void  abort(void) __attribute__((noreturn));
 int   atexit(void (*func)(void));
 int   __cxa_atexit(void (*func)(void), void *arg, void *dso_handle);
 
+/*
+ * The strtoxx family follows C99 7.20.1.4, and that is deliberate: base 0
+ * makes "0b101" base 8, so it converts to 0 with endptr after the leading '0'.
+ * C23 added a binary prefix and glibc accepts one, so a program ported from
+ * there that passes "0b101" gets 0 rather than 5. Adding it would change a
+ * result the standard this libc implements defines, so it is not added; a
+ * caller that wants base 2 spells it out with base == 2 and a "0" of its own.
+ */
 int    atoi(const char *nptr);
 long   atol(const char *nptr);
 long long atoll(const char *nptr);

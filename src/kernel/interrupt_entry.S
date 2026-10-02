@@ -201,22 +201,24 @@ interrupt_common:
  * in an unusable state, and the C code after this call must not have to know
  * that a reload just happened.
  */
-/* TEMPORARY INSTRUMENTATION (gdthang): port-0xE9 + COM1 markers, no state. */
-	.macro	GDTMARK c8
-	movw	$0x3F8, %dx
-	movb	$(0x30 + \c8), %al	/* OUTB takes AL, not CL */
-	outb	%al, %dx
-	movw	$0xE9, %dx
-	outb	%al, %dx
-	.endm
+/* TEMPORARY INSTRUMENTATION (gdthang): port-0xE9 markers, no state, no COM1. */
+	.equ	GDT_E_A,	0x41
+	.equ	GDT_E_B,	0x42
+	.equ	GDT_E_C,	0x43
+	.equ	GDT_E_D,	0x44
+	.equ	GDT_E_E,	0x45
 
 	.globl	gdt_flush
 	.type	gdt_flush, @function
 gdt_flush:
-	GDTMARK	'A'				/* entered */
+	movb	$GDT_E_A, %al
+	outb	%al, $0xE9
+
 	movq	%rdi, %rax			/* the GDTR pointer, in full */
 	lgdt	(%rax)
-	GDTMARK	'B'				/* lgdt done */
+
+	movb	$GDT_E_B, %al
+	outb	%al, $0xE9
 
 	/*
 	 * Reload the data segments while the old CS is still the one in use, and
@@ -230,17 +232,23 @@ gdt_flush:
 	movw	%ax, %fs
 	movw	%ax, %gs
 	movw	%ax, %ss
-	GDTMARK	'C'				/* segments reloaded */
 
-	GDTMARK	'D'				/* about to far-return */
+	movb	$GDT_E_C, %al
+	outb	%al, $0xE9
+
+	movb	$GDT_E_D, %al
+	outb	%al, $0xE9
+
 	pushq	$0x202				/* RFLAGS: IF set, reserved bit 1 */
 	pushq	$KERNEL_CODE_SELECTOR		/* CS */
 	pushq	.Lgdt_flush_resume		/* RIP */
 	lretq
 .Lgdt_flush_resume:
-	GDTMARK	'E'				/* back from lretq */
+	movb	$GDT_E_E, %al
+	outb	%al, $0xE9
 	ret
 	.size	gdt_flush, . - gdt_flush
+
 
 
 /*

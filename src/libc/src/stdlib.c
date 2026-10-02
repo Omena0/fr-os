@@ -122,6 +122,21 @@ static void store_result(void *result, enum str_width width, int is_unsigned,
 	}
 }
 
+/* The value of one hex digit, or -1.  Written out rather than reaching for
+ * <ctype.h>, which this libc does not have, and ASCII-only on purpose: the
+ * base-16 digit set is a fixed list of characters in C99 7.20.1.4, not
+ * something locale-dependent. */
+static int hex_digit(int c)
+{
+	if (c >= '0' && c <= '9')
+		return c - '0';
+	if (c >= 'a' && c <= 'f')
+		return c - 'a' + 10;
+	if (c >= 'A' && c <= 'F')
+		return c - 'A' + 10;
+	return -1;
+}
+
 static int strtoxx(const char *nptr, char **endptr, int base, int is_unsigned,
 		   void *result, enum str_width width)
 {
@@ -145,8 +160,21 @@ static int strtoxx(const char *nptr, char **endptr, int base, int is_unsigned,
 		s++;
 	}
 
-	/* Handle base prefix */
-	if ((base == 0 || base == 16) && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+	/* Handle base prefix.
+	 *
+	 * The "0x" is part of the expected form, not part of a digit, and the
+	 * expected form requires hex digits *after* it: C99 7.20.1.4p4 falls
+	 * back to "the longest initial subsequence of the expected form" when
+	 * the whole thing does not match, which for "0x" and "0xg" is just the
+	 * leading "0".  Consuming the prefix anyway made strtol("0x", &e, 16)
+	 * report no conversion at all and store nptr in *endptr, when the
+	 * answer is 0 with *endptr pointing at the "x" -- which is also where
+	 * the longest-subsequence rule puts it.  So the prefix is only taken
+	 * when a hex digit actually follows it.  Reading s[2] is safe because
+	 * s[1] is known to be 'x' or 'X', so s[2] is at worst the NUL.
+	 */
+	if ((base == 0 || base == 16) && s[0] == '0' &&
+	    (s[1] == 'x' || s[1] == 'X') && hex_digit(s[2]) >= 0) {
 		s += 2;
 		base = 16;
 	}
@@ -197,9 +225,18 @@ static int strtoxx(const char *nptr, char **endptr, int base, int is_unsigned,
 	if (any < 0) {
 		__errno = ERANGE;
 		if (is_unsigned)
-			/* "-1" is 1 converted to unsigned and then negated,
-			 * which is the maximum. */
-			sat = neg ? 1ULL : ULLONG_MAX;
+			/*
+			 * ULLONG_MAX whether or not a sign was present. A
+			 * magnitude too large for the *unsigned* result type
+			 * has no negative range to clamp to, and the only
+			 * answer consistent with the in-range "-1" is
+			 * ULONG_MAX: the value is converted and then negated
+			 * in the unsigned type (C99 7.20.1.4). Returning 1
+			 * here -- which is what this did for a negative
+			 * subject sequence -- was neither the wrap nor the
+			 * clamp, and disagreed with every other libc.
+			 */
+			sat = ULLONG_MAX;
 		else
 			sat = neg ? (unsigned long long)LLONG_MAX + 1
 				 : (unsigned long long)LLONG_MAX;
@@ -440,10 +477,23 @@ static int log2_int(int n)
 /*
  * A pivot selection that is only a heuristic -- getting it wrong costs time,
  * not order -- but this one was wrong in a way that did cost order in the
- * caller: when compar(a, b) <= 0 and compar(a, c) > 0, a is the *smallest* of
- * the three (b >= a > c) so the median is b, and the code returned a. Left
- * alone it still sorts correctly; it just picks the smallest of three samples
- * as the pivot far more often than intended.
+ * caller.  Take the branch the three-way compare lands in:
+ *
+ *   compar(a, b) > 0     a > b.  Then b > c makes b the median; otherwise
+ *                        c >= b, and a > c makes c the median while
+ *                        c >= a > b leaves a as the median.
+ *   compar(a, b) <= 0    a <= b.  Then a > c makes *a* the median -- the
+ *                        branch that used to return b and hand the caller the
+ *                        largest of the three samples.  Otherwise b > c with
+ *                        a <= c leaves c as the median, and a <= b <= c
+ *                        leaves b as the median.
+ *
+ * The second bullet's old comment claimed the opposite ("b >= a > c so a is
+ * the smallest of the three, therefore the median is b"), which is wrong twice
+ * over: if c < a <= b then a is the *median* and c is the smallest.  The
+ * consequence was not a wrong order -- partition() and heapsort() make the
+ * pivot choice affect only time -- but a wrong pivot one time in six, which is
+ * a large fraction of the 1/3 that median-of-three already misses.
  */
 static void *median_of_three(char *a, char *b, char *c,
 			     int (*compar)(const void *, const void *))
@@ -456,7 +506,7 @@ static void *median_of_three(char *a, char *b, char *c,
 		return a;
 	}
 	if (compar(a, c) > 0)
-		return b;
+		return a;
 	if (compar(b, c) > 0)
 		return c;
 	return b;

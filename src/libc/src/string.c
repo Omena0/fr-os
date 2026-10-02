@@ -206,9 +206,27 @@ static unsigned char to_lower(unsigned char c)
 	return (c >= 'A' && c <= 'Z') ? c + ('a' - 'A') : c;
 }
 
+/*
+ * Both case-insensitive compares have to fold *before* deciding the bytes
+ * differ.  Testing `*a == *b` first and only then folding is a different
+ * function: strcasecmp("ab", "A") stopped at the first pair, saw 'a' != 'A',
+ * and reported the folded difference of 'a' and 'A', which is zero -- so it
+ * claimed "ab" and "A" were equal, and likewise "abc" against "A".  The
+ * strncasecmp had the same shape one character at a time.
+ *
+ * The comparisons below subtract the two *folded* bytes and return that
+ * difference, which is zero if and only if the two characters fold to the same
+ * byte.  That is the only property strcmp(3) promises a caller, and it is what
+ * the old byte test failed to give.
+ */
 int strcasecmp(const char *a, const char *b)
 {
-	while (*a && *a == *b) {
+	while (*a && *b) {
+		int d = (int)to_lower((unsigned char)*a) -
+			(int)to_lower((unsigned char)*b);
+
+		if (d)
+			return d;
 		a++;
 		b++;
 	}
@@ -221,9 +239,11 @@ int strncasecmp(const char *a, const char *b, size_t n)
 	size_t i;
 
 	for (i = 0; i < n; i++) {
-		if (a[i] != b[i])
-			return (int)to_lower((unsigned char)a[i]) -
-			       (int)to_lower((unsigned char)b[i]);
+		int d = (int)to_lower((unsigned char)a[i]) -
+			(int)to_lower((unsigned char)b[i]);
+
+		if (d)
+			return d;
 		if (a[i] == '\0')
 			return 0;
 	}
