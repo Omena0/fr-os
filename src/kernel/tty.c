@@ -403,14 +403,23 @@ static void ps2_flush(void)
 }
 
 /* Consume one controller response, leaving the data register. Used to swallow the
- * 0xFA that acknowledges a command the kernel just sent. */
-static void ps2_expect_ack(void)
+ * 0xFA that acknowledges a command the kernel just sent.
+ *
+ * Takes the command byte so the failure can name it. "8042 answered 0x00 where
+ * an ack was expected" identifies the controller's mood and nothing else: there
+ * are several steps in the sequence and no way to tell which of them produced
+ * it, which is how an unacknowledged enable-scanning -- the step that decides
+ * whether a keystroke can raise an interrupt at all -- can look like a problem
+ * with the keyboard rather than with the sequence.
+ */
+static void ps2_expect_ack(uint8_t cmd, uint8_t want)
 {
 	uint8_t resp = ps2_read_data();
 
-	if (resp != 0xFA)
-		klog(KLOG_WARN, "tty: 8042 answered 0x%02x where an ack was "
-		     "expected\n", (unsigned)resp);
+	if (resp != want)
+		klog(KLOG_WARN, "tty: 8042 command 0x%02x answered 0x%02x, "
+		     "expected 0x%02x\n", (unsigned)cmd, (unsigned)resp,
+		     (unsigned)want);
 }
 
 /* ---------------------------------------------- scancode translation -------- */
@@ -622,58 +631,29 @@ void tty_init(void)
 	 */
 	pic_remap();
 
-	/* The controller may not be present. Everything below is best-effort
-	 * after the self test fails, and each step is allowed to fail, because a
-	 * machine with no PS/2 controller still has a perfectly good terminal —
-	 * it just cannot be typed at. */
-	if (ps2_write_port(PS2_CMD, PS2_CMD_SELF_TEST)) {
-		uint8_t result = ps2_read_data();
-
-		if (result != 0x55) {
-			klog(KLOG_WARN, "tty: 8042 self test returned 0x%02x; "
-			     "keyboard input disabled\n", (unsigned)result);
-			irq_restore(flags);
-			return;
-		}
-
-		/*
-		 * The controller answers the self test twice: 0x55 for the result,
-		 * and then 0xAA, the power-on self-test byte. Only the first was
-		 * being read, so 0xAA stayed in the data register and was picked up
-		 * as the reply to the *next* command -- which is where
-		 *
-		 *   "tty: 8042 answered 0xaa where an ack was expected"
-		 *
-		 * came from. The reply the sequence was actually reading was never
-		 * the reply to anything it had sent, so every ack after this point
-		 * was compared against the wrong byte and every keyboard command
-		 * after it was misjudged as unacknowledged.
-		 */
-		(void)ps2_read_data();
-	} else {
-		klog(KLOG_WARN, "tty: 8042 did not answer; keyboard input "
-		     "disabled\n");
-		irq_restore(flags);
-		return;
-	}
-
-	/* A reset leaves the controller with scanning off and the config byte
-	 * cleared, so both have to be re-established after it. */
 	/*
-	 * 0xFF sent to the *keyboard* is not acknowledged with 0xFA. It makes the
-	 * keyboard run its basic atomic test, and the reply is 0xAA -- the BAT
-	 * completion code. 0xFA belongs to the interface commands that follow, and
-	 * asking for it here is how this step got reported as unacknowledged even
-	 * once the leftover self-test byte had been accounted for.
-	 */
-	if (ps2_write_port(PS2_DATA, KBD_CMD_RESET))
-		(void)ps2_read_data();		/* BAT completion, 0xAA */
-
-	/* Drain anything the reset produced before the next command. */
-	ps2_flush();
+	 * Drain the controller before the first command, and do not run its self
+	 * test.
+	 *
+	 * The self test was here, and it is the step everything downstream was
+	 * getting wrong. The controller answers 0xAA with 0x55 and then 0xAA; some
+	 * implementations -- QEMU among them -- answer with 0x55 alone. Consuming
+	 * "the second byte" on the assumption that it is always there reads a reply
+	 * that belongs to a *later* command, and then that command's real reply is
+	 * never seen. Both readings were tried here and neither is reliable:
+	 * trusting one byte leaves a stray 0xAA to be mistaken for the next reply,
+	 * and trusting two swallows the next reply instead. The observed result was
+	 * "8042 command 0xae answered 0x00" -- the enable-interface command,
+	 * unanswered, which is why no key ever arrived.
+	 *
+	 * The self test is diagnostic, not setup. A controller that is absent leaves
+	 * the port unreadable, which the bounded waits below already turn into a
+	 * reported failure rather than a hang. Draining first gives a known-empty
+	 * register, which is the property the sequence actually needs.
+	 */	ps2_flush();
 
 	if (ps2_write_port(PS2_CMD, PS2_CMD_ENABLE_KBD))
-		ps2_expect_ack();
+		ps2_expect_ack(PS2_CMD_ENABLE_KBD, 0xFA);
 
 	ps2_flush();
 
@@ -695,7 +675,7 @@ void tty_init(void)
 	/* Scanning on, or no interrupt is ever generated no matter what the
 	 * config byte says. */
 	if (ps2_write_port(PS2_DATA, KBD_CMD_ENABLE_SCAN))
-		ps2_expect_ack();
+		ps2_expect_ack(KBD_CMD_ENABLE_SCAN, 0xFA);
 
 	ps2_flush();
 
