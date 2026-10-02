@@ -137,12 +137,23 @@
  * address space the kernel is in the middle of constructing — so the answer is
  * asked for rather than derived.
  *
- * The value is the *end* of the TLS block, not its start, and that is not a
- * choice this ABI gets to make. A local-exec `__thread` access is a fixed
- * displacement from FS (measured on the artefact: a variable at offset 0 of a
- * 16-byte block compiles to `mov %fs:-16`), so the thread pointer has to be
- * the address one past the last byte for every access to land where the
- * linker put the variable. See the comment on `tls_ptr` in kernel/include/vmm.h.
+ * The value is NOT simply "one past the last byte of the block". It is
+ *
+ *     tp = ALIGN_UP(p_vaddr + p_memsz, p_align)
+ *
+ * and the alignment is load-bearing. Local-exec TLS is addressed at negative
+ * displacements from FS, so a thread pointer that is even a few bytes off
+ * resolves every `__thread` access to the wrong address -- usually *inside* the
+ * same mapped page, so it corrupts data instead of faulting.
+ *
+ * This was measured on build/init.elf rather than taken from the
+ * specification, and the measurement is what makes it a rule: with
+ * p_vaddr = 0x409ff0, p_memsz = 0xc and p_align = 8, the unaligned end is
+ * 0x409ffc and the aligned thread pointer is 0x40a000. 0x40a000 is the only
+ * value that puts both `cmp %rax,%fs:-16` (__libc_tls_sentinel) and
+ * `movl $0xc,%fs:-8` (__errno) inside the block; 0x409ffc puts them at
+ * 0x409fec and 0x409ff4, which are both wrong. elf.c carries the derivation
+ * and tests/tls_harness.sh re-checks it against whatever the build produced.
  *
  * A process that calls this and gets 0 has no thread-local storage, and any
  * `__thread` access in it is a null-pointer dereference. libc's startup turns

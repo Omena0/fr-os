@@ -343,6 +343,22 @@ void task_reset_budget(struct task *t);
 void task_load_fs_base(struct task *t);
 void task_save_fs_base(struct task *t);
 
+/*
+ * task_load_fs_current() — the same load, for the task on this CPU.
+ *
+ * This exists because ret_to_user() cannot supply a task pointer from
+ * assembly: it has no way to hold current_task()'s return value across a
+ * second call without spilling, and it has already consumed RDI/RSI/RDX as its
+ * own arguments. The whole change the ring-3 return path needs is therefore
+ * one instruction -- `call task_load_fs_current` before the iretq in
+ * ret_to_user -- and this is the function it names.
+ *
+ * It is required for every forked child, not only for a process's first entry:
+ * fork resumes the child at the parent's syscall return site and never re-runs
+ * the C startup that would otherwise install the thread pointer.
+ */
+void task_load_fs_current(void);
+
 /* The task running on this CPU, or NULL before the scheduler starts. */
 struct task *current_task(void);
 

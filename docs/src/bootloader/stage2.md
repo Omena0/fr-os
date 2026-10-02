@@ -24,7 +24,14 @@ outb(0x21, 0xFF);   /* master: all IRQs masked */
 outb(0xA1, 0xFF);   /* slave:  all IRQs masked */
 ```
 
-This is first, before the UART is even reprogrammed, and it is not optional.
+These are at `stage2.c:1795-1796`, **before the first firmware call** and
+therefore before anything that can be interrupted by one. They are *not* the
+first thing `stage2_main()` does: `serial_init()` runs at :1753 and the banner
+at :1798, because the first diagnostic has to have a known baud rate. Both of
+those are plain port I/O with no BIOS involvement, so the ordering requirement is
+"before the first `bios_call`", not "before anything". An earlier version of this
+page and of audit section 0.1 both said the stronger thing; both were wrong, and
+the source comment at stage2.c:1757-1758 says it correctly.
 
 The BIOS leaves both PICs identity-mapped with IRQ0 *unmasked*. Nothing remaps
 them until the kernel, so until this was added an 18.2 Hz timer tick was
@@ -140,13 +147,38 @@ range against its own accounting before trusting it.
 
 ### Step 3 — Load GDT and Enter Protected Mode
 
-A GDT with null, 32-bit code, 32-bit data, and a user code/data pair at DPL 3 is
-built in C and installed. CR0.PE is set and a far jump flushes the instruction
-pipeline into 32-bit protected mode. The GDT and IDT pseudo-descriptors are
-written **by C**, not by the assembler: `.word stage2_gdt_limit` looks like it
-stores a limit, but `stage2_gdt_limit` is a label, so the assembler emits a
-relocation and the linker fills in the label's own address — LGDT would then load
-a limit that is an address and a base pointing at the two variables.
+A four-entry GDT is built in C and installed, and CR0.PE is set with a far jump
+into 32-bit protected mode. Decoded from the literals at `stage2.c:1706-1709`
+(byte 5 is the access byte, byte 6 holds the flags nibble in its low four bits
+and `limit[19:16]` in its high four):
+
+| entry | value | access | flags | limit | what it actually is |
+|---|---|---|---|---|---|
+| 0 | `0` | — | — | — | null |
+| 1 (0x08) | `0x00AF9A000000FFFF` | `0x9A` P=1 DPL=0 code exec/read | `0xF` G=1 D/B=1 **L=1** AVL=1 | `0xAFFFF` (11 MiB) | a **64-bit** code segment, base 0 |
+| 2 (0x10) | `0x00CF93000000FFFF` | `0x93` P=1 DPL=0 data RW | `0xF` G=1 D/B=1 (L ignored for data) | `0xCFFFF` (13 MiB) | flat data, base 0 |
+| 3 (0x18) | `0x0000FA000000FFFF` | `0xFA` P=1 **DPL=3** code exec/read | `0x0` G=0 D/B=0 **L=0** | `0xFFFF`, G=0 (64 KiB) | a **16-bit** code segment — see Known Gaps |
+
+Two things about this table are worth stating because they are easy to get wrong
+by reading the comments instead of the bytes:
+
+  * **Entry 1 has `L=1`, so it is a 64-bit code descriptor, not a 32-bit one.**
+    `L` lives in the low bit of the flags nibble, and the flags nibble is `0xF` —
+    all four bits set. It is used as the CS that the far jump lands on while the
+    CPU is still in 32-bit protected mode, which is worth a second look before
+    anyone "simplifies" the literal; see Known Gaps.
+  * **Neither entry 1 nor entry 2 is 4 GiB.** `stage2.c:1707` comments entry 1
+    `/* 0x08 64-bit code, base 0, 4G */`, but `limit[19:16]` is `0xA`, not `0xF`,
+    so the encoded limit is `0xAFFFF` — 11 MiB, with granularity applied. The
+    same applies to entry 2 at 13 MiB. Both are comfortably larger than the
+    loader image, which `stage2.ld` caps at 24 KiB, so nothing can fault on it;
+    it is the comment that is wrong, not the boot.
+
+The GDT and IDT pseudo-descriptors are written **by C**, not by the assembler:
+`.word stage2_gdt_limit` looks like it stores a limit, but `stage2_gdt_limit` is
+a label, so the assembler emits a relocation and the linker fills in the label's
+own address — LGDT would then load a limit that is an address and a base
+pointing at the two variables.
 
 The bootstrap IDT has 256 gates, all pointing at the **32-bit** reporter. They are
 repointed at the 64-bit reporter as the last act before the far jump, so no gate
@@ -172,8 +204,9 @@ is ever entered by a CPU of the wrong width.
 4. Set CR4.PAE, EFER.LME and EFER.NXE; enable XCR0 for x87 + SSE + AVX.
 5. Load CR3, set CR0.PG, and far-jump into 64-bit code.
 
-There is **no direct map in stage 2.** The kernel builds its own when it starts
-(`vmm: direct map 0-4 GiB, 2 MiB pages` in the boot log). Stage 2's only job is
+There is **no direct map in stage 2.** The kernel builds its own when it starts,
+and says so on every boot — `vmm: direct map 0-4 GiB, 2 MiB pages`, or `1 GiB
+pages` on a CPU that reports PDPE1GB. Stage 2's only job is
 to make the kernel window exist.
 
 ### Step 5 — Load Kernel ELF
@@ -214,19 +247,33 @@ returns; if it ever did, `fail()` reports the fact.
 ## Memory Used by Stage 2
 
 ```
-0x000000 – 0x0009FBFF   conventional RAM, low 1 MiB (MBR, stage 1 image,
+0x000000 – 0x0009FBFF   conventional RAM, low 1 MiB (MBR, stage1 image,
                          stage 2's real-mode scratch, IVT/BIOS vectors)
 0x008000 – 0x00DFFF     stage 2 image (.text, .trampoline, .rodata, .data,
                          .bss) — at most 24 KiB, enforced by the linker
 0x00E000 – 0x01FFFF     32-bit loader stack, 72 KiB, grows down from 0x20000
 0x020000 – 0x020FFF     firmware bounce window, up to eight 512-byte sectors
                          per firmware call (BOUNCE_BYTES = 4 KiB)
-0x021000 – 0x021FFF     program-header scratch (DAP, VBE scratch)
+0x021000 – 0x0210FF     INT 13h disk address packet (DAP_ADDR)
+0x021100 – 0x021FFF     VBE scratch, 0xF00 bytes (VBE_SCRATCH_ADDR)
+0x022000 – 0x022FFF     one program header reassembled out of the bounce window
+                         (PHDR_SCRATCH_ADDR)
 0x090000 – 0x090BFF     E820 map, up to 128 entries
 0x091000 – 0x0910E7     struct bootinfo
-0x100000 – 0x2C7FFF     the kernel image, once loaded
+0x100000 – 0x2CFFFF     the kernel image landing zone, once loaded
+                         (KERNEL_MAX_BYTES = 0x1D0000)
 0x2D0000 – 0x2DFFFF     bootstrap page tables
 ```
+
+**Do not take the physical-layout comment at the top of `src/boot/boot_layout.h`
+as the authority for any of this.** It is a map of the loader *before* the
+bounce buffer was moved from 0x10000 to 0x20000, so it still places the bounce
+window, the DAP, the VBE scratch and the program-header scratch a page lower
+than they are, still describes the loader stack as living at 0x20000-0x2FFFF
+(it is at 0xE000-0x1FFFF, growing down from the bounce window's bottom), and
+gives the kernel landing zone as 1.875 MiB where the constant is 1.8125 MiB.
+This table is derived from the constants in that same header; audit finding
+**#178** is the writeup.
 
 The 32-bit loader stack's top is deliberately the same address as the bounce
 window's bottom. A downward-growing stack writes below its top, so the two touch
@@ -247,11 +294,23 @@ These are real and unfixed; they are listed here rather than discovered later.
   `stage2_entry.S:61-62` claims the unsuffixed `lgdt` is the m16&32 form; it is
   not, and `gcc -m32` on a three-line reproducer confirms it.
 - `e_entry` is not bounds-checked against the loaded segments, and `e_type` is
-  not checked at all. `e_entry` is taken from the header verbatim (stage2.c:1279)
-  and `e_type` is read into a local (stage2.c:1220) and then never used.
-- The stage 2 GDT's index 3 is labelled "64-bit user code, DPL 3" but its flags
-  byte is `0x00`, which is a 16-bit code segment. Nothing in stage 2 uses it;
-  the kernel builds its own GDT.
+  not checked at all. `e_entry` is taken from the header verbatim
+  (`kernel_entry_vaddr = eh->e_entry`, stage2.c:1386) and `e_type` is read into
+  the `struct elf64_hdr` at stage2.c:1327 and then never used.
+- The stage 2 GDT's index 3 is labelled "64-bit user code, DPL 3". Its DPL is
+  right — the access byte `0xFA` does give DPL 3 — but its flags byte is `0x00`,
+  so `L=0`: it is a 16-bit code segment with a 64 KiB limit. Loading 0x18/0x1B
+  as CS in long mode raises `#GP`. Nothing in stage 2 uses it; the kernel builds
+  its own GDT, and `src/include/gdt.h` claims the two "cannot drift apart" while
+  stage2.c hardcodes all four literals instead of using them.
+- The stage 2 GDT's index 1 has `L=1`, and it is the CS the far jump into
+  protected mode loads. A 64-bit code descriptor being loaded while the CPU is
+  still in 32-bit mode is either ignored or `#GP`s depending on what you believe
+  about compatibility mode, and **this pass did not settle it** — stage2 boots, so
+  on this machine QEMU tolerates it. It is recorded because the answer should not
+  be "whatever the emulator happens to do", and because the neighbouring
+  literal's comment claims a 4 GiB limit it does not have. Both are in audit
+  finding #17's territory; #17 as written only covers index 3.
 
 Two items that were on this list and are **not** gaps any more, kept because the
 stale entries were the misleading part:
@@ -260,8 +319,9 @@ stale entries were the misleading part:
   the gate."~~ `a20_enable()` checks `a20_is_open() || (inb(PS2_FAST_GATE) & 0x02)`
   and logs `A20 already enabled by firmware` (stage2.c:501-504).
 - ~~"`hang_puts()` clobbers the character with the UART line-status byte."~~
-  `hang_putc64` is `movzbl %dil, %eax /* the character, not the status */`
-  (stage2_long.S:467).
+  `hang_putc64` reads the line status into `%edx` and the character into `%eax`
+  (`movl $0x3FD, %edx` then `movzbl %dil, %eax /* the character, not the status */`,
+  stage2_long.S:458 and :466), and never puts the status in `%eax`.
 - ~~"The stage 2 banner still prints `abcdefg`."~~ The string does not occur
   anywhere under `src/`; `grep -rn abcdefg src/` returns nothing.
 

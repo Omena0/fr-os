@@ -3,9 +3,12 @@ SOURCE TREE AUDIT — /home/omena0/Github/os   @ b1df707
 (The first audit pass was read-only: no file in the repository was created,
 edited or deleted, and build + boot verification ran on a copy at
 /tmp/kilo/os-audit2. The 2026-10-02 reconciliation below is *not* read-only —
-it edits this file, pmm.h and two documents, and it says so at each site.)
+it edits this file, pmm.h and two documents, and it says so at each site. The
+06:05 pass edited this file and the same two documents plus one more — see the
+end of A0.5.)
 
                         --- RECONCILED 2026-10-02, 03:20 local ---
+                        --- RE-VERIFIED  2026-10-02, 06:05 local (audit2) ---
 THIS FILE IS NOW A WORK QUEUE. That changes how it must be read, and the change
 is not cosmetic.
 
@@ -15,21 +18,56 @@ is not cosmetic.
 
 Consequences, stated so a reader does not have to infer them:
 
-  * A number that is absent is NOT evidence that the bug is fixed. Sixty-five
+  * A number that is absent is NOT evidence that the bug is fixed. Sixty-six
     numbers are absent for four different reasons and section `A0` below
     separates them. Do not assume the good case.
-  * Seven claims in this file were found to be *wrong* about the tree, in ways
-    that sent other people after bugs that were not there. Section `A1` records
-    each correction at the point where the wrong claim would otherwise be read.
-    Six were reported to me; the seventh — #15 — turned up while verifying the
-    other six, and it is the only one whose own status line was also wrong.
+  * **Eleven claims in this file have been found to be *wrong* about the tree**,
+    in ways that sent other people after bugs that were not there. Section `A1`
+    records each correction at the point where the wrong claim would otherwise be
+    read. Seven were found by the 03:20 pass — six reported to me, the seventh
+    (#15) turning up while verifying the other six. **Four more were found by the
+    06:05 pass, all of them status lines rather than findings, and all four
+    asserting the *opposite* of the tree: see A1.9.** Two of those four turned
+    out to be fixed and were deleted. The rate has not gone down with more
+    passes, which is the point.
   * A `>> STATUS:` line that says FIXED is one that was verified against a
     named file:line. Exactly one is left — #150, and it says `FIXED (partial)`.
     Everything else below is OPEN, OPEN (partial), OPEN (amended) or VERIFIED
     CORRECT, and the ones that became FIXED have been deleted under the
-    convention above, which is why the count is **112** and not 177. Five
-    deletions are itemised in **A0.5**; the earlier ones are not recoverable
-    from this file at all.
+    convention above. Eight deletions are itemised in **A0.5**; the earlier ones
+    are not recoverable from this file at all.
+  * **The count is 112 findings over a range of 178 numbers, and one of the 112
+    is not from the original audit.** #178 was added by the 06:05 pass, which
+    took a number above the original 177 because inventing a gap inside someone
+    else's numbering would have made `grep` ambiguous. So: 111 original findings
+    still present, 66 absent, plus #178. The original audit had 177; this file
+    now spans 178.
+
+**Two things to know before you trust anything below, both established in the
+06:05 re-verification pass.**
+
+  * **The tree does not build right now, and that is not a regression.** A clean
+    `make -j8` stops at `src/kernel/interrupt_entry.S:208` and `:210`:
+
+        Error: operand type mismatch for `out'
+        Info: macro invoked from here
+
+    That is `gdthang`'s uncommitted `GDTMARK` instrumentation macro
+    (interrupt_entry.S:205-211). `OUT` takes AL/AX/EAX only, and the macro does
+    `outb %cl, %dx`. It is the only thing in the tree that fails: every other
+    object compiles, `console.c` included. `build/kernel.elf` and `build/os.img`
+    are absent for this reason and their absence is not evidence of anything.
+    Re-check with
+    `flock /tmp/fr-build.lock make clean >/dev/null 2>&1 && flock /tmp/fr-build.lock make -j8`.
+
+  * **Line numbers in this file drift, and a `file.c:1234` citation is not a
+    fact.** They were re-derived per finding against a tree that has since moved
+    again: commit 1401355 changed `interrupt_entry.S` by 43 lines and `process.c`
+    by 11, `main.c` by 7 up and 7 back, and `cpu_features.c` has been rewritten.
+    Citations verified in this pass have been corrected here and are marked with
+    a date; **the rest are unchecked and should be re-derived before you spend
+    time on them.** A finding's mechanism and its status are the load-bearing
+    part. Its line numbers are a convenience that is currently a trap.
 
 STATUS AS OF 2026-10-01, ~23:40 local (kept: the previous header claimed a
 verbatim 177-finding archive, which was never true — see A0)
@@ -58,13 +96,19 @@ recoverable copy of it.
 ================================================================================
 
 --------------------------------------------------------------------------------
-A0. THE ABSENT FINDINGS — 65 numbers that are not in this file
+A0. THE ABSENT FINDINGS — 66 numbers that are not in this file
 --------------------------------------------------------------------------------
 
-The audit this file came from had 177 findings. **112 are present.** Sixty-five
+The audit this file came from had 177 findings. **111 of them are present**, plus
+one added since (**#178**, see the header). Sixty-six
 are not, and "not present" is doing four different jobs here, which is the whole
 reason this section exists: before it, a reader could not tell "fixed and
 deleted" from "lost", and guessed wrong in both directions.
+
+The 66 accounts for exactly, as of the 06:05 pass: **15** in A0.1 (removed, per
+the standing register), **43** in A0.3 (gone, no record), and **8** in A0.5
+(deleted in one of the two reconciliation passes, each with proof). A0.2's four
+are *present*, which is the point that subsection makes.
 
 **The text is unrecoverable.** There is no copy to restore. MEGA_AUDIT.md *is*
 tracked by git, but the first revision that contains it (f2ea8c8) already has
@@ -104,18 +148,27 @@ register is stale for these four.** Read the file, not the register, when they
 collide. (`35` and `62` were also on this list; they were verified fixed in
 this pass and deleted — see A0.5.)
 
-### A0.3  Absent, with no record of any kind (39)
+### A0.3  Absent, with no record of any kind (43)
 
-`5, 6, 7, 8, 10, 11, 13, 19, 20, 22, 23, 24, 27, 28, 29, 31, 32, 33, 34, 36, 37,
+`5, 6, 10, 11, 13, 19, 20, 22, 23, 24, 27, 28, 29, 31, 32, 33, 34, 36, 37,
 38, 53, 54, 55, 56, 58, 59, 96, 97, 98, 104, 106, 110, 116, 118, 119, 122, 128,
 130, 132, 161, 169, 172, 173`
 
+**Corrected 2026-10-02 06:05.** The 03:20 pass printed this as "(39)" and then
+listed **45** numbers, and two of the 45 — **7 and 8** — are not absent at all:
+both are in section A below with status lines (`7. [INFO] Clean build …`,
+`8. [INFO] No source file under src/ contains TODO/FIXME/XXX/HACK`). They have
+been taken out of the list, which is what makes the register total 43 and the
+absent total 66. The discrepancy was never visible before because the
+subsection's own count and its own list disagreed and nothing cross-checked
+them; that is the failure mode A0.4 is about, applied to A0.3.
+
 This is the block the user noticed missing, and it is **not confined to section
-C**. It spans the boot chain (5-13, 19-24), kernel memory management (27-39),
-syscall/percpu/sched (53-59), console/panic/printf (96-98), libc (104, 106, 110,
-116, 118-119, 122, 128, 130, 132), and build/CI (161, 169, 172-173). Section C
-is where it is most visible because section C is the shortest section, not
-because the loss happened there.
+C**. It spans the boot chain (5-6, 10-11, 13, 19-20, 22-24), kernel memory
+management (27-39), syscall/percpu/sched (53-59), console/panic/printf
+(96-98), libc (104, 106, 110, 116, 118-119, 122, 128, 130, 132), and build/CI
+(161, 169, 172-173). Section C is where it is most visible because section C is
+the shortest section, not because the loss happened there.
 
 For a few of these I know what the number meant, because a later section of this
 file or a source comment refers to it, and I have re-derived the substance:
@@ -129,36 +182,43 @@ file or a source comment refers to it, and I have re-derived the substance:
     wrong, the fix is real (process.c:362-424).
   * **#96/#97** — `panic_regs` recorded its own address, and `panic_state.cs` is
     never written. #96 is fixed (panic.S:35-36 now takes `(%rsp)` at entry).
-    **#97 is NOT fixed, and it is the sharpest illustration of this entire
-    section.** See A0.4.
+    **#97 was NOT fixed when the 03:20 pass wrote this, and is the sharpest
+    illustration of this entire section.** See A0.4.
 
 ### A0.4  The lesson, stated because it will happen again
 
-**#97 is absent from this file, and the bug it describes is still in the tree.**
+**#97 is absent from this file, and when it was last read the bug it described
+was still in the tree. It has since been fixed (commit 1401355) — which makes it
+a *better* illustration, not a worse one.**
 
-`src/kernel/panic.S:55-57` does `pushfq; popq %rax; movq %rax, 136(%rdi)`. Field
+`src/kernel/panic.S` did `pushfq; popq %rax; movq %rax, 136(%rdi)`. Field
 offsets, measured with `offsetof` against the real header, not read off a
 comment:
 
 ```
 offset   0..127  rax,rbx,rcx,rdx,rsi,rdi,rbp,rsp,r8..r15    (written correctly)
 offset  128      rip                                          (written correctly)
-offset  136      cs              <- RFLAGS is written here
-offset  144      rflags          <- CR2 is written here
-offset  152      cr2             <- CR3 is written here
-offset  160      cr3             <- CR4 is written here
+offset  136      cs              <- RFLAGS was written here
+offset  144      rflags          <- CR2 was written here
+offset  152      cr2             <- CR3 was written here
+offset  160      cr3             <- CR4 was written here
 offset  168      cr4             <- never written; left 0
+offset  176      cpu_id          <- cleared, 4 bytes, at the right offset now
 ```
 
-So every field from offset 136 up prints one register high, and `cs` — which
-panic.c:116 prints and which the panic.S comment at :53-54 claims is "recorded
-by the caller-side stub" — is never written at all. CS cannot be a `MOV`
-destination in 64-bit mode, so recording it needs a far-return or
-`pushfq`-style stub; no such stub exists.
+So every field from offset 136 up printed one register high, and `cs` — which
+panic.c prints and which the panic.S comment claimed is "recorded by the
+caller-side stub" — was never written at all. CS cannot be a `MOV` destination
+in 64-bit mode, so recording it needs a far-return or `pushfq`-style stub; no
+such stub exists, and none exists now either. The register offsets are fixed and
+pinned (`0.22`), but **`cs` is still unwritten** — panic.h:77 asserts it is at
+136 and panic.S:71-75 says so in as many words: "Nothing does that today, so
+`cs` reads as whatever was in the buffer -- do not believe it."
 
-**This finding is gone from the work queue and the bug is live.** That is the
-whole argument for this section, in one instance. A number being absent is not
-evidence of a fix, and the person who removed #97 believed it was.
+**The finding was gone from the work queue the whole time the bug was live.** A
+number being absent is not evidence of a fix, and the person who removed #97
+believed it was. The bug sat there for a day and was found by hand, not by
+grepping this file for a number that was no longer in it.
 
 **The second instance is #60**, and it is the same shape. Section 0.1 records
 that masking both PICs left the system with no interrupt source at all, and
@@ -167,39 +227,78 @@ removed as worked. I cannot verify what #60 said — the text is gone — but I 
 verify the consequence it was cited for: **there is still no PIT or timer driver
 anywhere in `src/kernel/`.** The only reference to one is a comment at
 cpu_features.c:187 explaining why a TSC calibration against the PIT was not
-written. So #60 was removed and the thing it was about is still open.
+written. So #60 was removed and the thing it was about is still open. This one
+is *still* open, four days of work later; #97 is the pair of cases that show the
+loss is recoverable by hand and the fix is recoverable at all.
 
-### A0.5  Deleted in this pass, after re-verification (5)
-The convention above says a verified FIXED finding is deleted. Five were, on
-2026-10-02, each re-checked against the tree first. Their reasoning survives in
-section 0 and is not lost:
+### A0.5  Deleted in this pass, after re-verification (8)
+The convention above says a verified FIXED finding is deleted. Eight have been,
+five on 2026-10-02 at 03:20 and three more at 06:05, each re-checked against the
+tree first. Their reasoning survives in section 0 and is not lost:
 
 | # | was | proof it is fixed | now written up as |
 |---|---|---|---|
 | 26 | `build_missing_tables` builds only a PD and a PT | vmm.c:422-456 walks levels 3 and 2 and creates whatever is missing at each, supervisor-only. Both stated consequences are dead: `PML4[384]` is reachable so `vmalloc` no longer always returns NULL, and a user address no longer fails the walk. | **0.19** |
-| 35 | `vmm.c` says the direct map is 4 GiB, `pmm.h` says `ZONE_HIGH` is reachable through it, `memory-layout.md` said 64 TB | Three-way disagreement resolved in favour of the code: `DIRECT_MAP_BYTES = (4ULL << 30)` (vmm.c:54) is authoritative; the document was corrected and `pmm.h:14-15` was corrected here too. The hazard underneath is unchanged and is still in the header's new text. | the corrected `pmm.h` comment + `docs/src/architecture/memory-layout.md` |
-| 62 | `ret_to_user` never sets RAX, so a forked child enters ring 3 with kernel residue | interrupt_entry.S:327-331 clears RAX and the rest of the caller-saved set, *after* the IRETQ frame is built, with the reason in the comment. Landed in commit 283e22e. | **0.18** |
+| 35 | `vmm.c` says the direct map is 4 GiB, `pmm.h` says `ZONE_HIGH` is reachable through it, `memory-layout.md` said 64 TB | Three-way disagreement resolved in favour of the code: `DIRECT_MAP_BYTES = (4ULL << 30)` (vmm.c:54) is authoritative; the document was corrected and `pmm.h:14-22` was corrected here too. **Re-verified 06:05: still 4 GiB, and the document's numbers are right — but its quoted boot-log line is not, see the note at 0.26.** | the corrected `pmm.h` comment + `docs/src/architecture/memory-layout.md` |
+| 62 | `ret_to_user` never sets RAX, so a forked child enters ring 3 with kernel residue | interrupt_entry.S:314-318 clears RAX and the rest of the caller-saved set, *after* the IRETQ frame is built, with the reason in the comment. Landed in commit 283e22e; **line numbers re-derived 06:05 — the previously cited 327-331 are now the frame-layout `.set` block.** | **0.18** |
 | 153 | `-MMD -MP` missing from the boot and libc `.S` rules | Makefile:110, 114, 118, 122, 126, 130, 134 — all seven object rules pass `-MMD -MP -MF $@.d`, the four `.S` ones included (108, 116, 128, plus the kernel `.S` at 116). | **0.21** |
 | 154 | `-include $(shell find …)` forks on every run and finds nothing on a clean tree | Makefile:423 is `-include $(addsuffix .d, $(KERNEL_OBJ) $(LIBC_OBJ) $(STAGE2_OBJ) $(STAGE1_OBJ))` over explicit lists. | **0.21** |
+| **18** | **stage1's sectors-per-track divisor inherits AH from `movb $0x08,%ah`, so `bx_spt` is `0x0800 \| spt` and every LBA→CHS division is wrong** | **The clear is now in the code, not only in the finding: `xorb %ah,%ah` at stage1.S:218 immediately precedes `movw %ax, bx_spt` at :219, and the comment above it (:199-217) states the hazard the finding describes, in the finding's own words. The heads path's separate `xorb %ah,%ah` (:224) is still there. This was the *whole* finding — there was no second half.** | the comment at stage1.S:199-217 |
+| **78** | **four CPUID decode errors: NX read from leaf 1 EDX bit 20 (reserved), `invariant_tsc` from the wrong leaf, family/model dropping the extended fields, and `has_1gb_pages` never assigned at all** | **All four are fixed, each with the reasoning inline: NX from `extended_edx` bit 20 (cpu_features.c:295, with the old wrong source named at :288-291); `invariant_tsc` from leaf 0x80000007 EDX bit 8 (cpu_features.c:126-129); family/model with the 8-bit extended-family and 4-bit extended-model fields (cpu_features.c:91-92); `has_1gb_pages` from `extended_edx` bit 26 (cpu_features.c:218), which makes vmm.c:221's 1 GiB branch live for the first time. `main.c:336` now prints the real value instead of a constant zero. No sub-item survives.** | the four comments at cpu_features.c:91, :126, :212-218, :288-295 |
+| **94** | **the escape parser is defeated for every sequence: `handle_escape(*s)` advances the state machine and `console_putc_attr(*s, …)` then prints the same byte anyway, so `ESC [ 2 J` emits a literal `[2J` onto the screen it just cleared** | **`handle_escape` returns `bool` (console.c:480) and every branch returns true (486, 488, 494, 499, 506, 514, :516-572); the caller consumes the byte — `if (handle_escape(*s)) continue;` at console.c:645-648 — so the byte is not printed a second time. The function ends with an explicit `return false` (:577-578) so the "control reaches end of non-void function" error the 03:20 pass reported is gone: `console.c` compiles today, verified by a full build.** | the comment at console.c:471-479 |
 
-Nothing here was in an active agent's scope at the time of deletion: each fix
-is already landed in the tree and, for #62, in git, so there was no work in
-flight to discard.
+None of the three new deletions was in an active agent's scope: #18 is
+`src/boot/stage1.S`, #78 is `src/kernel/cpu_features.c`, #94 is
+`src/kernel/console.c`, and `ownership.json` at the time of the pass listed
+claims on `main.c`, `gdt.c`, `interrupt_entry.S`, `elf.c`, `syscall.c`,
+`task.h`, `src/libc/**` and `src/include/uapi/syscall.h` — none of the three.
+The five earlier deletions are argued above.
+
+**Two of the three were found by a different route than expected, which is worth
+noting: both #78 and #94 had status lines that were *actively misleading* rather
+than merely stale.** #78's said "NX is permanently false, `has_1gb_pages` is never
+assigned at all, so the 1 GiB branch is dead" — every clause of which was the
+opposite of the tree. #94's said "the caller had not yet been updated and
+console.c:569 failed to compile", which described a half-finished edit as a
+build break. A status line is a claim about the tree, and a wrong one is worse
+than a missing one, which is why **A1.9** exists.
 
 **The one `FIXED` line still in the file is #150, and it says `FIXED (partial)`**
-— the arithmetic is fixed but `build_initrd()` still exists in both `disk.py`
-and `initrd.py`, so the duplication the finding recommends removing is intact.
-Partial fixes stay in the queue; that is the point of the word.
+— the arithmetic is fixed but `build_initrd()` still exists in `disk.py` and a
+second copy of the format still exists in `initrd.py`, so the duplication the
+finding recommends removing is intact. (Corrected 06:05: the second copy's
+function is named `build`, not `build_initrd`, at tools/initrd.py:32 — so
+grepping for `build_initrd` finds one copy and hides the duplication.) Partial
+fixes stay in the queue; that is the point of the word.
+
+**What the 06:05 pass edited, in full, so that the boundary between "the tree was
+changed" and "this file was changed" is not a matter of memory.** It edited
+exactly three files and nothing in `src/`: `MEGA_AUDIT.md`,
+`docs/src/bootloader/stage2.md`, and
+`docs/src/architecture/memory-layout.md`. It changed no source file, so **every
+code fact in this pass is a statement about the tree as of 06:05, not a fix to
+it.** It ran one clean build, which failed at `interrupt_entry.S` (see the
+header). Where a code comment is quoted as wrong — `panic.S`'s `cpu_id` at 172
+(0.22), `stage2.c:1707`'s "4G" (0.26, and the table in stage2.md),
+`boot_layout.h:20-33`'s physical map (#178), the Makefile's own paragraph
+contradicting the one beneath it (0.25) — **the comment is recorded as wrong and
+left in place**, because every one of those files is either in an active agent's
+scope or is a comment whose surrounding intent I cannot see from outside. Fixing
+a comment is a two-minute edit; guessing what the author meant is not, and 0.26
+is the standing example of a "fix" that lands without being right.
 
 --------------------------------------------------------------------------------
-A1. CORRECTIONS — findings that were wrong about the tree
+A1. CORRECTIONS — claims that were wrong about the tree
 --------------------------------------------------------------------------------
 
 Six of the 177 were wrong in ways that cost other people hours, because each
 one described a bug that was not the bug and the real one was hidden behind the
-description. A seventh (A1.7) was found while verifying the first six. Every
-statement below was re-derived from the tree during this pass; the evidence is
-the file:line given, and where I could only establish part of it, that is said.
+description. A seventh (A1.7) was found while verifying the first six, and four
+more (A1.9) in the 06:05 pass — all four of those status lines rather than
+findings, and all four wrong in the opposite direction. Every
+statement below was re-derived from the tree during the pass that reports it; the
+evidence is the file:line given, and where I could only establish part of it,
+that is said.
 
 These are not deleted. The wrong text is what a reader needs to recognise, and
 the correction sits next to it.
@@ -393,6 +492,56 @@ address, or a mode has to have that number re-derived before anyone spends time
 on it.** Four of the six above were found by re-deriving, and in every case the
 re-derivation was cheaper than the investigation the wrong text had started.
 
+### A1.9  Four status lines that assert the *opposite* of the tree
+
+Found in the 06:05 pass, and a different failure from A1.1-A1.7: those were wrong
+about the tree when written; these are right about the tree and wrong about
+*this file's own claim* about the tree, which is the same thing stated the other
+way round. Each was a status line — the part of a finding a reader is most likely
+to trust, because it is the part that was re-checked.
+
+  * **#78 claimed NX was "permanently false", `invariant_tsc` was read from "the
+    wrong leaf", family/model "dropped the extended fields", and
+    "`has_1gb_pages` is never assigned at all … so vmm.c's 1 GiB branch is dead
+    and main.c always prints `1g_pages=0`".** All four are fixed (cpu_features.c:
+    295, :126-129, :91-92, :218). A reader who trusted the status line would have
+    gone looking for a dead code path that is live. Deleted; see **A0.5**.
+  * **#94 claimed "the caller had not yet been updated and console.c:569 failed
+    to compile (`control reaches end of non-void function`)"** — a build break,
+    in a status line, for code that compiles today. That is worse than a stale
+    OPEN: it says the tree is broken, and it invites someone to "fix" it.
+    Deleted; see **A0.5**.
+  * **#162 claimed ".gitignore is now four lines: `/build`, `.vscode`, `.kilo`,
+    and `MEGA_AUDIT.md`" and "this audit document itself is now gitignored *and*
+    untracked, so it does not survive a clone".** Neither is true.
+    `cat .gitignore` gives five patterns and one comment — `/build`, `.vscode`,
+    `.kilo`, `/ownership.json`, `/ownership.json.lock` — and **no mention of this
+    file**. `git ls-files MEGA_AUDIT.md` lists it; `git check-ignore
+    MEGA_AUDIT.md` returns nothing. The claim contradicts this file's own header,
+    which corrects exactly this ("this file *is* tracked by git … and
+    `.gitignore` does **not** mention it"), so the header and #162 cannot both
+    be right and the header is the one that is right. The finding's surviving
+    residue is real and unrelated: `.venv/`, `__pycache__/`, `*.pyc`, `*.log`
+    and `*.img` are still uncovered. Status rewritten in place.
+  * **#163 claimed "$(INITRD) and $(DISK) have no dependency on tools/initrd.py
+    or tools/disk.py, and the initrd.c.o rule has none on tools/bin2c.py".** All
+    three exist: Makefile:178 (`$(INITRD): $(INIT_ELF) $(HELLO_ELF)
+    tools/initrd.py`), :215 (`$(OBJ)/kernel/initrd.c.o: $(INITRD)
+    tools/bin2c.py`), :304 (`$(DISK): … $(INITRD) tools/disk.py`). One of the
+    finding's four items survives — Makefile:217 still redirects to a hardcoded
+    `build/initrd.c` rather than `$(BUILD)/initrd.c`, so changing `BUILD` in
+    config.mk:15 leaves a generated file outside `make clean`'s reach. Status
+    rewritten in place.
+
+The pattern across all four is the same one section 0's opening claims and
+**P** states at full length: these are not findings that describe something that
+fails loudly. They are sentences that *read* right and are *about* the tree, and
+the only way to tell is to run the command they name.
+
+**The rule:** a status line is a claim, and a claim about code is the same class
+of thing as a finding about code. It gets re-derived, or it gets deleted. It does
+not get left because it is short.
+
 --------------------------------------------------------------------------------
 0. FIXED SINCE THIS AUDIT WAS TAKEN
 --------------------------------------------------------------------------------
@@ -400,17 +549,32 @@ re-derivation was cheaper than the investigation the wrong text had started.
 The 177 findings below are the state at b1df707. These are the defects that were
 *not* in it — found afterwards, mostly by instrumenting a boot that would not
 finish — and which no finding in the list records. Each one is here with the
-mechanism and, more usefully, with why it was silent. **Twenty-one** of them.
+mechanism and, more usefully, with why it was silent. **Twenty-seven** of them,
+of which twenty-five are fixed; 0.26 is a documentation residue and 0.27 is
+open, and it is in this section rather than the queue because no finding records
+it.
 Of the fourteen found in the first pass, eleven produced no diagnostic of any
 kind, and of the three that did, two reported the wrong fault. That ratio is the
 recurring theme and it is worth stating plainly: on this tree the most expensive
-bugs are the ones that do not fail, they print something plausible.
+bugs are the ones that do not fail, they print something plausible. Section **P**
+takes that ratio apart and says what to do about it.
 
 0.15-0.21 were added on 2026-10-02, after re-deriving the section-C fixes against
 the tree and finding that seven of the most consequential ones were documented
 in the source and nowhere else. A reader looking for the descriptor-table or
 copy-direction bugs would not have found them in any finding, and had to be
 told.
+
+0.22-0.27 were added on 2026-10-02 at 06:05, from commit 1401355 and the build
+that followed it, and **every one of the four fixes in it is only partly true.**
+That is not a hedge; it is the finding. `cs` is still unwritten (0.22); the three
+`vmm_translate` call sites are not migrated (0.23); `sys_execve`'s own path still
+returns the reason unlogged (0.24); and the Makefile still contains a paragraph
+asserting the arrangement 0.25 just removed (0.25). **Writing these four up as
+four fixes would have been four more claims that the tree does not support**,
+which is the thing **A1.9** is about and the thing **P** says to stop doing.
+0.26 is the one place the *documents* are still wrong about the code, which is the
+residue of #35. 0.27 is the current blocker and is reported-but-unverified.
 
 Reading this section is how you avoid re-introducing any of them.
 
@@ -429,11 +593,20 @@ physical zero: it dispatches through that IDT. Gate 0 was `exc_stub`, the
 instructions as 16-bit. The decode walked off the end of the reporter into
 `exc_halt64`.
 
-**Fix.** Two lines at the top of `stage2_main()`, before anything else
-(src/boot/stage2.c:1657-1658):
+**Fix.** Two lines in `stage2_main()`, at src/boot/stage2.c:**1795-1796**
+(re-derived 06:05; the 1657-1658 this entry used to cite was wrong on both the
+line numbers and the ordering):
 
     outb(0x21, 0xFF);		/* master: all IRQs masked */
     outb(0xA1, 0xFF);		/* slave:  all IRQs masked */
+
+They are not the first statements in the function — `serial_init()` is at :1753
+and the banner at :1798 — but they are before the **first firmware call**, which
+is the ordering that matters, and the source comment at :1757-1758 says exactly
+that. An earlier version of this entry said "before anything else", which was
+false; `docs/src/bootloader/stage2.md` said the same thing independently, which
+is the useful detail: two documents in this repository made the same wrong claim
+about the same two lines, and neither was derived from the other.
 
 **Why it was silent.** `cli` does not help — it runs *after* the trampoline
 returns, and the tick lands *during* the call; the trampoline `pushfw`es flags
@@ -699,10 +872,11 @@ kernel's call chain last left in RAX, so `if (fork() == 0)` takes the **parent**
 branch on the first fork after any call that returned non-zero — and only on
 that fork, which is the signature of "the bug is intermittent" rather than "the
 child branch is inverted". The rest of the caller-saved set is now cleared too
-(interrupt_entry.S:327-331), after the frame is built, because RDX/RDI/RSI are
-the frame's inputs and clearing them first would frame the `iretq` with
-RIP=0, RSP=0 and RFLAGS=0. R11 is left alone deliberately: it carries the
-interrupt frame pointer.
+(interrupt_entry.S:314-318, re-derived 06:05 — the 327-331 this entry used to
+cite is now the frame-layout `.set` block), after the frame is built, because
+RDX/RDI/RSI are the frame's inputs and clearing them first would frame the
+`iretq` with RIP=0, RSP=0 and RFLAGS=0. R11 is left alone deliberately: it
+carries the interrupt frame pointer.
 
 ### 0.19  `build_missing_tables` only ever created a PD and a PT
 
@@ -770,17 +944,424 @@ make its target out of date, which is precisely the behaviour being fixed.
 fails and `@set -e` aborts (finding #152). And the standing workaround is still
 the right policy: **always `make clean` before believing a build result.**
 
+### 0.22  `panic.S` labelled every register one slot out, from offset 136 up
+
+**Mechanism.** `struct panic_state` puts `rip` at 128, `cs` at 136, `rflags` at
+144, `cr2` at 152, `cr3` at 160, `cr4` at 168, `cpu_id` at 176. `panic.S` did
+
+    pushfq
+    popq   %rax
+    movq   %rax, 136(%rdi)      /* RFLAGS into the cs slot */
+    ...
+    movq   %cr2, %rax ; movq %rax, 152(%rdi)   /* cr2 into the rflags slot */
+    movq   %cr3, %rax ; movq %rax, 160(%rdi)   /* cr3 into the cr2 slot  */
+    /* and cr4 was never written at all */
+
+So `cs` printed RFLAGS, `rflags` printed CR2, `cr2` printed CR3, `cr3` printed
+CR4, and `cr4` printed whatever the buffer already held. The fields below 128 —
+the sixteen GPRs and `rip` — were correct, which is what made it survivable: the
+dump looked complete.
+
+**Why it was silent.** Every one of those fields held a plausible 64-bit value.
+RFLAGS is `0x2`-ish; CR2 is a smallish fault address; CR3 and CR4 are both large
+aligned kernel pointers. There is no bit pattern that says "this is the wrong
+register", and the values were all *drawn from the machine being dumped*, so they
+described the machine correctly and the field names incorrectly. **A panic report
+that mislabels its registers is worse than one that omits them, because it gets
+believed** — a reader who sees a plausible CR3 will reason about paging, and the
+number they reason from is RFLAGS. The one thing that could have caught it, the
+compile, had nothing to check against: the offsets were bare numbers in a `.S`
+file and a struct in a `.h` file, and C does not know what an assembly file
+means.
+
+**The fix, and the part worth copying.** Seven `_Static_assert`s in
+`src/kernel/include/panic.h:76-82`, one per offset, each naming the other side
+of the pair:
+
+    _Static_assert(offsetof(struct panic_state, rip)    == 128, "panic.S writes rip at 128");
+    _Static_assert(offsetof(struct panic_state, cr4)    == 168, "panic.S writes cr4 at 168");
+    _Static_assert(offsetof(struct panic_state, cpu_id) == 176, "panic.S clears cpu_id at 176");
+
+A hard-coded number in assembly that has to agree with a struct is now a build
+error instead of a wrong answer. See **P**: two of today's bugs were caught in
+seconds by exactly this shape of assert, *after* the code had already been
+"fixed" wrongly by hand twice.
+
+**What is still open, and it is the half that matters.** `cs` is still never
+written. CS has no `MOV`-source form in 64-bit mode and `push cs` is not
+encodable, so `panic_regs` cannot read it; the exception stub that received the
+fault knows it and must store it before calling. Nothing does. `panic.h:70-74`
+says so and `panic.S:71-75` says so again: "`cs` reads as whatever was in the
+buffer -- do not believe it." The `_Static_assert` pins where `cs` *goes*; it
+does not put it there.
+
+**One stale number left in the fix.** `panic.S:56-57` and `:68-69` both say
+"`cpu_id` at 172", and `:68` says "`cpu_id` to 172". The code writes 176 and the
+assert says 176, so the comment is the wrong one — it is the residue of the first,
+rejected attempt. Recorded here rather than fixed: `src/kernel/panic.S` was
+outside this pass's claim, and a comment that contradicts the assert two files
+away is exactly the kind of text that should be caught rather than edited by
+someone with no context.
+
+### 0.23  `vmm_translate()` answered "not present" with 0, which is also a real answer
+
+**Mechanism.** `vmm_translate(pgd, virt, leaf)` returned 0 for "this address does
+not resolve". It also returns 0 for "this address resolves to physical frame 0".
+Nothing in the tree maps frame 0, so the two have not collided; but the return
+value is a *sentinel* being read as a *value*, and every caller that tests it is
+relying on that remaining true forever.
+
+The reason it matters is not the collision. It is that a process PML4 carries the
+direct map at `PML4[256]`, so the four-level walk resolves a **user** address
+such as `0x800000001000` perfectly happily: PML4 index 256 lands in the direct map
+and the translation succeeds, returning physical `0x1000`. `phys_to_virt()` then
+hands the caller a kernel pointer into a frame the process does not own. The
+correct question is never "what physical address is this" but "is this address
+mine", and an API whose return value is a physical address cannot answer it.
+
+**Why it was silent.** Not a fault, not a bad value, not a return code nobody
+checked. `0` is the answer to "is it there?" *and* a plausible physical address,
+so the code that needs the first question is handed the second. Nothing in the
+tree got it wrong today — `process.c`'s `user_page()` bounds-checks `vaddr <
+USER_ADDRESS_MAX` *before* translating (process.c:332-333) precisely because
+`vmm_translate` cannot do it itself. That check is the only thing between a
+user-supplied address and the direct map, and it is a check that lives in the
+caller.
+
+**The fix, and its honest limit.** `vmm_lookup_page(pgd, virt, phys, leaf)` at
+vmm.c:503 returns a presence flag: 1 and `*phys` set, or 0 and `*phys` cleared.
+`vmm_translate` is now a two-line wrapper over it (vmm.c:521-527) with unchanged
+behaviour, so nothing that calls it changed meaning. Both forms are documented
+at vmm.h:286-315, and the header says plainly which one to use for new code and
+why the old one is a trap rather than a convenience.
+
+**What is still open, and do not write this one up as "replaced".** **Three
+call sites still use the sentinel form and still test the physical address for
+zero:** process.c:335, process.c:351 and mm.c:799. None of the three is wrong
+today, and the process.c pair sits behind the bounds check above. But the
+migration is not done, and "vmm_translate was replaced by vmm_lookup_page" is
+false as of this pass — it would have been the twelfth wrong claim in this file.
+What is true is narrower and more useful: **the ambiguous form now has a
+documented name and a safe alternative, and the three places that still reach
+for it are enumerable by `grep -n vmm_translate src/`.**
+
+### 0.24  `exec_load_and_run()` returned the reason init did not start, into a fault
+
+**Mechanism.** `exec_load_and_run()` had three failure exits — `elf_load()`,
+`mm_add_vma()` for the stack, `build_user_stack()` — and each one did the same
+thing:
+
+    if (r < 0) {
+            mm_put(new_mm);
+            return r;
+    }
+
+`mm_put()` tears down the new address space's page tables. So the error code —
+the entire diagnosis of why init does not start — was on its way back to a caller
+two frames up, behind a page-table teardown. **A fault inside that teardown takes
+the machine down before anything gets to report the code.** The result is that
+the one piece of information needed to make progress existed for the duration of
+one function call and was then destroyed by the machine crashing.
+
+**Why it was silent.** It is silent in the worst possible way: *the machine
+crashes, and the crash is a plausible-looking crash*. A fault in a page-table
+teardown reads as a paging bug. It reads as "the thing being torn down was
+already broken", which points at `elf_load`'s mappings — the opposite end of the
+function from the cause. So the investigation went to the mappings, and the
+mappings were fine. Meanwhile `init` never started, with no line in the log
+saying why, for an entire day.
+
+**The fix.** Log first, release second, at all three exits (process.c:1090-1100,
+:1113-1117, :1121-1126): `PROC_LOG(KLOG_ERROR, "exec: elf_load failed: %d", r)`
+and its two siblings, each written *before* `mm_put()`. The general form is the
+one worth remembering and it is not specific to this bug:
+
+> **Any code that returns a diagnosis after releasing the resource the diagnosis
+> is about is returning it into a hazard. Log the reason where it survives
+> whatever the release does next.**
+
+This is the shape of 0.1 and 0.7 as well — in all three the reporter was the
+thing that died, so the failure you got instead of the explanation was the
+reporter's own death. Three of the day's bugs are the same bug at three layers.
+
+**What is still open.** `sys_execve()`'s own path (process.c:1343) still
+`return exec_load_and_run(...)` directly, so a `sys_execve` failure is still a
+return code to userspace rather than a log line. That is defensible — userspace
+should learn that exec failed — but the *reason* is still not logged on that
+path, and `process_create_init()` (process.c:1277-1281) logs a single
+uninformative "cannot load the init image" on top of whatever `exec_load_and_run`
+already said. Two lines of diagnostic, one of which is worse than useless.
+
+### 0.25  A test of the checker gated the build, so a stale expectation in the test stopped the kernel being built
+
+**Mechanism.** `verify-isa-test` — a self test of `tools/verify_isa.py`, which
+compiles a dozen small fixtures through both flag profiles and asserts the
+classifier still recognises each instruction family — was a prerequisite of
+`all:`. It checks **the checker, not the tree**. Four of its fixtures did not
+assemble or did not behave as the fixtures claimed, and each one made
+`make` fail before the kernel was built:
+
+  * the string-move fixtures take no explicit operand, so `mov` with one did not
+    encode as written;
+  * `MOVD` has no GPR form in 64-bit mode;
+  * `BLSR`/`BLSI` have no one-operand form;
+  * the floating-point helpers in `isa_probe.c` cannot compile under the
+    kernel's own `-mno-sse`.
+
+**Why it was silent — and this is the part that generalises.** The gate
+`verify-isa` that actually protects the kernel is applied to the *linked
+artefacts* and did its job all along; `verify-isa-test` is the test of that
+gate's classifier. Gating `all:` on the test of the gate means **the test's own
+bugs are indistinguishable from the gate's findings, and both stop the build.**
+There is no output that says "the checker is broken" as opposed to "the kernel
+contains an illegal instruction", because from make's point of view they are the
+same event: a non-zero exit from a prerequisite. So the response to a build that
+stops in a self test is to fix the self test, which is what happened, four times,
+each time correctly and each time leaving the real question — why does the build
+depend on this at all — unasked.
+
+**The fix, and the principle.** `all:` no longer depends on it (Makefile:342 is
+`all: $(DISK)` and nothing else). `make check` runs it (Makefile:345-347), and
+`make verify-isa-test` still runs it directly. The Makefile comment at :331-336
+states why in the terms that matter: "a stale or wrong expectation inside the
+check itself would otherwise stop the kernel being built at all, which is the
+wrong failure mode for a test of a safety net." The fixtures were fixed as well,
+so the test is not merely skipped.
+
+**What is still open, and it is the same failure one level down.** The Makefile
+comment above that one — :326-330 — still says "verify-isa-test runs first so a
+broken gate is reported before the image is assembled rather than after. It is
+cheap… so it costs a second and it is the only thing that notices a gate which
+has quietly stopped recognising an instruction family." **That paragraph describes
+the arrangement this entry just removed.** It is directly above a paragraph
+arguing the opposite, in the same comment block, on the same page. Nothing stops
+a stale comment from being *true*, only from being *currently true*; this one is
+currently false and it is the kind of false that convinces.
+
+### 0.26  The direct map is 4 GiB and mapped with 1 GiB pages when the CPU has them — the document says 2 MiB
+
+This is not a code bug. It is the residue of #35, and it is in the documentation
+this pass was asked to re-check, so it is recorded here rather than as a finding.
+
+`DIRECT_MAP_BYTES` is `(4ULL << 30)` (vmm.c:54) — 4 GiB, three ways agreeing, and
+`docs/src/architecture/memory-layout.md` now says 4 GiB in its address table and
+in its own prose. **That part is fixed.** What is still wrong is the page size
+and the log line the document quotes:
+
+  * vmm.c:221-239 chooses between **1 GiB pages** (`cpu_features.has_1gb_pages`,
+    PDPT entries with `PS=1`) and 2 MiB pages, and logs
+    `vmm: direct map 0-%u GiB, 1 GiB pages` or `… 2 MiB pages` accordingly.
+    `memory-layout.md` says flatly "laid out with 2 MiB pages" and quotes
+    `vmm: direct map 0-4 GiB, 2 MiB pages` as *the* boot log.
+  * Which of the two runs is a property of the CPU, not of the build, so the
+    document's quoted log line is right on some machines and wrong on others,
+    and the document cannot tell you which.
+
+Corrected in the document during this pass. `has_1gb_pages` is finally assigned
+(cpu_features.c:218 — it was never assigned at all when #78 was written, which is
+why the 1 GiB branch was dead), so the 1 GiB path is live for the first time and
+a boot log that says "1 GiB pages" is now the expected output, not a surprise.
+
+**Why this entry exists at all.** #35 was filed as a three-way *disagreement*
+about the direct map's size, and it was resolved by picking the code. The
+resolution was correct and it left a document that agrees about the size and
+disagrees about everything else — so "resolved" was doing more work than it had
+earned. A disagreement is not resolved when one side is chosen; it is resolved
+when the other two sides are re-derived and found to match.
+
+### 0.27  OPEN, NOT FIXED, and not in any finding: the kernel dies in `gdt_reload` on a non-canonical RIP
+
+This is the one item in section 0 that is **not** a fix, and it is here because
+it is the current top of the queue and **no finding in this file records it** —
+`grep -n 'non-canonical\|gdt_reload\|lretq' MEGA_AUDIT.md` returns two hits, both
+about the *TSS descriptor's* base being non-canonical (0.16), which is a
+different bug that happens to share a word.
+
+**What is reported.** Commit 1401355's message ends: "Still outstanding: the
+kernel reaches gdt_reload and the fault after it moved to a non-canonical RIP on
+the far return, so the frame is still wrong. Not claiming that fixed." The chain
+around it, from the same day's commits: 8eba98a removed port-0xE9/COM1 markers
+from `main.c` that "still did not appear: the crash happens before gdt_reload
+returns".
+
+**What I verified, and what I did not.** I read `gdt_flush` and `gdt_reload` and
+the far-return frame they build, and the frame is *shaped* correctly —
+`pushq $0x202` (RFLAGS), `pushq $KERNEL_CODE_SELECTOR` (CS),
+`pushq $.Lgdt_flush_resume` (RIP), `lretq`, which is the right order for LRETQ's
+RIP-then-CS-then-RFLAGS pop. **I could not reproduce it or find the cause,
+because the tree does not assemble today** (see the header note), and because
+reaching it needs a boot this pass did not do. So: reported, unverified, and
+recorded as an open item rather than as a conclusion.
+
+**One thing a reader should know before they start, because it is the shape that
+has already wasted time.** `gdt_flush`'s C prototype takes three arguments
+(`gdt_flush(gdt_pointer, code_selector, data_selector)`, gdt.c:95) and the
+assembly **ignores the second and third**, using compile-time immediates
+(`movw $KERNEL_DATA_SELECTOR, %ax`; `pushq $KERNEL_CODE_SELECTOR`) instead. That
+is not the bug — the selectors are constants and both spellings are right today —
+but it means the signature promises a parameterisation the assembly does not
+implement, which is the same kind of lie as a comment that describes a different
+codebase. If the far-return frame is being debugged, that mismatch is where I
+would look second, after confirming what RIP actually was.
+
+--------------------------------------------------------------------------------
+P. THE PATTERN — fourteen bugs, one shape, and what actually finds them
+--------------------------------------------------------------------------------
+
+This is the durable finding of 2026-10-02. Everything else in this file is a
+list; this is the reason the list keeps growing, and it is not a task. Nothing
+here can be worked, because nothing here is a bug. **If you fix nothing else in
+this file, read this section.**
+
+### P.1  The ratio
+
+Fourteen bugs were found in one day of boot debugging. **Eleven produced no
+diagnostic of any kind.** Not a wrong one — none. The machine booted, or hung, or
+printed something, and the output was indistinguishable from a correct run or an
+unrelated failure.
+
+Of the three that did produce output, **two reported the wrong fault.**
+
+That is the whole shape of the day: thirteen of fourteen bugs were invisible to
+the only instrument available, and the fourteenth pointed somewhere else. **The
+most expensive bugs on this tree are not the ones that crash. They are the ones
+that print a plausible number.**
+
+### P.2  Why "no diagnostic" is the common case, not bad luck
+
+Every one of the eleven has the same cause, and it is structural rather than
+accidental: **the bug was in the layer whose job is to produce the diagnostic, or
+immediately below it, and nothing exists above it to notice.**
+
+  * `panic.S` wrote RFLAGS into the `cs` slot and shifted CR2/CR3/CR4 one slot
+    low (0.22). The panic reporter named the wrong registers. The dump was
+    complete, well-formatted, and wrong.
+  * `exec_load_and_run` returned its error code into a page-table teardown that
+    faulted first (0.24). The code that would have said why did not run.
+  * Both A20 methods, the 8042 output port and port 0x92, have **opposite bit-0
+    polarity**, and getting it backwards does not fail — it resets the machine,
+    which at that point in stage2 looks exactly like the machine deciding to
+    stop. The loader has no watchdog to tell the two apart.
+  * 0.1, 0.2, 0.4: the 8259 tick landed inside a BIOS call, so the fault handler
+    that should have logged it was the code that died. The *reporter* was the
+    crash.
+  * 0.9: `gdtr64` held the *addresses* of the limit and base, not their
+    contents. `LGDT` succeeded. It loaded a limit that was an address and a base
+    pointing at two variables, and the far jump resolved against a descriptor
+    assembled out of the loader's own stack.
+  * 0.11: the kernel entry address zero-extended instead of sign-extending, and
+    jumped to 2 GiB — a real, mapped, low address. It did not fault; it went
+    somewhere else and failed there.
+  * 0.19: `vmalloc` returned NULL and `execve` returned an error. Both **failed
+    by returning failure**, which is the quietest possible failure: the return
+    value is a normal one and the caller that should have checked it did not.
+
+Note the shape those last three share: **each one produced a correct-looking
+value at a point where the caller was not checking.** None of them is exotic.
+They are the ordinary result of writing an offset, a literal, or a return value
+without a second source to check it against.
+
+### P.3  What actually found them
+
+Not reading the source. To be specific, because "read the code" is what everyone
+already does and it does not work:
+
+  * **`objdump -d` on the *linked* artefact**, not the `.S` file. This is what
+    found the descriptor bugs (0.15, 0.16): `GDT_ENTRY` looked correct in the
+    header and produced `L=0` in the descriptor, which is visible in the
+    instruction stream that consumes the descriptor and invisible in the macro.
+  * **`objdump -d`, or reading the encoding, for instruction forms.** A1.7 is the
+    template: the finding said `0f 01 1c` "really is the m16&32 form", so a
+    three-line reproducer was compiled with `gcc -m32` and disassembled in 16-bit
+    mode. The answer took ten seconds and settled it.
+  * **`-d int` / `-d exec` tracing.** Not "print more". The 0.1 tick and the
+    stage2 faults were found by stepping, because the answer to "where did it go"
+    is only in the instruction pointer at the moment it went.
+  * **Differential testing against host libc** — compile the same function for the
+    host and for the kernel and compare. This is what catches the class where
+    the kernel's copy is *plausible but not what the standard says*, which is the
+    majority of section C.
+  * **`offsetof` against the real header, in a program, not a comment.** Every
+    field offset in 0.22 was "measured with `offsetof` against the real header,
+    not read off a comment". That distinction is the entire finding.
+
+**The common thread: every one of these produces a fact, and none of them
+requires the bug to announce itself.** That is the property that matters when the
+bug produces no diagnostic — the tool that finds it must not depend on the bug
+being loud.
+
+### P.4  `_Static_assert` is worth more than the fix it caught
+
+Two of today's bugs were caught **within seconds** by `_Static_assert`s — and
+both were caught *after* the code had already been fixed wrongly by hand, twice,
+in **opposite directions**.
+
+The recorded instance, from commit 1401355's message: the `panic_state` offsets
+were written by hand, `cpu_id` was placed at **172**, and the assert
+`offsetof(struct panic_state, cpu_id) == 176` failed the build immediately —
+because `cr4` ends at 176, so 172 was inside the previous field's tail. The wrong
+answer had been written, believed, and would have shipped a fourth mislabelled
+field into the one routine whose entire job is telling you the truth.
+
+The second instance is reported from the same session but its evidence is not in
+the tree, and this file does not restate it as fact. What is verifiable is the
+*shape*, and the shape is verifiable because it is now all over the tree:
+
+  * seven asserts pinning `struct panic_state` offsets to what `panic.S` writes
+    (panic.h:76-82);
+  * seven asserts pinning `struct tss` offsets, the IST slot width and
+    `sizeof(struct tss) == 108` (gdt.c:67-76) — the 32-bit-layout bug, 0.17, was
+    a struct that was the wrong architectural size, and `sizeof == 80` is a
+    plausible number that no compiler complains about;
+  * the round-trip decoders in gdt.c that encode a descriptor and decode it back
+    into its fields, so a wrong shift in the encoder is a build failure
+    (cited at 0.16).
+
+**The generalisable rule, and it is stronger than "add asserts":** a hard-coded
+number in assembly, a byte offset in a struct, or a hand-encoded bit field has
+**no second source of truth**, and a comment is not one. Pin it with an assert
+that names both sides. On this tree that single change would have prevented
+0.22, 0.17 and 0.16 outright, and it caught two of them *after* the fact.
+
+The two directions matter as much as the count: getting `cpu_id` wrong by four
+bytes low and by four bytes high are both "a plausible offset", and a check that
+only catches one of them is not a check.
+
+### P.5  What to do about it
+
+  1. **A bug that produces no diagnostic is not a quieter bug. It is a bug whose
+     symptom you have not learned to read yet.** Eleven for fourteen is not bad
+     luck; it is what happens when the defective layer is the reporting layer.
+  2. **Do not add a diagnostic where the diagnostic already is the thing that
+     fails.** 0.24 and 0.1 are the same shape: the reason existed, and was
+     destroyed on the way out. Log before you release, not after.
+  3. **Prefer the tool that produces a fact to the tool that produces an
+     impression.** `objdump`, `offsetof`, `-d int`, host-libc differential. A
+     careful read of a `.S` file found none of the fourteen.
+  4. **Pin every assembly↔C constant in both directions.** `_Static_assert` on
+     `offsetof` and on `sizeof` is cheap, and the build failure it produces is
+     *loud*, which is the property you want when everything else is quiet.
+  5. **A claim about this tree — a finding, a status line, a comment, a document
+     — gets re-derived or it gets deleted.** Seven wrong claims in this file and
+     four in one pass (A1.9) is the count, and every one of them was believed by
+     someone who did not have time to check it.
+
 --------------------------------------------------------------------------------
 A. RUNTIME / BUILD VERIFICATION (empirically established)
 --------------------------------------------------------------------------------
 
 7.  [INFO] Clean build of b1df707 succeeds with zero errors and 18 warnings; the
-    >> STATUS: OPEN (amended) — the clean build now produces 13 warnings (11 compiler + 2
-       ld), not 18, and the composition changed: stage2.c 7 (a20_is_open's
-       -Warray-bounds and an unused `count_here`), cpu_features.c 2, console.c 1,
-       unistd.c 1 (`noreturn` function does return = #129). The kprintf/kmalloc/pmm
-       warnings the audit listed are gone. The remaining ones are still real
-       defects.
+    >> STATUS: OPEN (amended, re-checked 06:05 and NOT confirmed) — the clean
+       build does not currently reach the link stage, so this line's arithmetic
+       cannot be re-derived today. What *is* verifiable: the build stops at
+       `src/kernel/interrupt_entry.S:208` with `operand type mismatch for 'out'`
+       (gdthang's uncommitted `GDTMARK` macro), and before that point only two
+       warnings are emitted — `console.c:330` unused `bytes_per_pixel` (this is
+       finding #102, still real) and `stage2.c:992` unused `best_score`, which
+       appears in **no** finding here. The claimed composition (11 compiler + 2
+       ld) is **unchecked**, not disproved: the claim that the `kprintf`,
+       `kmalloc` and `pmm` warnings are gone was true at 03:20 and nothing since
+       should have brought them back. Re-derive it once the tree assembles.
 
     warnings are real defects, not noise. Reproduce with
     `make clean && make 2>&1 | grep -E 'warning|error'`. See #14, #37, #40,
@@ -844,7 +1425,7 @@ B. BOOT CHAIN  (src/boot/*, src/include/boot.h, tools/disk.py, tools/initrd.py)
     silently truncates the IDT base and the first exception decodes a gate from
     unrelated memory. Nothing faults and nothing reports.
 
-16. [MEDIUM] src/boot/boot_layout.h:194 + stage2_entry.S:499,549-550 — the
+16. [MEDIUM] src/boot/boot_layout.h:197,280 + stage2_entry.S — the
     >> STATUS: OPEN — `BIOS_RM_STACK_TOP` is still 0x7E00 (boot_layout.h:197) and
        `STAGE1_DRIVE_ADDR` is still 0x7DFC (:280), so the trampoline's first
        `pushfw`/`lcallw` still lands on the drive byte. Only 512 bytes of headroom
@@ -852,14 +1433,17 @@ B. BOOT CHAIN  (src/boot/*, src/include/boot.h, tools/disk.py, tools/initrd.py)
 
     real-mode trampoline stack top is 0x7E00 and it grows *down* into the MBR:
     `pushfw` then `lcallw *BIOS_IVT_PTR` writes 0x7DFE and 0x7DFC, and
-    STAGE1_DRIVE_ADDR is 0x7DFC (boot_layout.h:277). The comment at
+    STAGE1_DRIVE_ADDR is 0x7DFC (boot_layout.h:280; the status line's :197 and
+    :280 are the current lines, this finding text's :194 and :277 are not). The
+    comment at
     boot_layout.h:188-190 ("0x7E00 is above stage1's image ... so nothing the
     firmware writes there can collide") reasons backwards. Harmless today only
     because the drive byte is consumed at stage2_entry.S:106 before the first
     BIOS call. Only 512 bytes of headroom exist before it reaches 0x7C00.
 
 17. [MEDIUM] src/boot/stage2.c:1285-1289 — the ring-3 code descriptor is
-    >> STATUS: OPEN — stage2.c:1570 still installs `gdt[3] = 0x0000FA000000FFFFULL`, flags
+    >> STATUS: OPEN (amended 06:05) — `stage2.c:1709` (the line this used to
+       cite, 1570, moved) still installs `gdt[3] = 0x0000FA000000FFFFULL`, flags
        byte 0x00, i.e. a 16-bit code segment, and still labels it `/* 0x18 64-bit
        user code, DPL 3 */`. stage2 never enters ring 3 so it is latent, but the
        label is a false claim and gdt.h's "cannot drift apart" is still untrue.
@@ -872,22 +1456,12 @@ B. BOOT CHAIN  (src/boot/*, src/include/boot.h, tools/disk.py, tools/initrd.py)
     apart" — stage2.c:22 includes gdt.h and then hardcodes all four literals, so
     they have in fact drifted. Loading 0x18/0x1B as CS in long mode raises    #GP(0x1B).
 
-18. [MEDIUM] src/boot/stage1.S:189-196 — the sectors-per-track divisor inherits
-    >> STATUS: OPEN — stage1.S:182 sets `movb $0x08, %ah` and :196 still does `movw %ax,
-       bx_spt` with nothing clearing AH in between (the `xorb %ah,%ah` at :201 only
-       covers `bx_heads`). `divw bx_spt` at :287 therefore divides by `0x0800 |
-       spt`. It happens to work because SeaBIOS returns AH=0 on success; that is
-       luck, not logic.
-
-    AH from the BIOS status byte. `movb $0x08, %ah` is still live at
-    `movw %ax, bx_spt`, so bx_spt = 0x0800 | spt (e.g. 2111, not 63) unless    INT 13h/AH=08h happens to return AH=0. Every LBA->CHS conversion in
-    chs_read is then wrong with CF clear — wrong sectors read, silently. The
-    heads path gets this right (`xorb %ah,%ah` at :201).
-
 21. [LOW] Dead code and unused constants in the boot chain: stage2.c:63 io_wait()
-    >> STATUS: OPEN (partial) — `io_wait()` now has callers (stage2.c:284,305) and
+    >> STATUS: OPEN (partial, amended 06:05) — `io_wait()` now has callers
+       (stage2.c:291,312 — the lines this used to cite, 284,305, moved) and
        `diag_report`/`diag_check` no longer exist. `DAP_ADDR` (boot_layout.h:98)
-       and `VBE_SCRATCH_BYTES` (:109) are still defined-but-unused, and the
+       and `VBE_SCRATCH_BYTES` (:109) are still defined-but-unused — verified by
+       `grep -rn`, which finds the two `#define`s and no reference — and the
        duplicate stage2.ld ASSERTs were not re-checked.
 
     (never called), :255 diag_report(), :282 diag_check(), :960 `need` computed
@@ -987,8 +1561,12 @@ C. KERNEL MEMORY MANAGEMENT  (pmm.c, mm.c, vmm.c, kmalloc.c, percpu.c)
     primitive. Add `assert(!(read_cr4() & (1<<16)))` before the first swapgs.
 
 47. [LOW] There is no AP bring-up path anywhere in the tree. percpu_setup() is
-    >> STATUS: OPEN — still no AP bring-up path; `percpu_setup(0)` is still CPU 0 only, and
-       MAX_CPUS/kmags are still sized for a path that does not exist.
+    >> STATUS: OPEN (amended 06:05) — still no AP bring-up path; `percpu_setup(0)` is
+       still CPU 0 only, and MAX_CPUS/kmags are still sized for a path that does
+       not exist. **The line number this used to cite is stale:** `percpu_setup(0)`
+       is at main.c:142, not :147. (main.c is byte-identical to its state before
+       commit 1401355 — that commit added seven marker lines and 8eba98a removed
+       the same seven — so this citation rotted without the file moving.)
 
     called for CPU 0 only (main.c:147), so run.sh's `-smp 18` leaves 17 vCPUs in
     the firmware's INIT/SIPI wait and this_cpu_id() is only ever evaluated on
@@ -1316,23 +1894,6 @@ D. PROCESS / SCHEDULING / SYSCALL / ELF
     2048 fragmented blocks exist, every subsequent vmalloc, including vma_alloc
     and therefore every mmap, fails permanently with no recovery.
 
-78. [MEDIUM] src/kernel/include/cpu_features.h:31-33 vs cpu_features.c:171 —
-    >> STATUS: OPEN — cpu_features.c:171 still reads NX from `basic_edx` bit 20 and never
-       consults `extended_edx` (:87). Boot log: `nx=0` and `cpu: no NX support`.
-       The leaf 0x80000007 invariant_tsc source and the family/model extended-field
-       decode are unchanged too.
-
-    NX is read from CPUID leaf 1 EDX bit 20, which is *reserved*. NX/XD is
-    CPUID 0x80000001 EDX bit 20, read into extended_edx at cpu_features.c:87 but
-    never consulted. So `cpu_has(CPU_FEATURE_NX)` is permanently false and
-    cpu_features.c:222-223 always logs "no NX support" — a permanent false
-    alarm that will silently disable NX if anything ever gates on it. Two more
-    decode errors in the same file: invariant_tsc is taken from leaf 0x80000001
-    EDX bit 8 (the correct source is leaf 0x80000007 EDX bit 8), and family/model
-    drop the 8-bit extended-family and 4-bit extended-model fields
-    (cpu_features.c:75-76). cpu_features.h:109 `has_1gb_pages` is never assigned    at all (leaf 0x80000001 is never queried), so vmm.c:202-208's 1 GiB branch is
-    dead and main.c:272 always prints 1g_pages=0.
-
 79. [MEDIUM] src/kernel/sched.c:587-600 — sched_wake() mutates the target task
     >> STATUS: OPEN — `sched_wake()` still mutates mlfq_level/io_boost/exec_budget before
        taking rq->lock.
@@ -1417,29 +1978,45 @@ D. PROCESS / SCHEDULING / SYSCALL / ELF
     wakes a writer. POSIX says it must have no side effects.
 
 87. [LOW] interrupt_entry.S never clears DF on the interrupt path (only
-    >> STATUS: OPEN — interrupt_entry.S still never clears DF on the interrupt path.
+    >> STATUS: OPEN (amended 06:05) — interrupt_entry.S still never clears DF on
+       the interrupt path. The *claim* about `ret_to_user` having a `cld` still
+       holds (`ret_to_user` is at :284 and `cld` is its first instruction at
+       :285; the line number this used to cite, :261, is stale). Harmless today
+       because the kernel builds
+       -mno-sse/-mno-sse2 and memcpy_scalar (kstring.c:293-310) is a plain u64-copy
+       loop, with the only rep movsl in the kernel being the bootinfo copy in
+       main.c before interrupts are enabled. Add `cld` to interrupt_common.
 
-    ret_to_user:261 and SFMASK do). Harmless today because the kernel builds
-    -mno-sse/-mno-sse2 and memcpy_scalar (kstring.c:293-310) is a plain u64-copy
-    loop, with the only rep movsl in the kernel being the bootinfo copy in
-    main.c before interrupts are enabled. Add `cld` to interrupt_common.
+88. [LOW] `addq $8,%rsp; popq %rbp` in ret_to_user is a complete
+    >> STATUS: OPEN (amended 06:05) — the pair is still there, but not where this
+       finding says: `addq $8, %rsp` is at interrupt_entry.S:295 and `popq %rbp`
+       at :319 (the two cited lines, 270-271, are now inside ret_to_user's
+       comment block). The `addq` is a real no-op (it consumes the pad word
+       pushed to 16-align the user stack) and the comment claiming it is what
+       aligns the user stack
+       is false. The real guarantee is
+       ALIGN_DOWN(...,16) in build_user_stack (process.c:905). The end state is
+       correct; the two instructions and the comment should go.
 
-88. [LOW] interrupt_entry.S:270-271 — `addq $8,%rsp; popq %rbp` is a complete
-    >> STATUS: OPEN — interrupt_entry.S:270-271 still has the `addq $8,%rsp; popq %rbp`
-       no-op and the comment claiming it is what aligns the user stack.
-
-    no-op (push then pop of an unrelated value), and the comment claiming it is
-    what makes the user land 16-aligned is false. The real guarantee is
-    ALIGN_DOWN(...,16) in build_user_stack (process.c:905). The end state is
-    correct; the two instructions and the comment should go.
-
-89. [LOW] interrupt_entry.S:288-303 defines .set FRAME_RDI/FRAME_SIZE but nothing
-    >> STATUS: OPEN — FRAME_RDI/FRAME_SIZE are still defined in the assembly and hardcoded
-       independently in interrupt.h.
+89. [LOW] interrupt_entry.S defines .set FRAME_RDI/FRAME_SIZE but nothing
+    >> STATUS: OPEN (amended 06:05) — FRAME_RDI/FRAME_SIZE are still defined in the
+       assembly and hardcoded independently in interrupt.h. **Line numbers
+       corrected:** the block is interrupt_entry.S:336-351 (`FRAME_RDI` at :336,
+       `FRAME_SIZE` at :351), not the :288-303 this used to cite — commit 1401355
+       changed that file by 43 lines.
 
     in the assembly references them, and interrupt.h:128-141 hardcodes the same
-    numbers independently. The comment at :288 claims    "_Static_asserts them, so the two cannot drift" — the protection is
+    numbers independently. The comment above the `.set` block claims    "_Static_asserts them, so the two cannot drift" — the protection is
     one-directional and only catches edits to the C struct.
+
+    **This is the finding `P` argues for, and it is the one place in the file
+    where the argument applies to the tree as it stands.** The protection is
+    asymmetric: `interrupt.h` static-asserts against the assembly's numbers, so
+    editing the `.set` block is caught, and editing the C struct is caught — but
+    *adding* a field to either side is not, and nothing catches a `.set` that
+    disagrees with the struct at the moment it is written. The gdt.c round-trip
+    decoders (0.16) and the seven `struct tss` asserts (0.17) are what the
+    comment is describing without having done it.
 
 90. [LOW] syscall.c:877-890 — syscall_dispatch() sets
     >> STATUS: OPEN — syscall_dispatch() still sets `ret_to_user = 1` after the early
@@ -1504,17 +2081,6 @@ E. KERNEL CORE — CONSOLE / LOG / PANIC / KPRINTF / INIT ORDER / ENTRY
     'J' at :489-495 which checks both backends. When a framebuffer backend is
     active, 0xB8000 has been repurposed by the graphics mode, so an erase-line
     escape corrupts the framebuffer.
-
-94. [HIGH] src/kernel/console.c:561-568 — the escape parser is defeated for
-    >> STATUS: OPEN — being fixed at the time of this check. `handle_escape()` now returns
-       `bool` and every branch returns true, but the caller had not yet been
-       updated and console.c:569 failed to compile (`control reaches end of
-       non-void function`).
-
-    every sequence. `handle_escape(*s)` is called to advance the state machine    and then `console_putc_attr(*s, ...)` prints the *same byte* anyway. Only
-    ESC itself is skipped by the `continue`. So `ESC [ H` emits the literal
-    characters '[' and 'H' to both VGA and serial, in addition to performing the
-    cursor move. Fix: have handle_escape report whether it consumed the byte.
 
 95. [HIGH] src/kernel/panic.c:74-78 — the "range check" before writing to the
     >> STATUS: OPEN — panic.c:76-77 still reads `if ((uintptr_t)0xB8000 < 0x100000)`, a
@@ -1937,10 +2503,13 @@ G. BUILD SYSTEM, TOOLS, CI, REPO HYGIENE
        computes `INITRD_HEADER_SIZE + len(index) + len(body)`, and disk.py:40 has
        the same `"<QIIQ"` format string as initrd.py:27, so both agree on 24
        bytes. The residue is the thing the finding actually recommends, and it is
-       unchanged: `build_initrd()` still exists in *both* tools (disk.py:56,
-       initrd.py:32) with two independent copies of the container format. One
-       format, two writers, and nothing that would notice a third field being
-       added to one of them. Delete one.
+       unchanged: **two independent copies of the container format are still
+       here** — `build_initrd()` at disk.py:56, called from disk.py:133, and a
+       second, differently-named copy at initrd.py:32 (`build()`, not
+       `build_initrd()`; the status line this replaces named both the same, which
+       is why `grep -rn build_initrd tools/` returns exactly one hit and looks
+       like the duplication is gone). One format, two writers, and nothing that
+       would notice a third field being added to one of them. Delete one.
 
      on the initrd header size. `INITRD_HEADER_FMT = "<QIIQ"` is 24 bytes
      (8+4+4+8), but disk.py hardcodes `total = 16 + len(index) + len(body)`.
@@ -2043,19 +2612,34 @@ G. BUILD SYSTEM, TOOLS, CI, REPO HYGIENE
      patterns ["docs/src/*.md"] combination is self-contradictory.
 
 162. [MEDIUM] .gitignore is three lines (/build, .vscode, .kilo). .venv/ is
-    >> STATUS: OPEN (amended) — .gitignore is now four lines: `/build`, `.vscode`, `.kilo`,
-       and `MEGA_AUDIT.md`. `.venv/`, `__pycache__/`, `*.pyc`, `*.log` and `*.img`
-       are still uncovered. **New and important:** this audit document itself is
-       now gitignored *and* untracked, so it does not survive a clone — see the
-       note at the top of this file.
+    >> STATUS: OPEN (amended 06:05 — the previous status line was wrong about this
+       file, see A1.9) — `.gitignore` is five patterns plus a comment:
+       `/build`, `.vscode`, `.kilo`, `/ownership.json`, `/ownership.json.lock`.
+       `.venv/`, `__pycache__/`, `*.pyc`, `*.log` and `*.img` are
+       still uncovered. **What the previous status line claimed is false:** it said
+       `.gitignore` now lists `MEGA_AUDIT.md` and that "this audit document
+       itself is now gitignored *and* untracked, so it does not survive a clone".
+       `git ls-files MEGA_AUDIT.md` lists it and `git check-ignore
+       MEGA_AUDIT.md` matches nothing. It is tracked and not ignored. The residue
+       that is real is the uncovered patterns, plus the odd shape of the fix: the
+       two ownership paths *are* ignored, so the coordination state is protected
+       and the audit that describes the tree is not — which is backwards from what
+       a reader would expect.
 
      untracked today only because the venv tool wrote its own .venv/.gitignore.
      .venv, __pycache__/, *.pyc, *.log and *.img are uncovered.
 
-163. [LOW] Makefile:131-133, 155-158, 164-171 — $(INITRD) and $(DISK) have no
-    >> STATUS: OPEN — Makefile still gives $(INITRD)/$(DISK) no dependency on
-       tools/initrd.py or tools/disk.py, and Makefile:157 still writes to a
-       hardcoded `build/initrd.c`.
+163. [LOW] Makefile — $(INITRD) and $(DISK) dependency on the tools that
+    >> STATUS: OPEN (amended 06:05 — three of this finding's four items were
+       already fixed; see A1.9) — **the tool dependencies exist.** Makefile:178 is
+       `$(INITRD): $(INIT_ELF) $(HELLO_ELF) tools/initrd.py`, :215 is
+       `$(OBJ)/kernel/initrd.c.o: $(INITRD) tools/bin2c.py`, and :304 is
+       `$(DISK): … $(INITRD) tools/disk.py`. **One item survives:** Makefile:217
+       still redirects to a hardcoded `build/initrd.c` instead of
+       `$(BUILD)/initrd.c`, so changing BUILD in config.mk:15 leaves the generated
+       file outside `make clean`'s reach. `BUILD_INPUTS_STAMP` additionally makes
+       every header and the Makefiles themselves a real prerequisite of every
+       object (0.21).
 
      dependency on tools/initrd.py or tools/disk.py, and the initrd.c.o rule has
      none on tools/bin2c.py. Editing a tool does not trigger a rebuild.
@@ -2063,8 +2647,11 @@ G. BUILD SYSTEM, TOOLS, CI, REPO HYGIENE
      `$(BUILD)/initrd.c`, so changing BUILD in config.mk:15 leaves the generated
      file outside `make clean`'s reach.
 
-164. [LOW] src/config.mk:10-13 + Makefile:113,123 — HOST_LD_32 already contains
-    >> STATUS: OPEN — the stage2 link line still reads `ld -m elf_i386 -m elf_i386`.
+164. [LOW] src/config.mk:10-13 + Makefile:148,158 — HOST_LD_32 already contains
+    >> STATUS: OPEN (amended 06:05) — the stage2 link line still reads `ld -m elf_i386
+       -m elf_i386`. (The line numbers this used to cite, Makefile:113,123, are
+       stale; the two link lines are at :148 and :158. `HOST_LD_32` is at
+       config.mk:12.)
 
      `-m elf_i386` and the Makefile passes it again, so the link lines read
      `ld -m elf_i386 -m elf_i386`.
@@ -2215,3 +2802,77 @@ H. DOCUMENTATION vs IMPLEMENTATION
     >> STATUS: OPEN — prompt.txt is still tracked at the repo root.
 
      tracked at the repo root.
+
+178. [MEDIUM] src/boot/boot_layout.h:20-33 — the physical-layout comment at the
+    top of the header is a map of the loader *before* the bounce buffer moved,
+    and every load-bearing address in it is a page off or two pages off.
+    >> STATUS: OPEN (new finding, added 2026-10-02 06:05 by `audit2`. It is not
+       from the original audit — it was found while re-checking
+       `docs/src/bootloader/stage2.md` against the code, which is the task the
+       original audit's #170 created. Re-derived from the constants in the same
+       header; nothing here is read off the comment.)
+
+    The comment claims this layout:
+
+        0x0001_0000 - 0x0001_0FFF  BIOS bounce buffer, 4 KiB per transfer
+        0x0001_1000 - 0x0001_10FF  INT 13h disk address packet
+        0x0001_1100 - 0x0001_1FFF  INT 10h/VBE scratch structures
+        0x0002_0000 - 0x0002_FFFF  stage2 image + loader stack, up to 64 KiB
+        0x0001_2000 - 0x0001_2FFF  program header reassembly scratch
+        0x0010_0000 - 0x002C_8FFF  kernel image landing zone, 1.875 MiB
+
+    and the constants in the same file say:
+
+        BOUNCE_ADDR       0x00020000      (comment says 0x0001_0000)
+        DAP_ADDR          0x00021000      (comment says 0x0001_1000)
+        VBE_SCRATCH_ADDR  0x00021100      (comment says 0x0001_1100)
+        PHDR_SCRATCH_ADDR 0x00022000      (comment says 0x0001_2000)
+        STACK32_ADDR      0x0000E000      (comment says the stack is 0x20000-0x2FFFF)
+        STACK32_TOP       0x00020000      (grows DOWN from here, so the stack is
+                                          0xE000-0x1FFFF, 72 KiB, and it butts
+                                          up against BOUNCE_ADDR — not a region
+                                          above it)
+        KERNEL_MAX_BYTES  0x001D0000      (1.8125 MiB; the comment says 1.875 MiB
+                                          and an end of 0x2C8FFF; the real end is
+                                          0x2CFFFF)
+
+    **The worst instance is `STAGE2_BSS_LIMIT`'s own comment, at
+    boot_layout.h:220-226.** It explains — correctly, and in detail — why
+    stage2's `.bss` must end below 0x10000: "The bounce buffer, the disk
+    address packet and the VBE scratch block sit at 0x10000..0x11FFF, and
+    stage2's .bss is placed by the linker immediately after .rodata. Nothing
+    reserves the gap between the two, so a .bss that grew past 0x10000 would
+    land on top of them: **the 32 KiB loader stack did exactly that**, and the
+    failure only shows up as a BIOS transfer whose destination has been
+    overwritten by the loader's own return addresses." That is finding 0.4 in
+    prose, and the addresses it names are the ones from before 0.4 was fixed. The
+    explanation is now describing a collision that is impossible.
+
+    **Why it was silent, and why this one is worth more than its severity
+    suggests.** Nothing reads a comment, so nothing breaks — but this particular
+    comment is load-bearing in the sense that it *is* the documentation for the
+    assertion that would have caught 0.4, and it now names addresses that would
+    send the next person to look for a collision in a page that has been free
+    since the bounce buffer moved. It is the same failure as **A1.9**, in a
+    header rather than in this file: a text that reads correctly and is wrong,
+    about the thing it is most likely to be trusted on.
+
+    **What I did about it, and what I did not.** `docs/src/bootloader/stage2.md`'s
+    memory table was rebuilt from the constants and now carries the full set
+    (bounce, DAP, VBE scratch, program-header scratch, loader stack, landing
+    zone), with an explicit warning not to trust the header comment.
+    `src/boot/boot_layout.h` was **not** touched: it was outside this pass's
+    claim and it is the boot chain's active territory. Fixing it is a comment
+    edit, not a code change, and it is safe to do without a build.
+
+    **Also worth checking while in there**, because it is the same header and
+    the same vintage: the lines that are *right* are the `0x0000_8000 -
+    0x0000_FFFF stage2 code + data` row (STAGE2_ADDR is 0x8000) and the
+    `0x002D_0000 - 0x002D_FFFF bootstrap page tables` row (BOOT_PT_ADDR is
+    0x2D0000), and `BOOT_PT_BYTES` is still defined at boot_layout.h:284 and
+    still named in main.c's comment. So the staleness is confined to the
+    firmware-window addresses and the loader stack, and #21's residue list —
+    `DAP_ADDR`, `VBE_SCRATCH_BYTES`, `BOOT_PT_BYTES` — is accurate as written.
+    The four transfer-window addresses at 0x10000-0x11FFF that the comment still
+    shows are not constants at all any more; nothing is placed there, which is
+    precisely why `STAGE2_BSS_LIMIT`'s collision story can no longer happen.

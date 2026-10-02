@@ -169,35 +169,62 @@ static uint32_t phdr_prot(u32 p_flags)
  * pointer happens to be. With no way to set that pointer, that is address zero.
  *
  * Two things have to be right, and the second is the one that is easy to get
- * backwards:
+ * backwards.
  *
  *   1. The block is mapped, including the .tbss tail that no PT_LOAD covers.
  *      For a static image the block usually straddles the end of the last
- *      loadable segment: measured on build/init.elf, .tdata sits in the last
- *      byte of the final PT_LOAD's page and .tbss starts in the page after it,
- *      which nothing else in the image claims. A PT_TLS-sized hole in the
- *      address space is not a hole the fault handler can be relied on to fill
- *      either, because there is no VMA describing it.
+ *      loadable segment, so a PT_TLS-sized hole in the address space is not a
+ *      hole the fault handler can be relied on to fill either, because there
+ *      may be no VMA describing it.
  *
- *   2. The thread pointer is the address one *past* the last byte of the
- *      block, not its first byte. This is not a policy; it is what the code
- *      already linked into the image assumes. A local-exec `__thread` access
- *      is a fixed displacement from FS with the displacement already resolved
- *      at link time: on the same init.elf, a variable at offset 0 of a 16-byte
- *      block assembles to `mov %fs:-16`, and one at offset 8 to `mov %fs:-8`.
- *      Both land inside the block only if FS holds p_vaddr + p_memsz. Setting
- *      FS to p_vaddr instead would put every thread-local access 16 bytes
- *      below where the linker put the variable -- inside the preceding page,
- *      which for a static image is .data, so it would corrupt the program's
- *      globals rather than fault.
+ *   2. The thread pointer is not "the end of the block". It is
  *
- * The measurements above come from the artefact, not from the specification:
- *   readelf -lW build/init.elf   ->  TLS  ... 0x403ff8 filesz 0x4 memsz 0x10
- *   objdump -d build/init.elf    ->  mov %fs:0xfffffffffffffff0,%eax
- * The offsets agree with the formula for both variables, which is what makes
- * this a derivation rather than a guess. tests/tls_harness.c re-checks it
- * against whatever the current build produced, and fails the build's claim if
- * the two ever stop agreeing.
+ *          tp = ALIGN_UP(p_vaddr + p_memsz, p_align)
+ *
+ *      and the difference is not cosmetic. Local-exec TLS is addressed at
+ *      *negative* displacements from FS: the linker assigns each thread-local
+ *      symbol an offset counted down from the thread pointer, which is why the
+ *      variable that sits lowest in the block has the *largest* negative
+ *      displacement. This was measured, not assumed -- see the derivation
+ *      below and tests/tls_harness.c, which re-derives it from whatever the
+ *      current build produced.
+ *
+ * Derivation from build/init.elf, which is what libc actually links today:
+ *
+ *   readelf -lW build/init.elf
+ *     TLS  0x008ff0 0x409ff0 0x409ff0 0x000008 0x00000c  R  0x8
+ *   readelf -SW build/init.elf
+ *     .tdata  0x409ff0  size 8      __libc_tls_sentinel, TLS offset 0
+ *     .tbss   0x409ff8  size 4      __errno,             TLS offset 8
+ *   objdump -d build/init.elf
+ *     401f99: cmp %rax,%fs:0xfffffffffffffff0        -> __libc_tls_sentinel
+ *     402457: mov $0xfffffffffffffff8,%rax
+ *             movl $0xc,%fs:(%rax)                   -> __errno
+ *
+ * p_memsz is 0xc, so p_vaddr + p_memsz = 0x409ffc, which is 4 mod 8. Aligning
+ * that up to p_align = 8 gives 0x40a000, and that is the only value that puts
+ * *both* accesses inside the block:
+ *
+ *   0x40a000 - 16 = 0x409ff0  = __libc_tls_sentinel
+ *   0x40a000 -  8 = 0x409ff8  = __errno
+ *
+ * Using the unaligned end, 0x409ffc, is what this function did until it was
+ * measured. It is off by four and it fails in the worst possible way -- no
+ * fault, because every byte it addresses is inside an already-present, writable
+ * page:
+ *
+ *   0x409ffc - 16 = 0x409fec  inside .tdata's page, but not __libc_tls_sentinel
+ *   0x409ffc -  8 = 0x409ff4  the *upper four bytes of* __libc_tls_sentinel
+ *
+ * so libc's first errno write corrupts the sentinel, and the sentinel's own
+ * read-back check then fails and refuses to start. A TLS implementation that
+ * fails loudly is at least diagnosable; this one failed silently and looked
+ * like a linker problem.
+ *
+ * The rule was then checked against nine synthetic shapes (memsz 1, 4, 5, 8,
+ * 0xb, 0x10, 0x20, 0x48 with p_align up to 0x40) and against a second shape
+ * with init.elf's exact layout, all of which agree. tests/tls_harness.sh
+ * rebuilds that check on demand.
  */
 
 /* Bytes of .tbss zeroed per pass; large enough that the per-call cost of a
@@ -205,12 +232,14 @@ static uint32_t phdr_prot(u32 p_flags)
 #define TLS_ZERO_CHUNK 256
 
 static int elf_load_tls(struct address_space *mm, const u8 *base, u64 offset,
-			u64 vaddr, u64 filesz, u64 memsz, u64 covered_end)
+			u64 vaddr, u64 filesz, u64 memsz, u64 align,
+			u64 covered_end)
 {
 	static const u8 zeros[TLS_ZERO_CHUNK];
 	u64 start = ALIGN_DOWN(vaddr, PAGE_SIZE);
 	u64 end = ALIGN_UP(vaddr + memsz, PAGE_SIZE);
 	uint32_t prot = VM_READ | VM_WRITE | VM_USER;
+	u64 zero_from, tp;
 	int r;
 
 	/*
@@ -237,31 +266,53 @@ static int elf_load_tls(struct address_space *mm, const u8 *base, u64 offset,
 	}
 
 	/*
-	 * .tbss, zeroed through the same path rather than left to the fault
-	 * handler, and the reason is a byte range the handler cannot reach: when
-	 * the block's tail shares a page with the end of a PT_LOAD, that page is
-	 * already present and holds the segment's bytes, and no access to it
-	 * ever faults. Zeroing the whole remainder through user_memory_write
-	 * covers both that case and the ordinary one, since it maps the page
-	 * when it is absent and overwrites it when it is present.
+	 * .tbss, and only the part of it that is genuinely anonymous.
+	 *
+	 * This used to zero the whole tail, on the reasoning that a page shared
+	 * with the end of a PT_LOAD is present and so no fault would ever fill
+	 * it. That reasoning is right about the mechanism and wrong about the
+	 * consequence, because the shared bytes are not segment filler: on
+	 * build/init.elf .tbss is [0x409ff8,0x409ffc) and .init_array is
+	 * [0x409ff8,0x40a000), because a NOBITS section is laid out over
+	 * whatever follows it in the data segment. Zeroing the tail there
+	 * destroyed the first constructor pointer, so the program's
+	 * __attribute__((constructor)) functions silently stopped running.
+	 *
+	 * Everything below covered_end is live segment content and is left
+	 * alone. errno then starts out holding the first four bytes of
+	 * __init_array_start rather than zero, which is the documented
+	 * TLS-NOBITS-overlay behaviour and is harmless: nothing reads errno
+	 * before the first failed call overwrites it.
 	 */
-	for (u64 off = filesz; off < memsz;) {
-		size_t chunk = (size_t)MIN((u64)sizeof(zeros), memsz - off);
+	zero_from = vaddr + filesz;
+	if (zero_from < covered_end)
+		zero_from = covered_end;
+	for (u64 at = zero_from; at < vaddr + memsz;) {
+		size_t chunk = (size_t)MIN((u64)sizeof(zeros), vaddr + memsz - at);
 
-		r = user_memory_write(mm, (virt_addr_t)(vaddr + off), zeros,
-				      chunk, prot);
+		r = user_memory_write(mm, (virt_addr_t)at, zeros, chunk, prot);
 		if (r < 0)
 			return r;
-		off += chunk;
+		at += chunk;
 	}
 
-	mm->tls_ptr = vaddr + memsz;
+	/*
+	 * p_align is the segment's declared alignment, which is the largest
+	 * alignment of any symbol in the block. It is 1 for a block of bytes
+	 * and chars, so ALIGN_UP below has to tolerate it rather than assume a
+	 * page or a word.
+	 */
+	tp = ALIGN_UP(vaddr + memsz, align ? (unsigned long)align : 1UL);
+	if (tp < vaddr + memsz)
+		tp = vaddr + memsz;   /* only reachable on p_align 0, rejected above */
+
+	mm->tls_ptr = tp;
 	mm->tls_size = memsz;
 
 	ELF_LOG(KLOG_INFO,
-		"loaded TLS block [%#lx,%#lx) %lu bytes initialised, tp %#lx",
+		"loaded TLS block [%#lx,%#lx) %lu bytes initialised, tp %#lx (p_align %#lx)",
 		vaddr, vaddr + memsz, (unsigned long)filesz,
-		(unsigned long)mm->tls_ptr);
+		(unsigned long)mm->tls_ptr, (unsigned long)align);
 	return 0;
 }
 
@@ -282,6 +333,7 @@ int elf_load(struct address_space *mm, const void *image, size_t size,
 	 * confused: an image with no thread-local storage has no thread
 	 * pointer, and mm->tls_ptr == 0 says exactly that. */
 	u64 tls_offset = 0, tls_vaddr = 0, tls_filesz = 0, tls_memsz = 0;
+	u64 tls_align = 1;
 	bool tls_seen = false;
 	int r;
 
@@ -328,25 +380,41 @@ int elf_load(struct address_space *mm, const void *image, size_t size,
 				return -ENOEXEC;
 			if (load_bias + ph->p_vaddr < load_bias)
 				return -ENOEXEC;
-			/* The block, and the thread pointer one past its end,
-			 * have to be in the user half. The kernel window is the
-			 * bound available here; user_memory_write() enforces the
-			 * stricter user half below when it copies the bytes, so a
-			 * block that lands between the two is rejected by the
-			 * write rather than mapped. */
+			/*
+			 * The block, *and* the thread pointer, have to be in the
+			 * user half. The thread pointer can sit up to p_align-1
+			 * past the last byte of the block (see elf_load_tls), so
+			 * it is the bound that matters, not p_vaddr + p_memsz.
+			 * The kernel window is the bound available here;
+			 * user_memory_write() enforces the stricter user half
+			 * below when it copies the bytes, so a block that lands
+			 * between the two is rejected by the write rather than
+			 * mapped.
+			 */
 			if (load_bias + ph->p_vaddr + ph->p_memsz <
 			    load_bias + ph->p_vaddr)
 				return -ENOEXEC;
-			if (load_bias + ph->p_vaddr + ph->p_memsz >=
+			if (load_bias + ph->p_vaddr + ph->p_memsz +
+			    (ph->p_align ? ph->p_align : 1) - 1 >=
 			    VMM_KERNEL_BASE)
 				return -ENOEXEC;
-			if (ph->p_align > PAGE_SIZE &&
+			/*
+			 * p_align of zero is not a power of two and ALIGN_UP
+			 * would divide by it. The specification lets a linker
+			 * emit 0 to mean "no alignment claimed"; treating that
+			 * as byte alignment is the same answer the block's real
+			 * alignment would give for a block of bytes and chars,
+			 * and it is the only interpretation that cannot produce
+			 * a thread pointer the image was not linked against.
+			 */
+			if (ph->p_align &&
 			    (ph->p_align & (ph->p_align - 1)))
 				return -ENOEXEC;
 			tls_offset = ph->p_offset;
 			tls_vaddr = load_bias + ph->p_vaddr;
 			tls_filesz = ph->p_filesz;
 			tls_memsz = ph->p_memsz;
+			tls_align = ph->p_align ? ph->p_align : 1;
 			tls_seen = true;
 			continue;
 		}
@@ -370,7 +438,7 @@ int elf_load(struct address_space *mm, const void *image, size_t size,
 		const struct elf64_phdr *ph =
 			(const struct elf64_phdr *)(base + phoff +
 						    (u64)i * eh->e_phentsize);
-		u64 seg_vaddr, seg_start, seg_end, file_off, copylen;
+		u64 seg_vaddr, seg_start, seg_end, copylen;
 		uint32_t prot;
 
 		if (ph->p_type == PT_PHDR) {
@@ -391,16 +459,29 @@ int elf_load(struct address_space *mm, const void *image, size_t size,
 			max_vaddr = seg_end;
 
 		/*
-		 * A page-aligned vaddr with an unaligned file offset is legal:
-		 * the first (vaddr - seg_start) bytes of the first page are not
-		 * part of the segment, so the file cursor starts earlier and
-		 * the same number of bytes are copied to the page-aligned
-		 * destination.
+		 * The file bytes go to p_vaddr, not to seg_start.
+		 *
+		 * p_vaddr and p_offset are congruent modulo p_align, so for a
+		 * segment whose vaddr is page-aligned -- which is every segment
+		 * except the one that carries .tdata -- the two are equal and
+		 * this is a distinction without a difference. It stops being
+		 * one when they are not: on build/init.elf the last LOAD is
+		 * file offset 0x8ff0 at vaddr 0x409ff0, both 0xff0 into their
+		 * page, and this function used to rebase the source to 0x8000
+		 * and copy p_filesz bytes to 0x409000. That is short by 0xff0
+		 * bytes and offset by 0xff0 bytes at the same time, so the
+		 * segment's actual contents never arrived: .init_array and
+		 * .data were never written at all, and the constructors libc
+		 * runs before main silently did nothing.
+		 *
+		 * The leading (seg_vaddr - seg_start) bytes of the first page
+		 * are left alone. They are not part of the segment, and the
+		 * page they live in faults to a zero page if anything reads
+		 * them, which is what Linux does with the same segment.
 		 */
-		file_off = ph->p_offset - (seg_vaddr - seg_start);
 		copylen = ph->p_filesz;
-		if (seg_end - seg_start < copylen)
-			copylen = seg_end - seg_start;
+		if (seg_end - seg_vaddr < copylen)
+			copylen = seg_end - seg_vaddr;
 
 		prot = phdr_prot(ph->p_flags);
 
@@ -424,8 +505,8 @@ int elf_load(struct address_space *mm, const void *image, size_t size,
 		}
 
 		if (copylen) {
-			r = user_memory_write(mm, (virt_addr_t)seg_start,
-					      base + file_off, copylen, prot);
+			r = user_memory_write(mm, (virt_addr_t)seg_vaddr,
+					      base + ph->p_offset, copylen, prot);
 			if (r < 0)
 				return r;
 		}
@@ -469,16 +550,16 @@ int elf_load(struct address_space *mm, const void *image, size_t size,
 	 * usually starts inside the last segment's last page, and a VMA that
 	 * overlapped it would be refused.
 	 *
-	 * max_vaddr moves with it. The heap starts at the end of the image, and
-	 * for a static image the TLS block's .tbss is the last thing in the
-	 * address space -- past the end of the last PT_LOAD. Leaving max_vaddr
-	 * where the segments put it would start the heap inside the block, and
-	 * the first brk() would then fail with the confusing "overlaps an
-	 * existing VMA" instead of growing.
+	 * max_vaddr moves with it, and past the *thread pointer* rather than
+	 * past the last byte of the block. The heap starts at the end of the
+	 * image, and for a static image the TLS block is the last thing in the
+	 * address space; the thread pointer can sit up to p_align-1 bytes past
+	 * the block's last byte (see elf_load_tls), and a brk() that started
+	 * inside that gap would fault rather than fail the VMA insert cleanly.
 	 */
 	if (tls_memsz) {
 		r = elf_load_tls(mm, base, tls_offset, tls_vaddr, tls_filesz,
-				 tls_memsz, covered_end);
+				 tls_memsz, tls_align, covered_end);
 		if (r < 0)
 			return r;
 

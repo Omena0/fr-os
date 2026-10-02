@@ -78,12 +78,21 @@ so far, so a fragmented address space runs out rather than filling gaps.
 `PHYS_DIRECT_MAP` is `0xFFFF800000000000` and `phys_to_virt(p)` is
 `PHYS_DIRECT_MAP + p`, so the mapping is an identity map over whatever the
 direct-map constructor chose to cover. That constructor uses
-`DIRECT_MAP_BYTES = (4ULL << 30)` (`src/kernel/vmm.c`) — **4 GiB**, laid out with
-2 MiB pages. The boot log says so on every run:
+`DIRECT_MAP_BYTES = (4ULL << 30)` (`src/kernel/vmm.c`) — **4 GiB**. The boot log
+says the extent on every run, and which of two page sizes it used:
 
 ```
-vmm: direct map 0-4 GiB, 2 MiB pages
+vmm: direct map 0-4 GiB, 1 GiB pages      <- CPUID.0x80000001 EDX bit 26 set
+vmm: direct map 0-4 GiB, 2 MiB pages      <- bit 26 clear
 ```
+
+`map_direct_map()` picks between them at `src/kernel/vmm.c:221`: 1 GiB pages as
+PDPT entries with `PS=1` when `cpu_features.has_1gb_pages` is set, and 2 MiB
+pages through a PD otherwise. The 2 MiB path is the fallback and the 4 KiB path
+is deliberately not used at all — a 4 GiB machine mapped with 4 KiB pages needs
+2048 page-table pages and 2048 TLB entries, so almost every access to ordinary
+memory would be a page walk; with 2 MiB pages it needs four and four, and with
+1 GiB pages one.
 
 `ZONE_HIGH` exists and is populated on a machine with more than 4 GiB of RAM, and
 the PMM will hand out frames above 4 GiB as a fallback from `ZONE_NORMAL`. Those
@@ -99,6 +108,16 @@ in `src/kernel/include/pmm.h` describing `ZONE_HIGH` as "reachable through the
 direct map" has been corrected to say the opposite. Both corrections are landed
 (2026-10-02). The hazard itself is unchanged: a ZONE_HIGH allocation is still
 permitted, still handed out, and still faults in every consumer that touches it.
+
+One thing did survive that resolution and was corrected later the same day: this
+page also stated the page size, and it was wrong independently of the extent. The
+extent was a three-way disagreement; the page size was this page alone against the
+code. Resolving a disagreement by choosing the authoritative side and marking the
+item done does not re-derive the other two sides — it only settles the question
+that was asked. The 4 KiB/2 MiB/1 GiB choice was a separate question that nobody
+had asked yet, and it took until `has_1gb_pages` was finally assigned
+(`cpu_features.c:218`) before anyone could notice that the 1 GiB path had never
+run.
 
 ### The kernel window
 

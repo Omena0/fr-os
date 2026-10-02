@@ -223,6 +223,34 @@ void task_save_fs_base(struct task *t)
 }
 
 /*
+ * Load the running task's thread pointer into MSR_FS_BASE. This is the one
+ * entry point that takes no task, because it is the one the ring-3 return path
+ * can actually use.
+ *
+ * ret_to_user() in interrupt_entry.S is reached from two places that need it:
+ *
+ *   - process_enter_user(), for a process's *first* entry. FS is still whatever
+ *     the last process left there, so without this the process would run on a
+ *     thread pointer that belongs to somebody else. It happens to be harmless
+ *     for a process whose startup calls arch_prctl, and fatal for one that
+ *     does not -- the failure surfaces as a read of another process's memory.
+ *
+ *   - fork_child_start(), for every forked child. This is the load-bearing
+ *     case: the child resumes at its parent's syscall return site with RAX=0
+ *     and never re-runs crt1, so nothing will ever call arch_prctl on its
+ *     behalf. Without the load the child's first `__thread` access -- and libc
+ *     reaches for errno on the first failing call -- is a read through the
+ *     parent's thread pointer.
+ *
+ * NULL-safe by delegation: before the scheduler starts there is no current task
+ * and this leaves MSR_FS_BASE alone.
+ */
+void task_load_fs_current(void)
+{
+	task_load_fs_base(current_task());
+}
+
+/*
  * A task promoted to level 0, a new task, or a task whose budget was reset by
  * an aging boost all get the full quantum of their level rather than whatever
  * was left of the previous one. Halving the remaining budget on demotion (as
