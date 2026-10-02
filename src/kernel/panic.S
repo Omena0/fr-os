@@ -93,7 +93,7 @@ panic_regs:
 	movq	%cr4, %rax
 	movq	%rax, 168(%rdi)
 
-	movl	$0, 172(%rdi)		/* cpu_id, filled by the caller */
+	movl	$0, 176(%rdi)		/* cpu_id, filled by the caller */
 	ret
 	.size panic_regs, . - panic_regs
 

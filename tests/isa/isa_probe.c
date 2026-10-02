@@ -45,6 +45,18 @@ u64 sum_a(const struct wide *p)
 	return s;
 }
 
+/*
+ * Floating-point arithmetic is the reliable way to make a compiler emit
+ * scalar SSE, so it is what this probe uses. It is guarded because the same
+ * file is also compiled with the kernel's own flags, which are -mno-sse: a
+ * function returning or taking a double cannot even be compiled without SSE,
+ * because the ABI passes and returns it in %xmm0.
+ *
+ * The guard is the point rather than an inconvenience: the classifier has to
+ * distinguish "this object contains no vector instruction" from "this object
+ * could not be built", and the probe is compiled both ways to prove it.
+ */
+#ifdef __SSE__
 void sum_d(const struct wide *p, double *out)
 {
 	double s = 0;
@@ -60,6 +72,7 @@ void sum_f(const struct wide *p, float *out)
 		s += p->f[i];
 	*out = s;
 }
+#endif /* __SSE__ */
 
 u64 mix(u64 x)
 {
@@ -69,8 +82,10 @@ u64 mix(u64 x)
 	return x;
 }
 
+#ifdef __SSE__
 long convert(u64 a, long b, int c, long *out)
 {
 	*out = (long)b + c;
 	return (long)b + c + (long)(double)a;
 }
+#endif /* __SSE__ */

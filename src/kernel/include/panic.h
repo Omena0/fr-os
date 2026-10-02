@@ -57,6 +57,30 @@ struct panic_state {
 	char     message[256];
 };
 
+/*
+ * The byte offsets panic.S writes to, pinned here.
+ *
+ * They were every one slot low: RFLAGS went into `cs`, CR2 into `rflags`, CR3
+ * into `cr2`, CR4 into `cr3`, and `cr4` was never written. Every field from
+ * offset 136 up therefore named the wrong register, and since all of them are
+ * plausible 64-bit values the output looks entirely normal. A panic report that
+ * mislabels its registers is worse than one that omits them, because it gets
+ * believed.
+ *
+ * `cs` is intentionally left at 136 by panic.S. There is no MOV-source form for
+ * CS in 64-bit mode and `push cs` is not encodable either, so that function
+ * cannot read it; the exception stub that received the fault knows it and must
+ * store it before calling. Nothing does yet, so `cs` currently reads as
+ * whatever was in the buffer.
+ */
+_Static_assert(offsetof(struct panic_state, rip)    == 128, "panic.S writes rip at 128");
+_Static_assert(offsetof(struct panic_state, cs)     == 136, "panic.S must leave cs for the caller");
+_Static_assert(offsetof(struct panic_state, rflags) == 144, "panic.S writes rflags at 144");
+_Static_assert(offsetof(struct panic_state, cr2)    == 152, "panic.S writes cr2 at 152");
+_Static_assert(offsetof(struct panic_state, cr3)    == 160, "panic.S writes cr3 at 160");
+_Static_assert(offsetof(struct panic_state, cr4)    == 168, "panic.S writes cr4 at 168");
+_Static_assert(offsetof(struct panic_state, cpu_id) == 176, "panic.S clears cpu_id at 176");
+
 extern struct panic_state panic_state;
 
 #endif /* PANIC_H */

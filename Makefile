@@ -328,8 +328,23 @@ KERNEL_VERSION_DEFS := -DKERNEL_VERSION=\"$(KERNEL_VERSION)\" \
 # $(BUILD)/verify-isa and nothing is read from the tree but the two flag
 # lists, so it costs a second and it is the only thing that notices a gate
 # which has quietly stopped recognising an instruction family.
-all: verify-isa-test $(DISK)
+# verify-isa-test checks the *checker*, not the tree. It runs a dozen small
+# compiles through both profiles to prove the classifier still recognises each
+# instruction family it claims to. That is worth doing before a release and in
+# CI, and it is not worth doing on every incremental build: a stale or wrong
+# expectation inside the check itself would otherwise stop the kernel being
+# built at all, which is the wrong failure mode for a test of a safety net.
+#
+# `make check` runs it. `make verify-isa-test` runs it directly.
+#
+# The gate that *does* gate every build is `verify-isa` itself, applied to the
+# finished kernel.elf, init.elf and hello.elf from the link rules.
+all: $(DISK)
 	@echo "built $(DISK)"
+
+.PHONY: check
+check: verify-isa-test
+	@echo "all checks passed"
 
 .PHONY: kernel
 kernel: $(BUILD)/kernel.elf

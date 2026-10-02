@@ -206,55 +206,53 @@ interrupt_common:
 gdt_flush:
 	movq	%rdi, %rax			/* the GDTR pointer, in full */
 	lgdt	(%rax)
+
 	/*
-	 * The CS reload, as an *indirect* far jump rather than a far return.
-	 *
-	 * A far return is the textbook way to do this, and it is what this function
-	 * used: push RFLAGS, CS and the resume address, then IRETQ. That frame is
-	 * correct -- three words, RIP/CS/RFLAGS, resume address read before anything
-	 * is pushed -- and it still raises #GP, measured with RAX holding the
-	 * caller's real return address and CS=0x08 pointing at a textbook 64-bit
-	 * code descriptor (gdt[1] = 0x00af9b000000ffff, byte 6 = 0xaf). The CPU
-	 * faults *inside* the IRETQ, at its own address, error code 0x38. Swapping
-	 * only the mechanism for a far jump to the same selector -- no frame, no
-	 * RFLAGS -- lets execution continue past the reload into gdt_reload. So the
-	 * frame was not the problem and neither was the descriptor; the far return
-	 * itself is what this CPU will not accept here.
-	 *
-	 * The fault looked like a frame problem for a long time because the resume
-	 * address was `leaq 8(%rsp)` *after* two pushes had already happened, which
-	 * names the RFLAGS slot rather than the return address, so the frame carried
-	 * a stack address as RIP. That was a real bug, but fixing it changed nothing:
-	 * the same #GP came back with a provably correct frame.
-	 *
-	 * A far jump reloads CS just as completely -- same descriptor checks -- and
-	 * needs no frame, so it cannot disturb RSP and does not overwrite RFLAGS.
-	 * The return address is parked below it, the jump lands on the segment
-	 * reloads with RSP pointing at that address, and the `ret` closes the call.
-	 *
-	 * It has to be *indirect*. A direct far jump is opcode EA, and EA is not a
-	 * valid instruction in 64-bit mode: only FF /5 is. That version raises #UD
-	 * on the EA byte itself, which is what the `ud2` placeholder below is for.
-	 * GAS has no mnemonic for the 64-bit indirect form either -- `ljmp *(%rdx)`
-	 * assembles as m16:16 (ff 2a), a four-byte pointer that reads the selector
-	 * out of the wrong half of the return address -- so the encoding is written
-	 * out: REX.W + FF /5 with an 8-bit displacement, 48 ff 6a 00.
+	 * Reload the data segments while the old CS is still the one in use, and
+	 * therefore still valid: LGDT has replaced the descriptor table, but the
+	 * cached CS descriptor survives until CS itself is reloaded, and the
+	 * segments we are about to load are looked up in the *new* table.
 	 */
-	movq	(%rsp), %rcx			/* the caller's return address */
-	subq	$10, %rsp			/* room for offset:selector */
-	movq	%rcx, (%rsp)
-	movw	$KERNEL_CODE_SELECTOR, 8(%rsp)
-	movq	%rsp, %rdx
-	.byte	0x48, 0xff, 0x6a, 0x00		/* ljmp *(%rdx), 64-bit far pointer */
 	movw	$KERNEL_DATA_SELECTOR, %ax
 	movw	%ax, %ds
 	movw	%ax, %es
 	movw	%ax, %fs
 	movw	%ax, %gs
 	movw	%ax, %ss
-	addq	$10, %rsp			/* drop the far pointer; `ret` follows */
+
+	/*
+	 * Reload CS with a far return, built as a real three-word frame.
+	 *
+	 * The previous version built a ten-byte far pointer at (%rsp) and jumped
+	 * through it with an instruction placed *before* the stack was cleaned up.
+	 * That has two defects and both are silent.
+	 *
+	 * The jump landed on the caller's return address with %rsp still ten bytes
+	 * below where it started, so from the caller's point of view the function
+	 * returned with a shifted stack: the return address was no longer at [%rsp].
+	 * The caller's own `ret` therefore popped whatever was underneath, and the
+	 * machine jumped there. That is the fault this whole investigation kept
+	 * showing -- an instruction fetch at an address that looks like a kernel
+	 * pointer with its top half replaced, roughly sixteen bytes past the GDT --
+	 * with no exception from the code that was actually running. The stack was
+	 * silently corrupt long before anything noticed.
+	 *
+	 * The segment reloads after the jump were dead code for the same reason,
+	 * so DS/ES/FS/GS/SS also kept stage2's cached descriptors.
+	 *
+	 * LRETQ at CPL 0 with CS also at RPL 0 pops exactly three words -- RIP,
+	 * CS, RFLAGS -- and leaves the caller's frame untouched, so the `ret` below
+	 * is an ordinary, balanced return. It pops the three, leaving RSP exactly
+	 * where it was on entry to this function, and `ret` then pops the return
+	 * address from the right place.
+	 */
+	pushq	$0x202				/* RFLAGS: IF set, reserved bit 1 */
+	pushq	$KERNEL_CODE_SELECTOR		/* CS */
+	pushq	.Lgdt_flush_resume		/* RIP */
+	lretq
+.Lgdt_flush_resume:
 	ret
-	.size	gdt_flush, . - gdt_flush
+.size	gdt_flush, . - gdt_flush
 
 /*
  * tss_flush — load TR with the TSS selector.

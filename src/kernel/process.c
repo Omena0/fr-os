@@ -1088,6 +1088,15 @@ int exec_load_and_run(struct task *t, const void *image, size_t size,
 
 	r = elf_load(new_mm, image, size, 0, &info);
 	if (r < 0) {
+		/* Say what failed *before* releasing the address space.
+		 *
+		 * mm_put() tears down the page tables, and a fault inside that
+		 * teardown takes the machine down before anything gets here. The
+		 * error being returned is the entire diagnosis of why init does not
+		 * start, so it is written first, where it survives whatever the
+		 * teardown does next.
+		 */
+		PROC_LOG(KLOG_ERROR, "exec: elf_load failed: %d", r);
 		mm_put(new_mm);
 		return r;
 	}
@@ -1103,6 +1112,7 @@ int exec_load_and_run(struct task *t, const void *image, size_t size,
 		       (virt_addr_t)USER_STACK_TOP,
 		       VM_READ | VM_WRITE | VM_USER, VM_ANON);
 	if (r < 0) {
+		PROC_LOG(KLOG_ERROR, "exec: stack VMA failed: %d", r);
 		mm_put(new_mm);
 		return r;
 	}
@@ -1110,6 +1120,7 @@ int exec_load_and_run(struct task *t, const void *image, size_t size,
 
 	r = build_user_stack(new_mm, argv, envp, &info, &sp);
 	if (r < 0) {
+		PROC_LOG(KLOG_ERROR, "exec: user stack failed: %d", r);
 		mm_put(new_mm);
 		return r;
 	}
