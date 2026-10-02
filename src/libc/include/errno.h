@@ -1,11 +1,10 @@
 /*
  * errno.h — POSIX errno.
  *
- * errno is an alias for __errno, an ordinary global. It is deliberately *not*
- * declared __thread: this kernel neither allocates a TLS block (elf.c ignores
- * PT_TLS) nor provides any way for a process to set the FS base (there is no
- * arch_prctl in the syscall ABI), so an %fs-relative access reads address 0.
- * See src/libc/src/errno.c. The kernel returns -errno through the syscall ABI;
+ * errno is an alias for __errno, a thread-local. The kernel loads the image's
+ * PT_TLS (elf.c) and libc's startup installs the thread pointer with
+ * arch_prctl(ARCH_SET_FS) before anything can reach this variable
+ * (src/libc/src/crt1.c); the kernel returns -errno through the syscall ABI and
  * libc converts that back into a positive value and stores it here.
  */
 #ifndef ERRNO_H
@@ -24,7 +23,7 @@
 #define EOVERFLOW 75
 #endif
 
-extern int __errno;
+extern __thread int __errno;
 
 #define errno (__errno)
 

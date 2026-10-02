@@ -891,6 +891,11 @@ static bool fb_enabled;
 static uint8_t *const vbe_ctrl = (uint8_t *)(uintptr_t)VBE_SCRATCH_ADDR;
 static uint8_t *const vbe_mode = (uint8_t *)(uintptr_t)(VBE_SCRATCH_ADDR + 0x100);
 
+/* How many framebuffer modes vbe_setup() keeps as candidates for the mode set.
+ * A standard VGA mode list is around two hundred entries, of which the 32bpp
+ * ones number a handful; this is comfortably more than any of them. */
+#define VBE_MAX_CANDIDATES 12
+
 /* INT 10h/AH=4F01h: fill in the 256-byte mode info block for `mode`. */
 static bool vbe_get_mode_info(uint16_t mode)
 {
@@ -908,7 +913,13 @@ static bool vbe_get_mode_info(uint16_t mode)
 	return ret == 0x004Fu;
 }
 
-/* INT 10h/AH=4F02h: set the video mode, with the LFB bits in bit 14 of BH. */
+/*
+ * INT 10h/AH=4F02h: set the video mode, with the LFB bits in bit 14 of BH.
+ *
+ * The mode number is the low byte of BX, not of CX. Passing it in CX sets
+ * mode 0 -- the BIOS follows BX, reads 0x4000 & 0xFF, and puts the machine
+ * into 80x25 text while this function reports success.
+ */
 static bool vbe_set_mode(uint16_t mode)
 {
 	uint16_t es;
@@ -919,8 +930,9 @@ static bool vbe_set_mode(uint16_t mode)
 	diag_site = "vbeset";
 	diag_tick();
 
-	uint32_t ret = (uint32_t)bios_call(BIOS_INT_VIDEO, 0x4F02u, 0x4000u,
-					   (uint32_t)mode, 0, 0, di, es);
+	uint32_t ret = (uint32_t)bios_call(BIOS_INT_VIDEO, 0x4F02u,
+					   0x4000u | (uint32_t)(mode & 0xFFu),
+					   0, 0, 0, di, es);
 
 	return ret == 0x004Fu;
 }
@@ -980,6 +992,25 @@ static void vbe_setup(void)
 	uint32_t best_score = 0;
 	uint16_t best_mode = 0;
 
+	/* The mode list is a far pointer into the firmware's own memory. */
+
+	/*
+	 * The modes worth trying, kept rather than decided on the spot.
+	 *
+	 * AH=4F02h names the mode in eight bits, so a mode above 0xFF cannot be
+	 * set through it, and a firmware's largest listed mode is routinely one of
+	 * those. The walk below therefore records several candidates and the tail
+	 * of this function tries them best-first, rather than committing to the
+	 * biggest one and reporting that the machine has no framebuffer when the
+	 * firmware declines a mode this interface cannot express.
+	 */
+	struct vbe_candidate {
+		uint16_t mode;
+		uint32_t score;
+	};
+	struct vbe_candidate cand[VBE_MAX_CANDIDATES];
+	unsigned ncand = 0;
+
 	seg16((uint32_t)(uintptr_t)ctrl, &es, &di);
 
 	LOG("querying VESA BIOS...\r\n");
@@ -1000,42 +1031,62 @@ static void vbe_setup(void)
 	serial_puthex((uint64_t)(ctrl[2] | ((uint16_t)ctrl[3] << 8)));
 	serial_puts("\r\n");
 
-	/* The mode list is a far pointer into the firmware's own memory. */
-	best_score = 0;
 	best_mode = 0;
 
-	/* Walk the mode list. Each entry is a a far pointer, and the two words
-	 * that follow it are the segment and the offset. */
-	uint16_t list_seg = (uint16_t)(ctrl[0x0E] | ((uint16_t)ctrl[0x0F] << 8));
-	uint16_t list_off = (uint16_t)(ctrl[0x10] | ((uint16_t)ctrl[0x11] << 8));
+	/*
+	 * Walk the mode list.
+	 *
+	 * VideoModePtr is the fourth field of the controller block, and the two
+	 * words it occupies are stored offset first: +0x0E is the offset and
+	 * +0x10 is the segment. The spec draws a FarPtr as segment:offset and
+	 * that reading puts them the other way round, which on this firmware
+	 * produced segment 0x0022 offset 0x2110 and so a linear address of
+	 * 0x2330 -- inside the BIOS data area, where every word reads as zero.
+	 * The walk then asks 4F01 about mode 0 two hundred and fifty-six times,
+	 * the BIOS answers success every time, and the loader reports a
+	 * firmware that has no modes at all.
+	 *
+	 * The list behind that pointer is an array of 16-bit mode numbers closed
+	 * by 0xFFFF, not the array of four-byte far pointers the specification
+	 * describes. Reading four bytes per entry and taking the first word
+	 * examines every other mode and steps over the terminator, so the loop
+	 * below is bounded by an explicit count instead of relying on the end
+	 * marker being reachable.
+	 */
+	uint16_t list_off = (uint16_t)(ctrl[0x0E] | ((uint16_t)ctrl[0x0F] << 8));
+	uint16_t list_seg = (uint16_t)(ctrl[0x10] | ((uint16_t)ctrl[0x11] << 8));
 
-	for (unsigned i = 0; i < 256u; i++) {
-		uint16_t entry[2];
+	for (unsigned i = 0; i < 1024u; i++) {
 		uint16_t m;
 
-		/* Read the two-word far pointer through the segment the
-		 * controller block named. Paging is off and the flat segments have
-		 * base 0, so the linear address is just seg << 4 + off. */
-		uint32_t linear = ((uint32_t)list_seg << 4) + list_off + i * 4u;
+		/* Read through the segment the controller block named. Paging is
+		 * off and the flat segments have base 0, so the linear address is
+		 * just seg << 4 + off. */
+		uint32_t linear = ((uint32_t)list_seg << 4) + list_off + i * 2u;
 		uint8_t *p = (uint8_t *)(uintptr_t)linear;
 
-		entry[0] = (uint16_t)(p[2] | ((uint16_t)p[3] << 8));
-		entry[1] = (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
+		m = (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
 
-		m = entry[1];
 		if (m == 0xFFFFu)
 			break;
 
 		if (!vbe_get_mode_info(m))
 			continue;
 
-		/* Mode info attributes word: bit 7 is the LFB flag, bit 4 is
-		 * graphics, bit 0 is supported. */
+		/*
+		 * Mode info attributes word. Bit 0 is "mode is supported", bit 4 is
+		 * graphics, bit 7 is "uses a linear framebuffer"; bits 8 and up are
+		 * reserved. Testing bit 8 for the framebuffer -- which is what this
+		 * did -- is a test that no conforming firmware can ever satisfy,
+		 * because a reserved bit reads as zero, and it is the second half of
+		 * why the loader never found a mode even when the mode list itself
+		 * was read correctly.
+		 */
 		uint16_t attrs = (uint16_t)(vbe_mode[0] | ((uint16_t)vbe_mode[1] << 8));
 
 		if (!(attrs & 0x0081u))
 			continue;		/* not supported, or not a graphics mode */
-		if (!(attrs & 0x0100u))
+		if (!(attrs & 0x0080u))
 			continue;		/* no linear framebuffer */
 
 		uint32_t width = (uint32_t)(vbe_mode[0x12] | ((uint32_t)vbe_mode[0x13] << 8));
@@ -1047,27 +1098,83 @@ static void vbe_setup(void)
 		if (phys == 0)
 			continue;
 
-		uint32_t score = width * height;
-		if (score <= best_score)
+		/*
+		 * Only 32bpp. The kernel's framebuffer renderer composes a pixel by
+		 * shifting the three channels into the mask positions the mode info
+		 * block reports, which is exactly a 32bpp description; its 24bpp path
+		 * writes the channels in R,G,B order, and a 24bpp VBE mode is
+		 * ordinarily BGR, so accepting one would produce a legible screen in
+		 * the wrong colours. A mode list offers 8/15/16/24bpp alternatives for
+		 * every resolution that has a 32bpp form, so this costs nothing here.
+		 */
+		if (vbe_mode[0x19] != 32)
 			continue;
 
-		best_score = score;
-		best_mode = m;
+		uint32_t score = width * height;
 
-		vbe_extract_fb();
+		if (ncand == VBE_MAX_CANDIDATES) {
+			/* Full: displace the weakest entry if this one beats it. */
+			unsigned worst = 0;
+
+			for (unsigned k = 1; k < ncand; k++)
+				if (cand[k].score < cand[worst].score)
+					worst = k;
+			if (score <= cand[worst].score)
+				continue;
+			cand[worst].mode = m;
+			cand[worst].score = score;
+			continue;
+		}
+
+		cand[ncand].mode = m;
+		cand[ncand].score = score;
+		ncand++;
 	}
 
-	if (best_mode == 0) {
+	if (ncand == 0) {
 		LOG("  no linear framebuffer mode found\r\n");
 		return;
 	}
 
-	serial_puts("  mode 0x");
-	serial_puthex(best_mode);
-	serial_puts("\r\n");
+	/* Order the candidates best-first. A selection sort over a dozen entries
+	 * is cheaper to read than anything cleverer and runs once per boot. */
+	for (unsigned i = 1; i < ncand; i++) {
+		struct vbe_candidate keep = cand[i];
+		unsigned j = i;
 
-	if (!vbe_set_mode(best_mode)) {
-		LOG("  mode set refused; framebuffer unavailable\r\n");
+		while (j > 0 && cand[j - 1].score < keep.score) {
+			cand[j] = cand[j - 1];
+			j--;
+		}
+		cand[j] = keep;
+	}
+
+	/*
+	 * Try them in order until one is accepted.
+	 *
+	 * This is not defensive padding. AH=4F02h carries the mode number in the
+	 * low byte of BX alongside the bit-14 request for a linear framebuffer,
+	 * so a mode numbered above 0xFF cannot be named through this interface at
+	 * all -- the largest mode this firmware lists, 0x199, is exactly such a
+	 * mode, and asking for it answers 0x014F. Choosing the single largest
+	 * mode and setting it therefore fails on a machine whose 32bpp modes are
+	 * perfectly settable. Walking down the list costs one extra BIOS round
+	 * trip per rejected mode and gets a framebuffer out of hardware that the
+	 * one-shot version reported as having none.
+	 */
+	for (unsigned i = 0; i < ncand; i++) {
+		serial_puts("  trying mode 0x");
+		serial_puthex((uint64_t)cand[i].mode);
+		serial_puts("\r\n");
+
+		if (vbe_set_mode(cand[i].mode)) {
+			best_mode = cand[i].mode;
+			break;
+		}
+	}
+
+	if (best_mode == 0) {
+		LOG("  every framebuffer mode refused; framebuffer unavailable\r\n");
 		return;
 	}
 

@@ -268,3 +268,37 @@ gid_t sys_getegid(void)
 {
 	return sys_getgid();
 }
+
+/*
+ * arch_prctl, raw. Two reasons this is not shaped like the wrappers above.
+ *
+ * It returns the kernel's value verbatim instead of -1 with __errno set,
+ * because its only caller so far is the startup path that installs the thread
+ * pointer, and that path cannot be trusted to store into __errno: __errno is
+ * itself thread-local, so a failing arch_prctl reporting its failure by
+ * writing to the thing that is broken is a trap. See __libc_setup_tls in
+ * crt1.c.
+ *
+ * And it is not prctl: the codes are a separate namespace (ARCH_SET_FS and
+ * friends, Linux's values) under a separate number, because this call is about
+ * the calling thread's register state and nothing else.
+ */
+long sys_arch_prctl(unsigned long code, unsigned long addr)
+{
+	return __syscall2(SYS_arch_prctl, (long)code, (long)addr);
+}
+
+/*
+ * The thread pointer this image was loaded with, 0 if it has none.
+ *
+ * A query rather than an accessor because the value belongs to the address
+ * space and a process that execs gets a new address space, so nothing in libc
+ * may cache it across an exec; and a syscall rather than another auxiliary
+ * vector entry because that vector is built by the kernel's exec path, which
+ * is not libc's to change, and because this tree has no dynamic linker to hand
+ * the number over on the way in.
+ */
+long sys_get_tls_base(void)
+{
+	return __syscall0(SYS_get_tls_base);
+}

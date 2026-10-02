@@ -179,6 +179,8 @@ struct elf_info {
 	u32 phdr_count;
 	u64 min_vaddr;      /* lowest and highest byte any PT_LOAD claims */
 	u64 max_vaddr;
+	u64 tls_ptr;        /* initial thread pointer: PT_TLS end, 0 if none */
+	u64 tls_size;       /* PT_TLS p_memsz, 0 if the image has no PT_TLS */
 	bool is_dyn;        /* ET_DYN: `entry` is relative to the load bias */
 };
 
@@ -187,6 +189,13 @@ struct elf_info {
  * Nothing is mapped unless the whole header and every program header entry
  * has already passed validation, so a malformed image cannot leave a
  * half-constructed address space behind.
+ *
+ * A PT_TLS segment is mapped like any other, and additionally recorded in both
+ * `mm->tls_ptr` and `out->tls_ptr`: the process's initial thread pointer is the
+ * *end* of the block, and it is the one number a libc needs before it can
+ * execute an instruction compiled against `__thread`. See SYS_get_tls_base in
+ * uapi/syscall.h for why that is asked for rather than derived, and elf.c for
+ * why the end and not the start.
  */
 int elf_load(struct address_space *mm, const void *image, size_t size,
 	     uint64_t load_bias, struct elf_info *out);

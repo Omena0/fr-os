@@ -159,11 +159,14 @@ _OPERAND_AMBIGUOUS = frozenset(
 # `p`-prefixed instructions that are not SIMD. Everything else beginning with
 # "p" is packed-integer or packed-float, and there are many more of those than
 # of these, which is why this is an exclusion list and not an inclusion one.
+# pdep and pext are BMI2 and operate entirely on general-purpose registers,
+# and they are the one pair here that a kernel has a real reason to emit, so
+# they are excluded by name rather than being left to a false positive.
 # prefetch* is excluded by prefix on purpose: it is a hint, not a write, and
 # its VEX form (prefetchwt1) would otherwise be reported as a wide vector use
 # by a rule meant to catch YMM.
 _P_NOT_SIMD = re.compile(
-    r"^(?:push|pop|pause|popcnt|prefetch)[a-z0-9]*$"
+    r"^(?:push|pop|pause|popcnt|pdep|pext|prefetch)[a-z0-9]*$"
 )
 
 # `f`-prefixed instructions that are not x87. `fence` is a memory-ordering
@@ -207,13 +210,18 @@ _LEGACY_SSE = tuple(
         # packed float, register form
         r"^andnp[sd]$", r"^andp[sd]$", r"^orp[sd]$", r"^xorp[sd]$",
         r"^addp[sd]$", r"^addsubp[sd]$", r"^subp[sd]$", r"^mulp[sd]$",
-        r"^divp[sd]$", r"^minp[sd]$", r"^maxp[sd]$", r"^sqrtsp[sd]$",
-        r"^rcpp[sd]$", r"^rsqrtsp[sd]$", r"^cmpp[sd]$",
+        r"^divp[sd]$", r"^minp[sd]$", r"^maxp[sd]$",
+        r"^sqrtp[sd]$", r"^rcp[ps][sd]$", r"^rsqrt[ps][sd]$",
         # packed float, scalar form
-        r"^(?:add|sub|mul|div|min|max|sqrt|cmp)s[sd]$",
-        r"^rcpss$", r"^rsqrtss$",
+        r"^(?:add|sub|mul|div|min|max|sqrt)s[sd]$",
         r"^(?:comi|ucomi)[sp][sd]$",
-        r"^round[ps]$", r"^round[pd]$", r"^rounds[sd]$",
+        # every packed/scalar compare: cmpps, cmppd, cmpss, cmpsd, and the
+        # cmpeq/cmplt/cmple/cmpne/cmpnlt/cmpnle/cmpunord/cmpord/... forms
+        # objdump prints for the predicate-immediate encodings. The trailing
+        # [ps][sd] is what makes it specific: no GPR mnemonic ends that way,
+        # and the bare GPR compare is printed without a suffix.
+        r"^cmp[a-z]*[ps][sd]$",
+        r"^roundp[sd]$", r"^rounds[sd]$",
         # shuffles, unpacks, horizontal
         r"^unpck[hl]p[sd]$", r"^shufp[sd]$", r"^shufps$",
         r"^haddp[sd]$", r"^hsubp[sd]$", r"^blendp[sd]$", r"^blendw$",
@@ -222,19 +230,24 @@ _LEGACY_SSE = tuple(
         r"^movap[sd]$", r"^movup[sd]$", r"^movdq[au]$",
         r"^movh[pl][sd]$", r"^movl[pl][sd]$", r"^movhlps$", r"^movlhps$",
         r"^movddup$", r"^movshdup$", r"^movsldup$",
-        r"^movmsk[pd]$", r"^maskmov[qd]$",
+        r"^movmskp[sd]$", r"^maskmov[qd]$",
         r"^movnt[pdq][a-z0-9]*$",
         r"^movs[sd]$",
-        # the SSE2 two-register forms. objdump prints a GPR move as `mov`
-        # (never `movd`/`movq`), so these spellings are SIMD-only here.
+        # the aligned/unaligned pair-move forms. movdqa/movdqu are listed
+        # here and movd/movq are *not*: objdump prints those two spellings for
+        # a sign-extending GPR immediate store to a 64-bit destination, so they
+        # are decided by their operands in _is_vector above.
         r"^movdqa$", r"^movdqu$",
         # conversions, reductions, dot products
         r"^cvt[a-z0-9]+$",
         r"^insertps$", r"^extractps$",
         r"^dpps$", r"^dppd$", r"^mpsadbw$",
+        # AES and XSHA. Both are leading-letter families: nothing else on
+        # x86-64 starts with "aes" or "sha".
+        r"^aes[a-z0-9]+$", r"^sha[0-9][a-z0-9]+$",
         # MXCSR and the unaligned load
         r"^ldmxcsr$", r"^stmxcsr$", r"^lddqu$",
-        # MMX teardown
+        # MMX teardown. objdump prints femms for the 3DNow! form.
         r"^emms$", r"^femms$",
     )
 )
@@ -347,6 +360,245 @@ _USER_NOTE = """\
 
 
 # --------------------------------------------------------------------------
+# Self test
+# --------------------------------------------------------------------------
+#
+# The gate is the only thing standing between a flag typo and a kernel that
+# cannot boot, so the gate gets tested too. `make verify-isa-test` runs this
+# and then compiles a handful of small objects through both profiles.
+#
+# The lists below are not aspirational. MUST_FLAG_VECTOR is what objdump
+# actually printed for a probe holding one instance of every legacy
+# x87/MMX/SSE..SSE4.2/AES/XSHA mnemonic, and MUST_NOT_FLAG is the union of the
+# full mnemonic set of build/kernel.elf and a hand-written census of the
+# GPR-only instruction set. Both were diffed against the classifier before
+# being written down, which is how `movq` turned up in the wrong list: objdump
+# prints a sign-extending 32-bit immediate store to a 64-bit destination as
+# `movq`, so a plain "movq is SSE2" rule produces 161 false positives on this
+# kernel.
+#
+# The two operand-sensitive lists exist because six mnemonics are spelled the
+# same for a GPR operation and a vector one. Getting those wrong in either
+# direction is a real failure: a missed movsd is a missed vector move, and a
+# flagged movsq is a build that stops for no reason.
+
+_MUST_FLAG_VECTOR = (
+	"addpd", "addps", "addsd", "addss",
+	"addsubpd", "addsubps", "aesdec", "aesdeclast",
+	"aesenc", "aesenclast", "aesimc", "aeskeygenassist",
+	"andnpd", "andnps", "andpd", "andps",
+	"blendpd", "blendps", "blendvpd", "blendvps",
+	"cmpeqpd", "cmpeqps", "cmpeqsd", "cmpeqss",
+	"cmplepd", "cmpleps", "cmplesd", "cmpless",
+	"cmpltpd", "cmpltps", "cmpltsd", "cmpltss",
+	"cmpneqpd", "cmpneqps", "cmpneqsd", "cmpneqss",
+	"cmpnleps", "cmpnltpd", "cmpnltps", "cmpordpd",
+	"cmpordps", "cmpordsd", "cmpordss", "cmppeqpd",
+	"cmppeqps", "cmpunordpd", "cmpunordps", "cmpunordsd",
+	"cmpunordss", "comisd", "comiss", "cvtdq2pd",
+	"cvtdq2ps", "cvtpd2dq", "cvtpd2ps", "cvtps2dq",
+	"cvtps2pd", "cvtsd2si", "cvtsd2ss", "cvtsi2sd",
+	"cvtsi2ss", "cvtss2sd", "cvtss2si", "cvttpd2dq",
+	"cvttps2dq", "cvttsd2si", "cvttss2si", "divpd",
+	"divps", "divsd", "divss", "dppd",
+	"dpps", "emms", "extractps", "fabs",
+	"faddp", "fadds", "fbld", "fbstp",
+	"fchs", "fcmovb", "fcmovbe", "fcmove",
+	"fcmovnb", "fcmovnbe", "fcmovne", "fcmovnu",
+	"fcmovu", "fcomi", "fcos", "fdivp",
+	"fdivrp", "fdivrs", "fdivs", "femms",
+	"fildl", "fildll", "finit", "fistpl",
+	"fistpll", "fisttps", "fld1", "fldcw",
+	"fldenv", "fldl2e", "fldl2t", "fldlg2",
+	"fldln2", "fldpi", "flds", "fldz",
+	"fmulp", "fmuls", "fnclex", "fnop",
+	"fnstcw", "fnstenv", "fnstsw", "fpatan",
+	"fprem", "fprem1", "fptan", "frndint",
+	"fscale", "fsin", "fsqrt", "fstps",
+	"fsts", "fsubp", "fsubrp", "fsubrs",
+	"fsubs", "fucomi", "fucomip", "fucomp",
+	"fucompp", "fxam", "fxch", "fyl2x",
+	"fyl2xp1", "haddpd", "haddps", "hsubpd",
+	"hsubps", "insertps", "lddqu", "ldmxcsr",
+	"maskmovd", "maskmovq", "maxpd", "maxps",
+	"maxsd", "maxss", "minpd", "minps",
+	"minsd", "minss", "movapd", "movaps",
+	"movd", "movddup", "movdqa", "movdqu",
+	"movhlps", "movhpd", "movhps", "movlhps",
+	"movlpd", "movmskpd", "movmskps", "movntdq",
+	"movntdqa", "movntpd", "movntps", "movntq",
+	"movq", "movsd", "movshdup", "movsldup",
+	"movss", "movupd", "movups", "mulpd",
+	"mulps", "mulsd", "mulss", "orpd",
+	"orps", "pabsb", "pabsw", "packssdw",
+	"packsswb", "packuswb", "paddb", "paddd",
+	"paddq", "paddsb", "paddsw", "paddw",
+	"palignr", "pand", "pandn", "pavgusb",
+	"pavgw", "pblendvb", "pblendw", "pclmulhqlqdq",
+	"pclmullqlqdq", "pcmpeqb", "pcmpeqq", "pcmpestri",
+	"pcmpestrm", "pcmpgtb", "pcmpgtq", "pcmpistri",
+	"pcmpistrm", "pfadd", "pfcmpeq", "pfcmpge",
+	"pfcmpgt", "pfdiv", "pfmadd", "pfmul",
+	"pfrcp", "pfrsqrt", "pfsub", "phaddd",
+	"phaddw", "phminposuw", "phsubw", "pmaddubsw",
+	"pmaddwd", "pmaxsd", "pmaxsw", "pmaxub",
+	"pmaxud", "pmaxuw", "pminsd", "pminsw",
+	"pminub", "pminud", "pminuw", "pmovmskb",
+	"pmovsxbw", "pmovsxdq", "pmovsxwd", "pmovzxbw",
+	"pmovzxdq", "pmovzxwd", "pmuldq", "pmulhrsw",
+	"pmulhuw", "pmulhw", "pmulld", "pmullw",
+	"pmuludq", "por", "psadbw", "pshufb",
+	"pshufhw", "pshuflw", "pshufw", "psignb",
+	"psignd", "psignw", "pslld", "pslldq",
+	"psllq", "pslw", "psrad", "psraw",
+	"psrld", "psrldq", "psrlq", "psrlw",
+	"psubb", "psubd", "psubq", "psubsb",
+	"psubsw", "psubusb", "psubusw", "psubw",
+	"ptest", "punpckhbw", "punpckldq", "punpcklqdq",
+	"punpcklwd", "pxor", "rcppd", "rcpps",
+	"rcpss", "roundpd", "roundps", "roundsd",
+	"roundss", "rsqrtpd", "rsqrtps", "rsqrtss",
+	"sha1msg1", "sha1msg2", "sha1nexte", "sha1rnds4",
+	"sha256msg1", "sha256msg2", "sha256rnds2", "shufps",
+	"sqrtpd", "sqrtps", "sqrtsd", "sqrtss",
+	"stmxcsr", "subpd", "subps", "subsd",
+	"subss", "ucomisd", "ucomiss", "unpckhpd",
+	"unpcklpd", "xorpd", "xorps",
+)
+
+# Flagged by the classifier but exempted by the kernel *profile*, which is
+# where the exemption belongs: they are deliberate, not unknowable.
+_MUST_FLAG_BUT_EXEMPT = ("fxsave", "fxrstor")
+
+_MUST_NOT_FLAG = (
+	"adc", "adcx", "add", "addl", "addq",
+	"adox", "and", "andb", "andn", "bextr",
+	"blcs", "blsi", "blsr", "bmi", "bsr",
+	"bswap", "bt", "btr", "bts", "bzhi",
+	"call", "cbw", "cdq", "clc", "cld",
+	"cli", "cltq", "clts", "cmc", "cmova",
+	"cmovae", "cmovb", "cmovbe", "cmove", "cmovg",
+	"cmovle", "cmovne", "cmovs", "cmp", "cmpb",
+	"cmpl", "cmpq", "cmpsb", "cmpsl", "cmpsq",
+	"cmpw", "cpuid", "cqo", "cs", "cwde",
+	"hlt", "idiv", "imul", "in", "inc",
+	"int", "int3", "invd", "invlpg", "iretq",
+	"ja", "jae", "jb", "jbe", "jc",
+	"jcxz", "je", "jg", "jge", "jl",
+	"jle", "jmp", "jna", "jnae", "jnb",
+	"jnbe", "jnc", "jne", "jng", "jnge",
+	"jnl", "jnle", "jno", "jnp", "jns",
+	"jnz", "jo", "jp", "jpe", "jrcxz",
+	"js", "jz", "lea", "leave", "lfence",
+	"lgdt", "lidt", "ljmp", "lldt", "lods",
+	"lret", "lretq", "ltr", "lzcnt", "mfence",
+	"mov", "movabs", "movb", "movl", "movq",
+	"movsb", "movsbl", "movsl", "movslq", "movsq",
+	"movsw", "movw", "movzbl", "movzwl", "mul",
+	"mwait", "neg", "nop", "nopd", "nopl",
+	"nopw", "not", "or", "orl", "out",
+	"pause", "pdep", "pext", "pop", "popa",
+	"popad", "popcnt", "popf", "popfq", "prefetch",
+	"push", "pusha", "pushad", "pushf", "pushfq",
+	"rcl", "rcr", "rdfsbase", "rdmsr", "rdpid",
+	"rdrand", "rdseed", "rdtsc", "rdtscp", "rep",
+	"repnz", "repz", "ret", "retf", "retfq",
+	"rol", "ror", "rorx", "rsm", "sal",
+	"sar", "sarx", "sbb", "seta", "setae",
+	"setb", "setbe", "setc", "sete", "setg",
+	"setge", "setl", "setle", "setna", "setnae",
+	"setnb", "setnbe", "setnc", "setne", "setng",
+	"setnge", "setnl", "setno", "setns", "seto",
+	"sets", "sfence", "shl", "shlx", "shr",
+	"shrx", "smsw", "stc", "std", "sti",
+	"sub", "subl", "subq", "swapgs", "syscall",
+	"sysret", "sysretq", "test", "testb", "tzcnt",
+	"wbinvd", "wrfsbase", "wrmsr", "xadd", "xchg",
+	"xgetbv", "xor", "xsetbv",
+)
+
+_MUST_FLAG_WIDE = (
+	"kaddb", "kandw", "kmovb", "kmovw", "knotw",
+	"kortestw", "korw", "kunpckbw", "vaddpd", "vaddps",
+	"vaddss", "vaesenc", "vaesenclast", "vandnps", "vandps",
+	"vblendvps", "vbroadcastsd", "vcmpltps", "vcmpneqpd", "vcvtdq2ps",
+	"vcvtsi2sd", "vdivpd", "vextracti128", "vfmadd132ps", "vfmadd231ps",
+	"vfmsub213sd", "vfnmadd231ps", "vinserti128", "vlddqu", "vmaskmovps",
+	"vmovaps", "vmovd", "vmovdqa", "vmovdqu", "vmovdqu32",
+	"vmovdqu64", "vmovmskps", "vmovq", "vmovups", "vorps",
+	"vpaddb", "vpaddq", "vpand", "vpandn", "vpbroadcastb",
+	"vpclmulhqlqdq", "vpcmpeqb", "vpcmpeqd", "vpcmpgtq", "vpcompressd",
+	"vpdpbusd", "vperm2i128", "vpermt2d", "vpexpandd", "vpmovmskb",
+	"vpmuldq", "vpmulld", "vpmuludq", "vpor", "vpshufb",
+	"vpshufd", "vpsubq", "vpternlogd", "vptest", "vpxor",
+	"vrcp14ps", "vroundps", "vsqrtps", "vunpcklps", "vxorps",
+	"vzeroall", "vzeroupper",
+)
+
+_MUST_NOT_FLAG_WIDE = _MUST_NOT_FLAG
+
+# (mnemonic, operand text) pairs where the operand list decides the answer.
+_MUST_FLAG_VECTOR_OPS = (
+	("movd", "%eax,%xmm0"),
+	("movd", "%xmm0,%eax"),
+	("movq", "%rax,%xmm0"),
+	("movq", "%xmm0,%xmm1"),
+	("movq", "%xmm0,%rax"),
+	("movsd", "(%rax),%xmm0"),
+	("movsd", "%xmm0,(%rax)"),
+	("movapd", "%xmm0,%xmm1"),
+	("movupd", "%xmm0,%xmm1"),
+	("movmskps", "%xmm0,%eax"),
+	("movmskpd", "%xmm0,%rax"),
+)
+
+_MUST_NOT_FLAG_OPS = (
+	("movq", "%rax,%rbx"),
+	("movq", "%rax,0x8(%rbp)"),
+	("movd", "%eax,0x4(%rbp)"),
+	("movq", "$0x0,0x8(%rsp)"),
+	("movsd", "%rsi,%rdi"),
+	("movsq", "%rsi,%rdi"),
+	("movsl", "%esi,(%rdi)"),
+	("movsb", "%sil,0x0(%rdi)"),
+	("movsw", "%si,0x0(%rdi)"),
+	("movq", "0x10(%rsp),%rax"),
+)
+
+
+def self_test():
+    """Return a list of failure descriptions; empty means the gate agrees."""
+    failures = []
+    for m in _MUST_FLAG_VECTOR:
+        if not _is_vector(m, "%xmm0,%xmm1"):
+            failures.append("kernel profile misses %s" % m)
+    for m in _MUST_NOT_FLAG:
+        if _is_vector(m, "%rax,%rbx"):
+            failures.append("kernel profile false-positives on %s" % m)
+    for m in _MUST_FLAG_WIDE:
+        if not _is_wide(m, "%ymm0,%ymm1"):
+            failures.append("user profile misses %s" % m)
+        if not _is_vector(m, "%ymm0,%ymm1"):
+            failures.append("kernel profile misses %s" % m)
+    for m in _MUST_NOT_FLAG_WIDE:
+        if _is_wide(m, "%rax,%rbx"):
+            failures.append("user profile false-positives on %s" % m)
+    for m, ops in _MUST_FLAG_VECTOR_OPS:
+        if not _is_vector(m, ops):
+            failures.append("kernel profile misses %s with operands %s" % (m, ops))
+    for m, ops in _MUST_NOT_FLAG_OPS:
+        if _is_vector(m, ops):
+            failures.append(
+                "kernel profile false-positives on %s with operands %s" % (m, ops))
+    for m in _MUST_FLAG_BUT_EXEMPT:
+        if not _is_vector(m, "%rdi"):
+            failures.append("%s should be recognised as vector state" % m)
+        if m not in KERNEL_ALLOWED:
+            failures.append("%s should be exempt from the kernel profile" % m)
+    return failures
+
+
+# --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
 
@@ -366,6 +618,33 @@ def check(path, profile):
 
 
 def main(argv):
+    argv = list(argv)
+    if "--self-test" in argv:
+        argv.remove("--self-test")
+        failures = self_test()
+        if failures:
+            sys.stderr.write(
+                "ERROR: verify_isa.py self test failed (%d):\n" % len(failures)
+            )
+            for line in failures:
+                sys.stderr.write("         %s\n" % line)
+            return 1
+        print(
+            "verify-isa: self test passed (%d legacy mnemonics flagged, "
+            "%d GPR mnemonics clean, %d VEX/AVX-512 mnemonics wide)"
+            % (
+                len(_MUST_FLAG_VECTOR) + len(_MUST_FLAG_VECTOR_OPS),
+                len(_MUST_NOT_FLAG) + len(_MUST_NOT_FLAG_OPS),
+                len(_MUST_FLAG_WIDE),
+            )
+        )
+        return 0
+    if not argv:
+        sys.stderr.write(
+            "verify_isa.py: need --profile kernel|user FILE... or --self-test\n"
+        )
+        return 2
+
     parser = argparse.ArgumentParser(
         prog="verify_isa.py",
         description="Reject vector register state in a linked image.",

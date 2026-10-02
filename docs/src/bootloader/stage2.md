@@ -51,20 +51,43 @@ three methods, in this order, and judges each one by an alias test rather than b
 its return value:
 
 1. **The 8042 keyboard controller's output port.** Disable the keyboard, read the
-   output port, set bit 1, write it back, re-enable the keyboard. The reply is
-   only read if the controller reported one — reading port `0x60` with OBF clear
-   returns whatever the last keyboard byte was, and writing *that* to the output
-   port toggles the CPU reset line. Bit 0 is written back **clear** for the same
-   reason.
-2. **The port 0x92 fast gate.** A plain read-modify-write of bit 1, then a
-   read-back of bit 1.
+   output port, set bit 1, write it back, re-enable the keyboard.
+
+   The reply is only read if the controller reported one. Reading port `0x60`
+   with OBF clear returns whatever the last keyboard byte was, and writing
+   *that* to the output port can reset the CPU. So the value read back is also
+   checked before it is written: a genuine read of a running machine's output
+   port always has **bit 0 set**, and no scancode byte has that property, so a
+   reply with bit 0 clear is rejected as "not a port value" rather than written
+   back.
+
+   **Bit 0 is written back SET, and the polarity is the opposite of what the name
+   suggests.** In the 8042 output port, 1 means "running" and 0 means "reset the
+   machine" — QEMU models it exactly this way (`hw/input/pckbd.c`:
+   `outport_write()` calls `qemu_system_reset_request()` when `!(val & 1)`), and
+   its default outport is `0xCF` = reset-inactive | A20 | `0xCC`. The code
+   therefore sets `status | 0x02`: bit 1 on, bit 0 **forced on**, every other
+   bit passed through untouched, because bits 4 and 5 mirror the output-buffer
+   flags and rewriting them would corrupt the keyboard. Copying port 0x92's
+   polarity here reboots the machine instead of enabling A20.
+
+   After the write the register is read back and bit 1 required. The latch is
+   shared with port 0x92, and which of the two a chipset actually wires to the
+   A20 line is not knowable from here, so the fast gate's read-back below is a
+   second witness.
+2. **The port 0x92 fast gate.** A read-modify-write that sets bit 1 **and clears
+   bit 0**, then a read-back of bit 1. Bit 0 is the opposite control to the
+   8042's: in port 0x92 a 1 is the CPU *reset request* and a 0 is normal, so it
+   is explicitly driven low. A "plain read-modify-write of bit 1" that left bit
+   0 alone would leave a reset request standing.
 3. **INT 15h, AX=2401h.** Tried with `BX=0` (8042) and then `BX=1` (port 0x92);
    which of the two a given BIOS honours is not knowable from stage 2, so both
    are attempted.
 
-The test all three share is `a20_is_open()`: write a byte to `0x100500`, write a
-different one to `0x500`, and check that neither write appeared at the other
-address. Both locations are ordinary RAM that nothing else owns and that the
+The test all three share is `a20_is_open()`: write `0x00` to `0x100500`, write
+`0x5A` to `0x500`, and if `0x5A` came back out of `0x100500` the gate is closed;
+then write `0xA5` to `0x100500` and if `0x500` no longer reads `0x5A` it is
+closed. Both locations are ordinary RAM that nothing else owns and that the
 kernel image has not yet reached. A closed gate makes `0x500` and `0x100500` the
 same address, so this is a three-write test with no lasting effect.
 
@@ -73,6 +96,11 @@ firmware — stage 2 says which and what. **It does not carry on.** A machine wh
 A20 gate will not open cannot run this loader, and the alternative produces a
 kernel image written over the interrupt vector table with every access in
 between landing somewhere valid and nothing reporting anything at all.
+
+Note that the "already open by firmware" case is checked *last*, after all three
+methods have been tried, and it accepts either the alias test or port 0x92 bit 1
+as evidence — some chipsets only answer the alias test once the gate is open
+through whatever mechanism the firmware used before stage 2 ran.
 
 On the reference machine the 8042 path does not answer and the fast gate does,
 so the log reads:
@@ -150,13 +178,20 @@ to make the kernel window exist.
 
 ### Step 5 — Load Kernel ELF
 
-Stage 2 reads the kernel ELF from disk at `KERNEL_LBA` (64) in 512-byte sectors,
-one firmware call per sector, each through the 4 KiB bounce window at
-`BOUNCE_ADDR` (`0x20000`). The image is copied to `KERNEL_LANDING_ADDR`
-(`0x100000`) because INT 13h cannot address above 1 MiB. For each `PT_LOAD`
-segment the file bytes are copied to `KERNEL_LANDING_ADDR + p_offset`, and the
-bytes between `p_filesz` and `p_memsz` — `.bss` — are zeroed here because the
-kernel's allocator is not running yet.
+Stage 2 reads the kernel ELF from disk at `KERNEL_LBA` (64) in 512-byte sectors
+through the 4 KiB bounce window at `BOUNCE_ADDR` (`0x20000`). One firmware call
+moves **up to eight** sectors: `bios_read_bounce()` caps the batch at
+`BOUNCE_BYTES / 512` and also at the rest of the current track, because a CHS
+read may not cross a track boundary. The cap is the bounce window that matters —
+the track bound alone allows 63 sectors (32 KiB), and the firmware writes all of
+it to whatever buffer it was handed, overrunning the disk address packet and the
+VBE scratch block above it and reporting success. Nothing faults; the next
+sector's parameters are simply gone. The image is copied to
+`KERNEL_LANDING_ADDR` (`0x100000`) because INT 13h cannot address above 1 MiB.
+For each `PT_LOAD` segment the file bytes are copied to
+`KERNEL_LANDING_ADDR + p_offset`, and the bytes between `p_filesz` and
+`p_memsz` — `.bss` — are zeroed here because the kernel's allocator is not
+running yet.
 
 The header is checked for the `\x7fELF` magic, `ELFCLASS64`, and `EM_X86_64`, and
 anything else is a `fail()`. `e_entry` is then taken from the header verbatim.
@@ -184,7 +219,8 @@ returns; if it ever did, `fail()` reports the fact.
 0x008000 – 0x00DFFF     stage 2 image (.text, .trampoline, .rodata, .data,
                          .bss) — at most 24 KiB, enforced by the linker
 0x00E000 – 0x01FFFF     32-bit loader stack, 72 KiB, grows down from 0x20000
-0x020000 – 0x020FFF     firmware bounce window, one 512-byte sector at a time
+0x020000 – 0x020FFF     firmware bounce window, up to eight 512-byte sectors
+                         per firmware call (BOUNCE_BYTES = 4 KiB)
 0x021000 – 0x021FFF     program-header scratch (DAP, VBE scratch)
 0x090000 – 0x090BFF     E820 map, up to 128 entries
 0x091000 – 0x0910E7     struct bootinfo
@@ -201,19 +237,33 @@ without overlapping, and `stage2.ld` asserts both `__bss_end < STACK32_ADDR` and
 
 These are real and unfixed; they are listed here rather than discovered later.
 
-- `hang_puts()`, the one routine whose job is to explain a failed transition,
-  clobbers the character with the UART line-status byte before transmitting it,
-  so it emits a stream of `0x60` and none of the message.
-- The stage 2 banner still prints `abcdefg` on every boot.
-- `LGDT` is emitted in the m16&16 form. It works only because the GDT sits below
-  64 KiB.
-- A20 is enabled unconditionally at boot even when the firmware already opened
-  the gate.
+- `LGDT` and `LIDT` are both emitted in the **m16&16** form in `.code16` — the
+  bare `0f 01 14` and `0f 01 1c`, with no `0x66` prefix, so a 16-bit limit *and*
+  a 16-bit base. It works only because both tables sit below 64 KiB, and
+  `stage2.ld` asserts neither their addresses nor their sizes. The only bound on
+  `.bss` growth is `ASSERT(__bss_end <= 0x10000)`, so a larger `.rodata` would
+  push a table base past 0xFFFF, truncate it, and make the first exception
+  decode a gate out of unrelated memory. The source comment at
+  `stage2_entry.S:61-62` claims the unsuffixed `lgdt` is the m16&32 form; it is
+  not, and `gcc -m32` on a three-line reproducer confirms it.
 - `e_entry` is not bounds-checked against the loaded segments, and `e_type` is
-  not checked at all.
+  not checked at all. `e_entry` is taken from the header verbatim (stage2.c:1279)
+  and `e_type` is read into a local (stage2.c:1220) and then never used.
 - The stage 2 GDT's index 3 is labelled "64-bit user code, DPL 3" but its flags
   byte is `0x00`, which is a 16-bit code segment. Nothing in stage 2 uses it;
   the kernel builds its own GDT.
+
+Two items that were on this list and are **not** gaps any more, kept because the
+stale entries were the misleading part:
+
+- ~~"A20 is enabled unconditionally at boot even when the firmware already opened
+  the gate."~~ `a20_enable()` checks `a20_is_open() || (inb(PS2_FAST_GATE) & 0x02)`
+  and logs `A20 already enabled by firmware` (stage2.c:501-504).
+- ~~"`hang_puts()` clobbers the character with the UART line-status byte."~~
+  `hang_putc64` is `movzbl %dil, %eax /* the character, not the status */`
+  (stage2_long.S:467).
+- ~~"The stage 2 banner still prints `abcdefg`."~~ The string does not occur
+  anywhere under `src/`; `grep -rn abcdefg src/` returns nothing.
 
 ## Related Documents
 

@@ -156,7 +156,115 @@ static uint32_t phdr_prot(u32 p_flags)
 	return prot | VM_USER;
 }
 
-/* ---------------------------------------------------------------- load ------ */
+/* ---------------------------------------------------------------- TLS ------- */
+
+/*
+ * Thread-local storage, which is the one program header type whose contents
+ * are not executed and are not even reachable through an ordinary load: a
+ * PT_TLS segment names a block that the *linker* placed and the *compiler*
+ * addressed relative to a thread pointer, and the instruction stream never
+ * names an address in it. Nothing else in this file would ever touch those
+ * bytes, so a loader that skips PT_TLS still produces a process that runs --
+ * until the first `__thread` access, which is a load from whatever the thread
+ * pointer happens to be. With no way to set that pointer, that is address zero.
+ *
+ * Two things have to be right, and the second is the one that is easy to get
+ * backwards:
+ *
+ *   1. The block is mapped, including the .tbss tail that no PT_LOAD covers.
+ *      For a static image the block usually straddles the end of the last
+ *      loadable segment: measured on build/init.elf, .tdata sits in the last
+ *      byte of the final PT_LOAD's page and .tbss starts in the page after it,
+ *      which nothing else in the image claims. A PT_TLS-sized hole in the
+ *      address space is not a hole the fault handler can be relied on to fill
+ *      either, because there is no VMA describing it.
+ *
+ *   2. The thread pointer is the address one *past* the last byte of the
+ *      block, not its first byte. This is not a policy; it is what the code
+ *      already linked into the image assumes. A local-exec `__thread` access
+ *      is a fixed displacement from FS with the displacement already resolved
+ *      at link time: on the same init.elf, a variable at offset 0 of a 16-byte
+ *      block assembles to `mov %fs:-16`, and one at offset 8 to `mov %fs:-8`.
+ *      Both land inside the block only if FS holds p_vaddr + p_memsz. Setting
+ *      FS to p_vaddr instead would put every thread-local access 16 bytes
+ *      below where the linker put the variable -- inside the preceding page,
+ *      which for a static image is .data, so it would corrupt the program's
+ *      globals rather than fault.
+ *
+ * The measurements above come from the artefact, not from the specification:
+ *   readelf -lW build/init.elf   ->  TLS  ... 0x403ff8 filesz 0x4 memsz 0x10
+ *   objdump -d build/init.elf    ->  mov %fs:0xfffffffffffffff0,%eax
+ * The offsets agree with the formula for both variables, which is what makes
+ * this a derivation rather than a guess. tests/tls_harness.c re-checks it
+ * against whatever the current build produced, and fails the build's claim if
+ * the two ever stop agreeing.
+ */
+
+/* Bytes of .tbss zeroed per pass; large enough that the per-call cost of a
+ * big block is the loop, not the call. */
+#define TLS_ZERO_CHUNK 256
+
+static int elf_load_tls(struct address_space *mm, const u8 *base, u64 offset,
+			u64 vaddr, u64 filesz, u64 memsz, u64 covered_end)
+{
+	static const u8 zeros[TLS_ZERO_CHUNK];
+	u64 start = ALIGN_DOWN(vaddr, PAGE_SIZE);
+	u64 end = ALIGN_UP(vaddr + memsz, PAGE_SIZE);
+	uint32_t prot = VM_READ | VM_WRITE | VM_USER;
+	int r;
+
+	/*
+	 * Only the part no PT_LOAD already covers needs a VMA. The loader adds
+	 * VMAs for segment ranges and refuses to overlap one that exists, so
+	 * asking for the whole block would fail for every ordinary image: the
+	 * block almost always begins inside the last segment's last page.
+	 */
+	if (end > covered_end) {
+		u64 vma_start = start > covered_end ? start : covered_end;
+
+		r = mm_add_vma(mm, (virt_addr_t)vma_start, (virt_addr_t)end,
+			       prot, VM_ANON);
+		if (r < 0)
+			return r;
+	}
+
+	/* .tdata: the initialised part, copied from the file. */
+	if (filesz) {
+		r = user_memory_write(mm, (virt_addr_t)vaddr, base + offset,
+				      (size_t)filesz, prot);
+		if (r < 0)
+			return r;
+	}
+
+	/*
+	 * .tbss, zeroed through the same path rather than left to the fault
+	 * handler, and the reason is a byte range the handler cannot reach: when
+	 * the block's tail shares a page with the end of a PT_LOAD, that page is
+	 * already present and holds the segment's bytes, and no access to it
+	 * ever faults. Zeroing the whole remainder through user_memory_write
+	 * covers both that case and the ordinary one, since it maps the page
+	 * when it is absent and overwrites it when it is present.
+	 */
+	for (u64 off = filesz; off < memsz;) {
+		size_t chunk = (size_t)MIN((u64)sizeof(zeros), memsz - off);
+
+		r = user_memory_write(mm, (virt_addr_t)(vaddr + off), zeros,
+				      chunk, prot);
+		if (r < 0)
+			return r;
+		off += chunk;
+	}
+
+	mm->tls_ptr = vaddr + memsz;
+	mm->tls_size = memsz;
+
+	ELF_LOG(KLOG_INFO,
+		"loaded TLS block [%#lx,%#lx) %lu bytes initialised, tp %#lx",
+		vaddr, vaddr + memsz, (unsigned long)filesz,
+		(unsigned long)mm->tls_ptr);
+	return 0;
+}
+
 
 int elf_load(struct address_space *mm, const void *image, size_t size,
 	     uint64_t load_bias, struct elf_info *out)
@@ -169,6 +277,12 @@ int elf_load(struct address_space *mm, const void *image, size_t size,
 	u64 max_vaddr = 0;
 	u64 phdr_vaddr = 0;
 	u32 phdr_count = 0;
+	/* The image's PT_TLS, if it has one. Zeroed here rather than at the
+	 * point of use so that "no PT_TLS" and "PT_TLS of size zero" cannot be
+	 * confused: an image with no thread-local storage has no thread
+	 * pointer, and mm->tls_ptr == 0 says exactly that. */
+	u64 tls_offset = 0, tls_vaddr = 0, tls_filesz = 0, tls_memsz = 0;
+	bool tls_seen = false;
 	int r;
 
 	if (!mm || !image || !out)
@@ -197,6 +311,46 @@ int elf_load(struct address_space *mm, const void *image, size_t size,
 
 		if (ph->p_type == PT_INTERP)
 			return -ENOEXEC;
+
+		if (ph->p_type == PT_TLS) {
+			/*
+			 * One block per process. A second PT_TLS would mean two
+			 * candidate thread pointers and no rule for choosing
+			 * between them, and silently taking the first is how a
+			 * program's own thread-local variables end up somewhere
+			 * the linker never put them.
+			 */
+			if (tls_seen)
+				return -ENOEXEC;
+			if (!in_bounds(ph->p_offset, ph->p_filesz, size))
+				return -ENOEXEC;
+			if (ph->p_memsz < ph->p_filesz)
+				return -ENOEXEC;
+			if (load_bias + ph->p_vaddr < load_bias)
+				return -ENOEXEC;
+			/* The block, and the thread pointer one past its end,
+			 * have to be in the user half. The kernel window is the
+			 * bound available here; user_memory_write() enforces the
+			 * stricter user half below when it copies the bytes, so a
+			 * block that lands between the two is rejected by the
+			 * write rather than mapped. */
+			if (load_bias + ph->p_vaddr + ph->p_memsz <
+			    load_bias + ph->p_vaddr)
+				return -ENOEXEC;
+			if (load_bias + ph->p_vaddr + ph->p_memsz >=
+			    VMM_KERNEL_BASE)
+				return -ENOEXEC;
+			if (ph->p_align > PAGE_SIZE &&
+			    (ph->p_align & (ph->p_align - 1)))
+				return -ENOEXEC;
+			tls_offset = ph->p_offset;
+			tls_vaddr = load_bias + ph->p_vaddr;
+			tls_filesz = ph->p_filesz;
+			tls_memsz = ph->p_memsz;
+			tls_seen = true;
+			continue;
+		}
+
 		if (ph->p_type != PT_LOAD)
 			continue;
 		if (!in_bounds(ph->p_offset, ph->p_filesz, size))
@@ -309,6 +463,32 @@ int elf_load(struct address_space *mm, const void *image, size_t size,
 	if (!phdr_vaddr)
 		return -ENOEXEC;
 
+	/*
+	 * The TLS block goes in after every PT_LOAD, because the only thing
+	 * this needs to know about them is how far they reach: the block
+	 * usually starts inside the last segment's last page, and a VMA that
+	 * overlapped it would be refused.
+	 *
+	 * max_vaddr moves with it. The heap starts at the end of the image, and
+	 * for a static image the TLS block's .tbss is the last thing in the
+	 * address space -- past the end of the last PT_LOAD. Leaving max_vaddr
+	 * where the segments put it would start the heap inside the block, and
+	 * the first brk() would then fail with the confusing "overlaps an
+	 * existing VMA" instead of growing.
+	 */
+	if (tls_memsz) {
+		r = elf_load_tls(mm, base, tls_offset, tls_vaddr, tls_filesz,
+				 tls_memsz, covered_end);
+		if (r < 0)
+			return r;
+
+		out->tls_ptr = mm->tls_ptr;
+		out->tls_size = mm->tls_size;
+
+		if (mm->tls_ptr > max_vaddr)
+			max_vaddr = mm->tls_ptr;
+	}
+
 	out->phdr_vaddr = phdr_vaddr;
 	out->phdr_count = phdr_count ? phdr_count : eh->e_phnum;
 	out->min_vaddr = min_vaddr;
@@ -348,6 +528,10 @@ int elf_load(struct address_space *mm, const void *image, size_t size,
 	 * lower would let a brk() grow a VMA into the program's own data and
 	 * the loader's VMA insert would fail with a confusing EINVAL; starting
 	 * it higher wastes address space for no benefit.
+	 *
+	 * "Last loadable segment" includes the TLS block here, because max_vaddr
+	 * was moved past it above and .tbss is the last thing in the address
+	 * space for a static image.
 	 */
 	mm->start_brk = max_vaddr;
 	mm->brk = max_vaddr;
@@ -355,6 +539,13 @@ int elf_load(struct address_space *mm, const void *image, size_t size,
 		mm->mmap_base = 0x0000200000000000ULL;
 		mm->mmap_next = mm->mmap_base;
 	}
+
+	/* The TLS block is data, and for a static image it is the data with the
+	 * highest address, so it belongs in the extents /proc and any policy
+	 * that reads them will otherwise be told the program's memory ends
+	 * before its thread-locals do. */
+	if (mm->tls_ptr > mm->end_data)
+		mm->end_data = mm->tls_ptr;
 
 	ELF_LOG(KLOG_INFO, "loaded ELF entry %#lx phdr %#lx count %u [%#lx,%#lx)",
 		out->entry, out->phdr_vaddr, out->phdr_count, min_vaddr, max_vaddr);

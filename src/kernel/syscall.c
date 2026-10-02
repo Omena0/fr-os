@@ -839,6 +839,106 @@ static long sc_mprotect(struct syscall_regs *r)
 	return 0;
 }
 
+/* ----------------------------------------------------- thread-local storage -- */
+
+/*
+ * arch_prctl(ARCH_SET_FS, addr) is how a process installs a thread pointer,
+ * and it is the whole mechanism: without it a `__thread` access is a load from
+ * MSR_FS_BASE + a constant, and nothing in ring 3 can move that register.
+ *
+ * Nothing is validated about the block `addr` describes, deliberately. Every
+ * access through it goes through the MMU like any other access from the
+ * process, with the same permissions, so setting the base grants no authority
+ * the process did not already have -- and this kernel's own use of %gs (the
+ * per-CPU area) is nowhere near %fs. What *is* checked is that the base is a
+ * user address, because that is the one mistake with no recovery: FS is a
+ * per-CPU register, so a base that faults leaves the process unable to run at
+ * all until something else sets it, and the something else is a libc that has
+ * already faulted.
+ */
+static bool fs_base_acceptable(u64 addr)
+{
+	/* The user half. A thread pointer names memory the process can name. */
+	if (addr >= VMM_KERNEL_BASE)
+		return false;
+	/*
+	 * Canonical, in the four-level sense this kernel builds page tables in:
+	 * bit 47 has to be a copy of bits 63:48. A non-canonical base is not a
+	 * wrong address, it is a class of address for which the CPU raises #GP
+	 * on every access, so accepting one turns a rejected call into a dead
+	 * process.
+	 */
+	if ((addr >> 47) != 0 && (addr >> 47) != 0x1FFFFULL)
+		return false;
+	return true;
+}
+
+static long sc_arch_prctl(struct syscall_regs *r)
+{
+	struct task *t = caller();
+	u64 code = arg0(r);
+	u64 addr = arg1(r);
+
+	if (!t)
+		return -ESRCH;
+
+	switch (code) {
+	case ARCH_SET_FS: {
+		if (!fs_base_acceptable(addr))
+			return -EPERM;
+		wrmsr(MSR_FS_BASE, addr);
+		/*
+		 * Recorded as well as written, because the register is per-CPU and
+		 * this value is per-task. The scheduler moves it across a switch
+		 * (see task_load_fs_base); a task whose thread pointer is only in
+		 * the register loses it the moment another task runs.
+		 */
+		t->fs_base = addr;
+		return 0;
+	}
+	case ARCH_GET_FS: {
+		u64 val = rdmsr(MSR_FS_BASE);
+
+		return copy_to_user(addr, &val, sizeof(val));
+	}
+	default:
+		/*
+		 * ARCH_SET_GS and ARCH_GET_GS are refused on purpose, and the
+		 * number is Linux's so the refusal is visible to anything ported.
+		 * %gs is where this kernel keeps its per-CPU area, read through
+		 * the hidden GS base by every this_cpu(); a process that wrote
+		 * the visible one would not break its own access to the register
+		 * so much as make every per-CPU read in ring 0 -- this_cpu_id(),
+		 * the scheduler's run queues, the syscall entry path's own
+		 * kstack lookup -- resolve to whatever the process chose.
+		 * Linux disables ARCH_SET_GS for a related reason on newer
+		 * kernels.
+		 */
+		return -EINVAL;
+	}
+}
+
+/*
+ * The thread pointer this process's image was loaded with, or 0 if the image
+ * has no PT_TLS.
+ *
+ * A query rather than an accessor for a struct field because the answer belongs
+ * to the address space, and the address space is what the ELF loader was
+ * handed: exec builds a new mm and a task can outlive several of them, so
+ * anything cached on the task would be describing an image that is no longer
+ * mapped. See the SYS_get_tls_base comment in uapi/syscall.h for the
+ * arithmetic libc does with the answer.
+ */
+static long sc_get_tls_base(struct syscall_regs *r)
+{
+	struct address_space *mm = syscall_user_mm();
+
+	UNUSED(r);
+	if (!mm)
+		return -ENOSYS;
+	return (long)mm->tls_ptr;
+}
+
 /* ---------------------------------------------------------------- misc ----- */
 
 static long sc_getpgid(struct syscall_regs *r)
@@ -936,6 +1036,7 @@ void syscall_init(void)
 	syscall_table[SYS_getpgid] = sc_getpgid;
 	syscall_table[SYS_getuid] = sc_getuid;
 	syscall_table[SYS_getgid] = sc_getgid;
+	syscall_table[SYS_arch_prctl] = sc_arch_prctl;
 	syscall_table[SYS_nanosleep] = sc_nanosleep;
 	syscall_table[SYS_clock_gettime] = sc_clock_gettime;
 	syscall_table[SYS_open] = sc_open;
@@ -952,6 +1053,7 @@ void syscall_init(void)
 	syscall_table[SYS_mprotect] = sc_mprotect;
 	syscall_table[SYS_brk] = sc_brk;
 	syscall_table[SYS_madvise] = sc_madvise;
+	syscall_table[SYS_get_tls_base] = sc_get_tls_base;
 	syscall_table[SYS_pipe] = sc_pipe;
 	syscall_table[SYS_sched_yield] = sc_sched_yield;
 	syscall_table[SYS_getcpu] = sc_getcpu;

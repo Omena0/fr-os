@@ -17,16 +17,25 @@
  * hold whatever the kernel's last C statement left in them and every one of
  * them is garbage from the process's point of view.
  *
- * _start reads the vector off the stack, publishes it, runs the .init_array
- * constructors, calls __libc_init(), then main(argc, argv, envp), then
- * exit(ret). Never returns.
+ * _start reads the vector off the stack, publishes it, establishes the thread
+ * pointer, runs the .init_array constructors, calls __libc_init(), then
+ * main(argc, argv, envp), then exit(ret). Never returns.
  *
  * Also provides: __libc_argc, __libc_argv, __libc_envp, __libc_auxv,
- * __libc_init, __stack_chk_guard (from auxv AT_RANDOM or the TSC),
- * __stack_chk_fail, environ and __environ.
+ * __libc_init, __libc_setup_tls, __libc_tls_sentinel, __stack_chk_guard (from
+ * auxv AT_RANDOM or the TSC), __stack_chk_fail, environ and __environ.
+ *
+ * The order of the first three is not a preference. A `__thread` access is a
+ * load relative to FS, and nothing about ring 3 establishes FS: the process
+ * arrives from an iretq that restored RIP, CS, RFLAGS, RSP and SS and nothing
+ * else, so the first thing that can make a thread-local variable reachable is
+ * this file. libc's own globals are thread-local (errno is), so a constructor
+ * that called into stdio before the thread pointer was installed would fault
+ * at a low address rather than doing anything diagnosable.
  */
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>
 #include <unistd.h>
 #include <sys/auxv.h>
 #include <stdlib.h>
@@ -34,6 +43,13 @@
 extern void __libc_init(void);
 extern int main(int argc, char **argv, char **envp);
 extern void exit(int status) __attribute__((noreturn));
+
+/* Raw syscall trampolines, for the paths that must not touch errno. */
+extern long __syscall1(long number, long a1);
+extern long __syscall3(long number, long a1, long a2, long a3);
+
+extern long sys_arch_prctl(unsigned long code, unsigned long addr);
+extern long sys_get_tls_base(void);
 
 int __libc_argc;
 char **__libc_argv;
@@ -86,6 +102,87 @@ static void run_init_array(void)
 
 	for (ctor = __init_array_start; ctor < __init_array_end; ctor++)
 		(*ctor)();
+}
+
+/* ------------------------------------------------------- thread locals ----- */
+
+/*
+ * A thread-local variable in the startup object, and the reason it exists here
+ * rather than in a header.
+ *
+ * Its purpose is to make "this image has thread-local storage" a fact the
+ * program can check instead of assume. crt1.o is linked into every program
+ * that has a main, so its .tdata is linked into every image, so every image
+ * has a PT_TLS -- and therefore a nonzero answer from SYS_get_tls_base. That
+ * turns "the kernel gave us no thread pointer" from a condition libc has to
+ * reason about into a state that cannot occur without something having gone
+ * wrong, which is the only way to make a check on it meaningful. Without this
+ * sentinel the same check would have to be conditional on the program having
+ * thread-locals, which is precisely the thing libc cannot see.
+ *
+ * The initial value doubles as a read-back check on the thread pointer itself.
+ * The address the compiler will use for this variable is fixed at link time as
+ * a displacement from FS, and the kernel's answer is the value that makes that
+ * displacement land inside the block; if the two ever disagree, the byte
+ * written here is not the byte read back, and the comparison below is what
+ * notices -- before main, before any constructor, and while there is still a
+ * diagnostic worth printing.
+ */
+#define LIBC_TLS_SENTINEL  0x4c6962635f544c53ULL	/* "Libc_TLS" */
+
+__thread unsigned long __libc_tls_sentinel = LIBC_TLS_SENTINEL;
+
+/*
+ * Report a process that cannot have thread-local storage and stop, rather than
+ * letting the first `__thread` access fault.
+ *
+ * The write is a raw syscall for a specific reason: libc's write() reports
+ * failure by storing into __errno, __errno is thread-local, and the thread
+ * pointer is what is broken. Going through the wrapper would turn a
+ * diagnosable refusal to start into a #PF on the way to printing the
+ * diagnosis. SYS_exit rather than _exit() for the same reason -- exit() runs
+ * atexit handlers and flushes stdio, both of which reach errno.
+ */
+static __attribute__((noreturn)) void tls_fatal(const char *msg)
+{
+	__syscall3(SYS_write, 2, (long)msg, (long)strlen(msg));
+	__syscall1(SYS_exit, 127);
+	for (;;)
+		__asm__ __volatile__("hlt");
+}
+
+/*
+ * Install the thread pointer, before anything can use one.
+ *
+ * The value comes from the kernel because there is nowhere else in this tree to
+ * get it: the auxiliary vector is assembled by the exec path, which cannot be
+ * reached from here, and there is no dynamic linker to read PT_TLS out of the
+ * program headers and pass it on. SYS_get_tls_base returns the address one
+ * past the end of the image's TLS block, which is the value a local-exec
+ * `__thread` access is written against -- the end, not the start. The kernel
+ * side of that arithmetic, and the measurement it comes from, are in elf.c.
+ */
+static void __libc_setup_tls(void)
+{
+	unsigned long base = (unsigned long)sys_get_tls_base();
+
+	if (!base) {
+		tls_fatal("libc: the kernel loaded no TLS block for this "
+			  "image, so every __thread access is a null-pointer "
+			  "dereference. Refusing to start.\n");
+	}
+
+	if (sys_arch_prctl(ARCH_SET_FS, base) != 0) {
+		tls_fatal("libc: arch_prctl(ARCH_SET_FS) failed; no thread "
+			  "pointer, so __thread cannot work. Refusing to "
+			  "start.\n");
+	}
+
+	if (__libc_tls_sentinel != LIBC_TLS_SENTINEL) {
+		tls_fatal("libc: thread-local storage did not read back the "
+			  "value the image was linked with; the thread pointer "
+			  "is wrong. Refusing to start.\n");
+	}
 }
 
 void __libc_init(void)
@@ -141,6 +238,14 @@ __libc_start_c(unsigned long *sp)
 
 	environ = __libc_envp;
 	__environ = __libc_envp;
+
+	/*
+	 * Before the constructors, and before __libc_init. Both can reach
+	 * thread-local storage -- a constructor that calls into stdio touches
+	 * errno, and __libc_init() calls malloc() -- and neither can be trusted
+	 * to do so before the thread pointer exists.
+	 */
+	__libc_setup_tls();
 
 	/*
 	 * Constructors run before __libc_init and before main. A constructor

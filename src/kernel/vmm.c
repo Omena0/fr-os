@@ -500,16 +500,30 @@ phys_addr_t vmm_unmap_page(phys_addr_t pgd, virt_addr_t virt)
 	return phys;
 }
 
-phys_addr_t vmm_translate(phys_addr_t pgd, virt_addr_t virt, uint64_t **leaf)
+int vmm_lookup_page(phys_addr_t pgd, virt_addr_t virt, phys_addr_t *phys,
+		    uint64_t **leaf)
 {
 	uint64_t *pte = NULL;
 	phys_addr_t table = walk(pgd, virt, 1, &pte);
 
 	if (leaf)
 		*leaf = pte;
-	if (!table || !pte || !(*pte & PTE_PRESENT))
+	if (!table || !pte || !(*pte & PTE_PRESENT)) {
+		if (phys)
+			*phys = 0;
 		return 0;
-	return (*pte) & PTE_ADDR_MASK;
+	}
+	if (phys)
+		*phys = (*pte) & PTE_ADDR_MASK;
+	return 1;
+}
+
+phys_addr_t vmm_translate(phys_addr_t pgd, virt_addr_t virt, uint64_t **leaf)
+{
+	phys_addr_t phys = 0;
+
+	vmm_lookup_page(pgd, virt, &phys, leaf);
+	return phys;
 }
 
 int vmm_map_large(phys_addr_t pgd, virt_addr_t virt, phys_addr_t phys,

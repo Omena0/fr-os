@@ -90,8 +90,15 @@ the PMM will hand out frames above 4 GiB as a fallback from `ZONE_NORMAL`. Those
 frames are *not* reachable through the direct map: anything that dereferences
 `phys_to_virt()` of one — `GFP_ZERO`'s memset, `pt_alloc_zeroed`, `slab_new`,
 `clone_table` — faults. On a 4 GiB reference machine the zone is empty and this
-is latent. `src/kernel/include/pmm.h` still describes `ZONE_HIGH` as "reachable
-through the direct map"; that header text is wrong.
+is latent.
+
+This was audit finding **#35**, a three-way disagreement between this document,
+`vmm.c` and `pmm.h`. **The code is authoritative and the documents were both
+wrong**: `DIRECT_MAP_BYTES` in `src/kernel/vmm.c` decides, and the header text
+in `src/kernel/include/pmm.h` describing `ZONE_HIGH` as "reachable through the
+direct map" has been corrected to say the opposite. Both corrections are landed
+(2026-10-02). The hazard itself is unchanged: a ZONE_HIGH allocation is still
+permitted, still handed out, and still faults in every consumer that touches it.
 
 ### The kernel window
 

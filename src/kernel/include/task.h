@@ -262,6 +262,27 @@ struct task {
 	u64 *fpu_state;       /* 64-byte aligned FXSAVE area */
 	bool fpu_dirty;       /* x87/SSE state must be saved on switch-out */
 
+	/*
+	 * The task's FS base, and the only reason MSR_FS_BASE is not simply a
+	 * per-CPU constant.
+	 *
+	 * MSR_FS_BASE is a per-CPU register, and a thread pointer is per-task
+	 * state: arch_prctl writes the register for whoever is running now, and
+	 * every %fs-relative access the task makes is relative to it. So the
+	 * value has to travel with the task across a switch, exactly as CR3 and
+	 * the FPU image do — see sched_switch_frame(), which is where that save
+	 * and restore belongs and where the FS pair has to sit alongside the
+	 * other two.
+	 *
+	 * Zero for a kernel thread and for a user task that has not installed a
+	 * thread pointer, which is the state every process is in before its
+	 * startup code runs. Nothing in the kernel addresses memory through
+	 * %fs — per-CPU state is %gs, read through the hidden GS base — so a
+	 * task's FS base pointing into user space is inert while the task is
+	 * running in the kernel.
+	 */
+	u64 fs_base;
+
 	/* --- kernel thread entry -------------------------------------------- */
 	void (*thread_fn)(void *);
 	void *thread_arg;
@@ -309,6 +330,18 @@ void task_inherit(struct task *child, struct task *parent);
 
 /* Give a task the full complement of MLFQ quantum for its level. */
 void task_reset_budget(struct task *t);
+
+/*
+ * Move a task's thread pointer between the task and MSR_FS_BASE.
+ *
+ * Both halves belong on the per-task side of a context switch, beside the CR3
+ * and FPU handling in sched_switch_frame(); the load is also what a transition
+ * into ring 3 needs, which is why it is a function rather than a bare WRMSR
+ * living in whichever entry stub happened to need it. `t == NULL` is a no-op,
+ * so the entry path can call it unconditionally before the scheduler exists.
+ */
+void task_load_fs_base(struct task *t);
+void task_save_fs_base(struct task *t);
 
 /* The task running on this CPU, or NULL before the scheduler starts. */
 struct task *current_task(void);

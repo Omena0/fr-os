@@ -73,6 +73,15 @@ DISK := build/os.img
 .PHONY: FORCE
 FORCE:
 
+# The tool is a prerequisite of the three linked images, not of the objects.
+# The gate reads the finished artefact, so a change to the gate has to
+# re-validate the artefacts that exist rather than wait for an unrelated
+# edit; it has nothing to say about how an object is compiled, so it must not
+# invalidate one. That is the same split the .d files make, and the same
+# reason the -MMD -MP -MF $@.d flag is on the assembly rules too.
+VERIFY_ISA_PY := tools/verify_isa.py
+VERIFY_ISA := $(BUILD)/verify-isa
+
 BUILD_INPUTS := Makefile src/config.mk
 HEADER_FILES := $(shell find src -name '*.h' 2>/dev/null | sort)
 BUILD_INPUTS_STAMP := $(BUILD)/.build-inputs.stamp
@@ -158,11 +167,13 @@ $(BUILD)/stage2.elf: $(STAGE2_OBJ) src/boot/stage2.ld
 # The generating script is a prerequisite. tools/initrd.py decides the container
 # format, so editing it changes the output bytes; without the dependency the
 # blob would keep the old layout until something unrelated forced a rebuild.
-$(HELLO_ELF): $(HELLO_SRC) $(LIBC_OBJ) $(BUILD)/libc.a src/include/version.h
+$(HELLO_ELF): $(HELLO_SRC) $(LIBC_OBJ) $(BUILD)/libc.a src/include/version.h \
+             $(VERIFY_ISA_PY)
 	@mkdir -p $(dir $@)
 	$(HOST_CC_64) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $(HELLO_SRC) \
 		$(BUILD)/libc.a $(KERNEL_VERSION_DEFS)
 	$(HOST_OBJCOPY) $(STRIP_DEBUG) $@
+	@$(MAKE) --no-print-directory verify-isa PROFILE=user FILE=$@
 
 $(INITRD): $(INIT_ELF) $(HELLO_ELF) tools/initrd.py
 	@mkdir -p $(dir $@)
@@ -172,7 +183,8 @@ $(INITRD): $(INIT_ELF) $(HELLO_ELF) tools/initrd.py
 # version.h supplies KERNEL_VERSION/KERNEL_GIT_REV/KERNEL_BUILD_STAMP, which
 # reach the image as -D flags on the link line rather than through a header
 # dependency, so nothing else would notice a change to it.
-$(INIT_ELF): $(INIT_MAIN_SRC) $(LIBC_OBJ) $(BUILD)/libc.a src/include/version.h
+$(INIT_ELF): $(INIT_MAIN_SRC) $(LIBC_OBJ) $(BUILD)/libc.a src/include/version.h \
+            $(VERIFY_ISA_PY)
 	@mkdir -p $(dir $@)
 	$(HOST_CC_64) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $(INIT_MAIN_SRC) \
 		$(BUILD)/libc.a $(KERNEL_VERSION_DEFS)
@@ -183,6 +195,7 @@ $(INIT_ELF): $(INIT_MAIN_SRC) $(LIBC_OBJ) $(BUILD)/libc.a src/include/version.h
 	@# the loader reads -- so every byte here is a byte read from disk at
 	@# boot and charged against the landing-zone budget. See config.mk.
 	$(HOST_OBJCOPY) $(STRIP_DEBUG) $@
+	@$(MAKE) --no-print-directory verify-isa PROFILE=user FILE=$@
 
 $(BUILD)/libc.a: $(LIBC_OBJ)
 	@mkdir -p $(dir $@)
@@ -203,69 +216,85 @@ $(OBJ)/kernel/initrd.c.o: $(INITRD) tools/bin2c.py
 	@mkdir -p $(dir $@)
 	python3 tools/bin2c.py $< init_image > build/initrd.c
 	$(HOST_CC_64) $(KERNEL_CFLAGS) -c build/initrd.c -o $@
-$(BUILD)/kernel.elf: $(KERNEL_ENTRY_OBJ) $(BUILD)/libk.a $(OBJ)/kernel/initrd.c.o src/kernel/link.ld
+$(BUILD)/kernel.elf: $(KERNEL_ENTRY_OBJ) $(BUILD)/libk.a $(OBJ)/kernel/initrd.c.o \
+                   src/kernel/link.ld $(VERIFY_ISA_PY)
 	@mkdir -p $(dir $@)
 	$(HOST_LD_64) $(KERNEL_LDFLAGS) -o $@ $(KERNEL_ENTRY_OBJ) \
 		$(BUILD)/libk.a $(OBJ)/kernel/initrd.c.o
-	@$(MAKE) --no-print-directory verify-isa FILE=$@
+	@$(MAKE) --no-print-directory verify-isa PROFILE=kernel FILE=$@
 
 # Enforce the ISA policy in config.mk instead of trusting it.
 #
 # The -mno-sse/-mno-sse2/-mno-avx flags in KERNEL_CFLAGS are a request to the
 # compiler, not a guarantee: any -m flag appended after them wins, which is
 # exactly how -msse4.2 and then -mavx2 each got vector code into a build that
-# read as GPR-only. And a vector instruction in this kernel is not a slowdown,
-# it is a #UD -- the YMM/XMM state is never enabled through XCR0 on the kernel
-# entry path -- so the failure surfaces as a dead boot with no message.
+# read as GPR-only. Checking the linked output rather than the flags is what
+# makes this robust -- it does not care what order the flags are in, what a
+# future edit appends, or whether an inline asm block in a .S file slipped a
+# VEX encoding past the compiler entirely.
 #
-# Checking the linked output rather than the flags is what makes this robust.
-# It does not care what order the flags are in, what a future edit appends, or
-# whether an inline asm block in a .S file slipped a VEX encoding past the
-# compiler entirely. If one vector instruction reaches kernel.elf, the build
-# stops here, where the error names the instruction, instead of at boot, where
-# it does not.
+# So the rule is enforced in tools/verify_isa.py, on the linked artefact, and
+# it is run against *both* images with two different profiles.
 #
-# The list is the x86 vector and x87 state, plus the MMX registers. It is
-# matched against mnemonics only, which is the right granularity: a false
-# positive costs one investigation, a false negative costs the boot.
+#   kernel   build/kernel.elf must be GPR-only: no x87, no XMM, no YMM, no
+#            ZMM, no opmask, no XSAVE. fxsave/fxrstor are the two exemptions,
+#            because context.S defines fpu_save/fpu_restore on them and the
+#            scheduler calls them on every task switch.
 #
-# The pattern lives in a variable rather than inline because make expands $ in
-# recipes, and the regex is full of them. $$(...) would be needed everywhere and
-# makes the expression unreadable; a variable keeps it literal and lets the
-# recipe stay a single readable pipeline.
-VECTOR_MNEMONIC_RE := ^(v[a-z0-9]+|movdq[au]|movap[au]|movup[au]|padd[busw]|psub[busw]|pxor|pand|por|pcmpeq[bdw]|punpck[a-z]+|pshuf[dbw]|unpck[a-z]+|adds[sd]|subs[sd]|muls[sd]|divs[sd]|sqrts[sd]|comis[sd]|ucomis[sd]|cvt[a-z0-9]+|movs[sd]|andnp[sd]|andp[sd]|orp[sd]|xorp[sd]|maxs[sd]|mins[sd]|haddp[sd]|emms|ldmxcsr|stmxcsr|fxsave|fxrstor|fld|fst|fmul|fdiv|fadd|fsub|fabs|fsqrt|fucom|fxch|fil[de]|fist[pt]?)$$
-
-# Two instructions are exempt, and the exemption is exactly two.
+#   user     build/init.elf and build/hello.elf may use XMM and may not use
+#            anything wider. This is a second and deliberately weaker
+#            invocation, not a reuse of the kernel one, and the difference is
+#            the whole reason it is separate. The x86-64 baseline already
+#            provides SSE2, and FXSAVE *does* preserve the 128-bit state that
+#            legacy SSE uses: the image context.S saves is the legacy 512-byte
+#            one, x87 plus XMM0-XMM15 plus MXCSR. A legacy SSE instruction in
+#            userland is therefore carried across a preemption correctly. A
+#            VEX or AVX-512 instruction is not -- its upper halves are not in
+#            that image at all, so a preempted task loses them silently, with
+#            no fault and nothing in the log.
 #
-# fxsave and fxrstor appear in the kernel on purpose: context.S defines
-# fpu_save/fpu_restore, and the scheduler calls them on every task switch to
-# carry a task's FPU image across. They are hand-written asm, not compiler
-# output, and they are state-management rather than computation -- they move
-# 512 bytes without interpreting any of it. The loader enables what they need
-# (stage2_long.S clears CR0.EM, sets CR0.MP and CR4.OSFXSR unconditionally, and
-# ORs 0x7 into XCR0 when the CPU has AVX), so they execute rather than fault.
+# That second invocation is not redundant. USER_CFLAGS gained
+# -mno-avx -mno-avx2 -mno-fma -mno-f16c precisely because -march=x86-64-v3
+# would otherwise acquire AVX2 silently, and until now nothing checked the
+# result. `make verify-isa-test` is what keeps this honest; see
+# tests/isa/verify_isa_test.sh.
 #
-# Nothing else is exempt. A compiler-emitted fld or cvtsi2sd is exactly the bug
-# this check exists to catch, and allowing the whole x87 family to hide a
-# hand-written one would defeat the point.
-VECTOR_MNEMONIC_ALLOWED_RE := ^(fxsave|fxrstor)$$
+# The reason the two profiles exist at all is one sentence, and it is the
+# sentence the old failure message got wrong: fpu_save/fpu_restore in
+# context.S are FXSAVE/FXRSTOR, so any register state above 128 bits is
+# destroyed by the next task switch without announcing it. On a CPU that
+# reports AVX and OSXSAVE the loader sets XCR0 |= 7, so such an instruction
+# executes happily first. The tool's error message says exactly that.
+#
+# The tool is a prerequisite of the three linked images, not of the objects.
+# The gate reads the finished artefact, so a change to the gate has to
+# re-validate the artefacts that exist rather than wait for an unrelated
+# edit; it has nothing to say about how an object is compiled, so it must not
+# invalidate one. That is the same split the .d files make.
+# VERIFY_ISA_PY and VERIFY_ISA are defined up with BUILD_INPUTS, because
+# immediately-expanded (=) variables are read in order.
 
 .PHONY: verify-isa
 verify-isa:
-	@file=$${FILE:-$(BUILD)/kernel.elf}; \
-	 if [ ! -f "$$file" ]; then echo "verify-isa: $$file does not exist" >&2; exit 1; fi; \
-	 hits=$$(objdump -d "$$file" 2>/dev/null \
-	   | grep -oP '\t\K[a-z][a-z0-9]*' \
-	   | grep -E '$(VECTOR_MNEMONIC_RE)' \
-	   | grep -Ev '$(VECTOR_MNEMONIC_ALLOWED_RE)' \
-	   | sort | uniq -c | sort -rn); \
-	 if [ -n "$$hits" ]; then \
-	   echo "ERROR: vector/x87 instructions in $$file -- the kernel never" >&2; \
-	   echo "       enables XCR0, so each of these is a #UD at boot:" >&2; \
-	   echo "$$hits" | sed 's/^/         /' >&2; \
-	   exit 1; \
-	 fi; \
-	 echo "verify-isa: $$file is GPR-only (fxsave/fxrstor exempt: deliberate FPU context save)"
+	@if [ -z "$(PROFILE)" ]; then \
+	   echo "verify-isa: set PROFILE=kernel or PROFILE=user" >&2; exit 1; \
+	 fi
+	@python3 $(VERIFY_ISA_PY) --profile $(PROFILE) $${FILE:-$(BUILD)/kernel.elf}
+
+# The gate is the only thing standing between a flag typo and a kernel that
+# cannot boot, so it is tested. `make verify-isa-test` runs the classifier's
+# own self test (several hundred mnemonics, in both directions) and then
+# compiles real objects through both profiles with the real flag lists,
+# including the exact trap: KERNEL_CFLAGS with -msse2 appended, and
+# USER_CFLAGS with -march=x86-64-v3 appended. Both must be rejected.
+#
+# The flag strings go in as single arguments and are word-split inside the
+# script, which is what a make recipe does with them too. $(OUT) is under
+# $(BUILD) so `make clean` removes the probes.
+.PHONY: verify-isa-test
+verify-isa-test:
+	@sh tests/isa/verify_isa_test.sh "$(HOST_CC_64)" "$(VERIFY_ISA)" \
+		"$(KERNEL_CFLAGS)" "$(USER_CFLAGS)"
 
 # The image is a function of the four artifacts *and* of the script that lays
 # them out: disk.py owns the LBA assignments, the sector budget checks and the
@@ -294,7 +323,12 @@ KERNEL_VERSION_DEFS := -DKERNEL_VERSION=\"$(KERNEL_VERSION)\" \
                        -DKERNEL_BUILD_STAMP=\"$(KERNEL_BUILD_STAMP)\"
 
 .PHONY: all
-all: $(DISK)
+# verify-isa-test runs first so a broken gate is reported before the image is
+# assembled rather than after. It is cheap: a dozen small compiles into
+# $(BUILD)/verify-isa and nothing is read from the tree but the two flag
+# lists, so it costs a second and it is the only thing that notices a gate
+# which has quietly stopped recognising an instruction family.
+all: verify-isa-test $(DISK)
 	@echo "built $(DISK)"
 
 .PHONY: kernel
@@ -408,6 +442,8 @@ help:
 	@echo "make run-gdb    boot under QEMU with a GDB stub on :1234"
 	@echo "make deps       regenerate header dependency files"
 	@echo "make clean      remove build/"
+	@echo "make verify-isa PROFILE=kernel|user FILE=<elf>   run the ISA gate by hand"
+	@echo "make verify-isa-test          test the ISA gate itself"
 
 # Pull in the per-object header dependencies. Every pattern rule above writes
 # one next to its object, so this list is complete by construction and is

@@ -11,8 +11,14 @@
  *                because its bus address lines are wired that way. A driver
  *                asking for GFP_DMA must be served from here.
  *   ZONE_NORMAL  everything else that fits in 32 bits. The common case.
- *   ZONE_HIGH    above 4 GiB. Reachable through the direct map, and the only
- *                place allocations land on a machine with more than 4 GiB.
+ *   ZONE_HIGH    above 4 GiB. NOT reachable through the direct map: the map
+ *                backs only the low 4 GiB (DIRECT_MAP_BYTES, vmm.c), so a
+ *                consumer that phys_to_virt()s a ZONE_HIGH frame faults. It is
+ *                populated only on a machine with more than 4 GiB, and is the
+ *                place allocations land there, so any of the callers that
+ *                memsets or walks what it gets back (GFP_ZERO's memset,
+ *                pt_alloc_zeroed, slab_new, clone_table) is wrong above 4 GiB.
+ *                Reachable via the kernel window, or not at all.
  *
  * Each zone has its own free lists so a DMA allocation can never consume memory
  * a normal allocation would have used.

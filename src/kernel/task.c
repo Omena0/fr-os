@@ -189,6 +189,37 @@ void task_inherit(struct task *child, struct task *parent)
 	child->cred = parent->cred;
 	cpumask_copy(&child->cpumask, &parent->cpumask);
 	child->affinity_mask = parent->affinity_mask;
+	/*
+	 * A fork duplicates the address space, so the child gets its own copy of
+	 * the TLS block at the same address the parent's is at, and the same
+	 * thread pointer describes it. Copying the field rather than the
+	 * register is the point: the register holds whatever the *parent* last
+	 * installed, which is the same number here, but reading it would make
+	 * the child's state depend on whether the parent had run a syscall
+	 * since it was last switched to.
+	 */
+	child->fs_base = parent->fs_base;
+}
+
+/*
+ * The two halves of moving a thread pointer between the register and the task.
+ *
+ * MSR_FS_BASE is per-CPU and a thread pointer is per-task, so the scheduler
+ * calls these either side of a switch, next to the CR3 and FPU handling it
+ * already does there. Keeping them here rather than in sched.c is what lets
+ * the ring-3 entry path in interrupt_entry.S use the same one, instead of
+ * growing a second copy of the write.
+ */
+void task_load_fs_base(struct task *t)
+{
+	if (t)
+		wrmsr(MSR_FS_BASE, t->fs_base);
+}
+
+void task_save_fs_base(struct task *t)
+{
+	if (t)
+		t->fs_base = rdmsr(MSR_FS_BASE);
 }
 
 /*

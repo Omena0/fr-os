@@ -50,11 +50,33 @@ panic_regs:
 	movq	%r14, 112(%rdi)
 	movq	%r15, 120(%rdi)
 
-	/* CS is not readable with a plain MOV in 64-bit mode; pushfq/popq give
-	 * RFLAGS directly, and CS is recorded by the caller-side stub. */
+	/*
+	 * RFLAGS, then the control registers.
+	 *
+	 * struct panic_state puts rip at 128, cs at 136, rflags at 144, cr2 at
+	 * 152, cr3 at 160, cr4 at 168, cpu_id at 172.
+	 *
+	 * These offsets were all one slot low. RFLAGS went to 136 -- the `cs`
+	 * slot -- and then CR2, CR3 and CR4 went to 144, 152 and 160, which are
+	 * `rflags`, `cr2` and `cr3`. So `cs` printed RFLAGS, `rflags` printed
+	 * CR2, `cr2` printed CR3, `cr3` printed CR4, and `cr4` was never written
+	 * at all. Every field from 136 upward was one register out, and because
+	 * all of them are plausible-looking 64-bit values, nothing about the
+	 * output looks wrong -- a panic report that names the wrong registers is
+	 * worse than one that omits them, because it is believed.
+	 *
+	 * `cr4` is written to 168 and `cpu_id` to 172; `movl $0, 172(%rdi)` below
+	 * clears it for the caller.
+	 *
+	 * CS is deliberately left alone. It has no MOV-source form in 64-bit mode
+	 * and `push cs` is not encodable either, so this function cannot read it;
+	 * the caller-side stub that received the exception knows it and must
+	 * store it at 136 before calling. Nothing does that today, so `cs` reads
+	 * as whatever was in the buffer -- do not believe it.
+	 */
 	pushfq
 	popq	%rax
-	movq	%rax, 136(%rdi)
+	movq	%rax, 144(%rdi)
 
 	/* RDI itself is captured last, after the argument register is no
 	 * longer needed to address the output buffer. */
@@ -65,13 +87,13 @@ panic_regs:
 	 * register first. RAX is free here: its previous uses have all been
 	 * stored, and this function returns nothing. */
 	movq	%cr2, %rax
-	movq	%rax, 144(%rdi)
-	movq	%cr3, %rax
 	movq	%rax, 152(%rdi)
-	movq	%cr4, %rax
+	movq	%cr3, %rax
 	movq	%rax, 160(%rdi)
+	movq	%cr4, %rax
+	movq	%rax, 168(%rdi)
 
-	movl	$0, 168(%rdi)		/* cpu_id, filled by the caller */
+	movl	$0, 172(%rdi)		/* cpu_id, filled by the caller */
 	ret
 	.size panic_regs, . - panic_regs
 

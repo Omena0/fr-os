@@ -68,6 +68,7 @@
 #define SYS_clock_gettime 14u
 #define SYS_getuid       15u
 #define SYS_getgid       16u
+#define SYS_arch_prctl   17u
 
 /* Memory management. */
 #define SYS_mmap         32u
@@ -75,6 +76,7 @@
 #define SYS_mprotect     34u
 #define SYS_brk          35u
 #define SYS_madvise      36u
+#define SYS_get_tls_base 37u
 
 /* Files. */
 #define SYS_open         64u
@@ -104,6 +106,52 @@
  * consulting the dispatch table. Bounds-checking this is what keeps a garbage
  * RAX from becoming an arbitrary function-pointer call. */
 #define SYSCALL_MAX     288u
+
+/* --------------------------------------------- thread-local storage ------- */
+
+/*
+ * arch_prctl(code, addr) — per-thread register control.
+ *
+ * The code values are Linux's, deliberately: a libc that already knows how to
+ * establish a thread pointer for a static x86-64 binary (glibc's
+ * __libc_setup_tls, and anything ported from it) calls exactly this and works
+ * against this kernel unmodified. The numbering scheme above does not apply to
+ * the second argument, which is an operation selector from a different
+ * namespace, and inventing private values for it would buy nothing but a
+ * porting exercise.
+ */
+#define ARCH_SET_GS  0x1001
+#define ARCH_SET_FS  0x1002
+#define ARCH_GET_FS  0x1003
+#define ARCH_GET_GS  0x1004
+
+/*
+ * SYS_get_tls_base() — the thread pointer this process's image was loaded
+ * with, or 0 if the image has no PT_TLS.
+ *
+ * It exists because of how a static image is brought up here. On Linux the
+ * initial thread pointer is computed by whatever sets the process up: the
+ * dynamic linker for a shared object, and for a static binary the startup code
+ * itself, which finds PT_TLS in its own program headers. This kernel has no
+ * dynamic linker, and the program headers a process would read are in the
+ * address space the kernel is in the middle of constructing — so the answer is
+ * asked for rather than derived.
+ *
+ * The value is the *end* of the TLS block, not its start, and that is not a
+ * choice this ABI gets to make. A local-exec `__thread` access is a fixed
+ * displacement from FS (measured on the artefact: a variable at offset 0 of a
+ * 16-byte block compiles to `mov %fs:-16`), so the thread pointer has to be
+ * the address one past the last byte for every access to land where the
+ * linker put the variable. See the comment on `tls_ptr` in kernel/include/vmm.h.
+ *
+ * A process that calls this and gets 0 has no thread-local storage, and any
+ * `__thread` access in it is a null-pointer dereference. libc's startup turns
+ * that into a diagnostic and refuses to run rather than faulting.
+ *
+ * This is a query, not a setter: the value belongs to the image, the same way
+ * e_entry does, and a process that wants a different thread pointer for a
+ * later thread says so with arch_prctl(ARCH_SET_FS).
+ */
 
 /* ------------------------------------------------------------- structures -- */
 

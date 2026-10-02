@@ -154,6 +154,25 @@ struct address_space {
 	virt_addr_t start_brk, brk;
 	virt_addr_t stack_top;
 
+	/*
+	 * The initial thread pointer, from the image's PT_TLS: `tls_ptr` is the
+	 * value the calling task must have in MSR_FS_BASE, and `tls_ptr -
+	 * tls_size` is the first byte of the block it addresses. Zero means the
+	 * image has no PT_TLS, which is a fact about the image rather than a
+	 * missing value, so a caller can tell "no thread-local storage" from
+	 * "a TLS block at address 0" — the latter is not representable, since
+	 * the loader rejects any p_vaddr that would put it there.
+	 *
+	 * It lives on the address space rather than on the task because the ELF
+	 * loader is handed an mm and a task, and only the mm belongs to the
+	 * image: a task that execs gets a new address space and with it a new
+	 * TLS block, and nothing copies this field across the exec. It also
+	 * means the block needs no separate lifetime -- it is an ordinary VMA in
+	 * this same list, so mm_put() frees it with everything else.
+	 */
+	virt_addr_t tls_ptr;
+	virt_addr_t tls_size;
+
 	/* Randomised mmap region base, per ASLR policy. */
 	virt_addr_t mmap_base;
 	virt_addr_t mmap_next;
@@ -268,8 +287,32 @@ phys_addr_t vmm_unmap_page(phys_addr_t pgd, virt_addr_t virt);
  * Translate a virtual address through a PML4. Returns the physical address of
  * the frame and, through `leaf`, a pointer to the leaf PTE so the caller can
  * inspect or modify the flags.
+ *
+ * CAUTION: 0 means "not translated", and it is indistinguishable from a
+ * legitimate mapping of physical frame 0. Nothing in this kernel maps frame 0
+ * today, so the two have not yet collided -- but the answer is a sentinel, not
+ * a value, and every caller that treats it as one is relying on that remaining
+ * true. `vmm_lookup_page()` says what it means; prefer it for new code and
+ * migrate callers when convenient.
  */
 phys_addr_t vmm_translate(phys_addr_t pgd, virt_addr_t virt, uint64_t **leaf);
+
+/*
+ * The unambiguous form: returns 0 and sets *present to 0 when the address does
+ * not resolve. `*phys` is only meaningful when *present is 1.
+ *
+ * The distinction matters at the privilege boundary. A process PML4 carries the
+ * direct map at PML4[256], so a *user* address such as 0x800000001000 walks
+ * successfully to physical 0x1000 -- and a caller using vmm_translate() to
+ * decide "is this address mine?" would read the physical address, not the
+ * presence flag, and could be misled into treating a kernel frame as a valid
+ * user one. Nothing does that today, and `process.c`'s user_page() and
+ * user_memory_write() now bound-check the user half before calling anything --
+ * that check is the only thing standing between a user-supplied address and the
+ * direct map, so it must stay.
+ */
+int vmm_lookup_page(phys_addr_t pgd, virt_addr_t virt, phys_addr_t *phys,
+		    uint64_t **leaf);
 
 /* Populate all leaf entries in a large-page-aligned range. */
 int vmm_map_large(phys_addr_t pgd, virt_addr_t virt, phys_addr_t phys,
