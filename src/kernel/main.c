@@ -261,11 +261,8 @@ void kmain(uint64_t bootinfo_phys)
 	 * fault handler, before it can report anything.
 	 */
 	gdt_reload(0);
-	serial_puts("[-> tss_set_kernel_stack]\r\n");
 	tss_set_kernel_stack((void *)__kernel_stack_top);
-	serial_puts("[-> exceptions_init]\r\n");
 	exceptions_init();
-	serial_puts("[-> idt_init]\r\n");
 	idt_init();
 
 	/*
@@ -273,7 +270,6 @@ void kmain(uint64_t bootinfo_phys)
 	 * reach a SYSCALL instruction that has no dispatcher behind it, which
 	 * would #UD in user space with no kernel handler to explain it.
 	 */
-	serial_puts("[-> syscall_init]\r\n");
 	syscall_init();
 
 	/*
@@ -295,7 +291,6 @@ void kmain(uint64_t bootinfo_phys)
 	 * scheduler's per-CPU state, then PID 1. Anything that runs before
 	 * sched_init() is running with per_cpu(current) unset.
 	 */
-	serial_puts("[-> sched_init]\r\n");
 	sched_init();
 
 	/*
@@ -304,14 +299,12 @@ void kmain(uint64_t bootinfo_phys)
 	 * task and the kernel stops being a boot sequence. Anything belonging to
 	 * user space that is not reachable later belongs here.
 	 */
-	serial_puts("[-> process_create_init]\r\n");
 	struct task *init = process_create_init();
 	if (!init)
 		panic("could not create the init process; there is nothing to run");
 
 	kprintf("init: pid %u loaded, entering the scheduler\n", init->pid);
 
-	serial_puts("[-> sched_start]\r\n");
 	sched_start();
 
 	/* Unreachable: reaching it means the idle task was torn down, leaving no
