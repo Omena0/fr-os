@@ -384,6 +384,45 @@ is fixed, the controller is not in a state where each key raises its own
 interrupt. Start at `ps2_write_port()` / `ps2_expect_ack()` in `tty.c` and
 establish which command in the sequence loses the ack.
 
+**An intermittent failure, separate from the above and not yet explained.**
+Roughly one KVM run in four dies like this, and TCG has not been observed to do
+it at all in the runs taken since:
+
+```
+#EXC #PF  vector=14 cs=0x0008 rpl=0 rip=0xffffffff8000f10a err=0x2 -> kernel panic
+cr2 0x0000000000000000
+```
+
+`0xffffffff8000f10a` is `ring_push()` at `tty.c:87`, `r->buf[r->head] = src[i]`,
+with `cr2 = 0` -- and it happens on init's *first* write, before the banner.
+`out_ring.buf` is NULL there. But `tty_init()` demonstrably ran first: the log
+carries `tty: rings 4096 bytes each, 8042 up` at 577 ms, and the assignment
+`out_ring.buf = out_storage` is a few lines above that klog call.
+
+So a `.bss` object that was written and then read back as its initial value.
+`out_ring`'s initialiser is all zeros, so it lives in `.bss` and there is nothing
+about the store that could be reordered past a following call.
+
+Ruled out so far:
+- **Not a race on the ring itself.** `tty_write()` and `tty_drain()` both take
+  `out_lock` via `spinlock_irqsave()`, and the drain releases it before calling
+  `console_write_raw()`. `ring_push()` cannot write out of bounds: `n` is clamped
+  to `TTY_RING_CAP - r->count` and `head` wraps at the capacity, so the only way
+  to overflow is `r->count > TTY_RING_CAP`, which nothing in either path can
+  produce.
+- **Not a disagreement between the fill's address and the PTE's.**
+  `page_to_phys()` is `(page - page_array) << PAGE_SHIFT` and `phys_to_virt()` is
+  `PHYS_DIRECT_MAP + phys`, and the PTE stores the same `page_to_phys()` result,
+  so the demand fill's `memset` and the mapping agree.
+
+The interesting remaining suspect is something zeroing 4 KiB of physical memory
+that it should not: the demand fill does `memset(phys_to_virt(frame), 0, 4096)`
+once per fault, and `out_ring` sitting in `.bss` is exactly the kind of thing a
+stray 4 KiB zeroing would erase while leaving everything around it working. That
+is a hypothesis, not a finding. The measurement to make it a finding: log
+`page_to_phys()` alongside every demand fill, and check the frame is one the
+allocator believes is free, then look for a second writer.
+
 Two things already fixed here and worth not re-breaking:
 - `tty_read()` must enable interrupts across its `hlt` with **`sti`**, not with
   `irq_restore()` given flags whose IF is clear. `irq_restore()` only ever
