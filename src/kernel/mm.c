@@ -231,6 +231,34 @@ static phys_addr_t kernel_pgd_from_cr3(void)
 	return read_cr3() & ~0xFFFULL;
 }
 
+/*
+ * The PML4 entries every address space shares with the kernel's, and the only
+ * three it has:
+ *
+ *   256  the direct map, 0x0000800000000000
+ *   384  vmalloc,       0x0000c00000000000  (VMALLOC_AREA)
+ *   511  the kernel window, 0x0000ff8000000000
+ *
+ * They are shared, not copied: both address spaces point at the same PDPT
+ * pages, which is what makes creating an address space cheap. They must also
+ * be shared for correctness, or the kernel loses part of itself the moment CR3
+ * is switched -- see mm_create() for what that cost.
+ *
+ * One list, used by both the copy and the teardown. Two separate literals in
+ * two separate functions is how the third one gets missed: 256 and 511 were
+ * right for the direct map and the kernel window, and 384 was dropped, so every
+ * vmalloc address went unmapped in every process.
+ */
+static const unsigned mm_shared_pml4[] = { 256, 384, 511 };
+
+static bool pml4_is_shared(unsigned i)
+{
+	for (unsigned n = 0; n < sizeof(mm_shared_pml4) / sizeof(*mm_shared_pml4); n++)
+		if (mm_shared_pml4[n] == i)
+			return true;
+	return false;
+}
+
 struct address_space *mm_create(void)
 {
 	phys_addr_t kernel_pgd = kernel_pgd_from_cr3();
@@ -249,22 +277,34 @@ struct address_space *mm_create(void)
 	}
 
 	/*
-	 * Two entries and nothing else. 256 is the direct map, which every piece
-	 * of kernel code reaches through phys_to_virt(); 511 is the kernel's
-	 * negative canonical half, which is where the image, vmalloc and the
-	 * kernel stacks live. Everything between them is the user half, and a new
-	 * address space must start with none of it mapped — an address space that
-	 * inherited the parent's user mappings would make every VMA a description
-	 * of something that may or may not still be there.
+	 * Three entries and nothing else: the direct map, vmalloc, and the
+	 * kernel's negative canonical half. Everything between them is the user
+	 * half, and a new address space must start with none of it mapped -- an
+	 * address space that inherited the parent's user mappings would make
+	 * every VMA a description of something that may or may not still be
+	 * there.
 	 *
-	 * The entries are shared, not copied: both address spaces point at the
-	 * same PDPT pages. That is the whole reason the split is cheap, and it is
-	 * also why the teardown below has to leave indices 256 and 511 alone.
+	 * 384 was missing, and missing it costs the kernel its own memory. Every
+	 * task struct, every kernel stack and every kmalloc() over 4096 lives
+	 * at VMALLOC_AREA, which is PML4 index 384. An address space without it
+	 * is fine right up until CR3 is switched, and then the first thing the
+	 * scheduler does -- compare prev->mm with next->mm, or push a return
+	 * address on a task's kernel stack -- lands on an unmapped page and
+	 * faults. Measured by walking the live table: the kernel PGD has exactly
+	 * three populated PML4 entries, 256/384/511, and the process PGD had two.
+	 *
+	 * Note what that failure looks like: the fault address is a perfectly
+	 * ordinary kernel stack, the page tables are valid, and nothing about the
+	 * page that faulted is unusual. The missing entry is in a fourth-level
+	 * table belonging to a different PGD than the one being walked.
+	 *
+	 * The entries are shared, not copied; see mm_shared_pml4 above, which is
+	 * also why the teardown must leave them alone.
 	 */
 	src = (uint64_t *)phys_to_virt(kernel_pgd);
 	dst = (uint64_t *)phys_to_virt(pgd);
-	dst[256] = src[256];
-	dst[511] = src[511];
+	for (unsigned n = 0; n < sizeof(mm_shared_pml4) / sizeof(*mm_shared_pml4); n++)
+		dst[mm_shared_pml4[n]] = src[mm_shared_pml4[n]];
 
 	memset(mm, 0, sizeof(*mm));
 	mm->pgd = pgd;
@@ -356,7 +396,11 @@ static void mm_free_page_tables(phys_addr_t pgd)
 	for (unsigned i = 0; i < 512; i++) {
 		uint64_t e = entries[i];
 
-		if (i == 256 || i == 511)
+		/* A shared PDPT belongs to the kernel PGD as well. Freeing it here
+		 * would unmap the direct map, vmalloc or the kernel window out from
+		 * under every other address space, including the one freeing this
+		 * one. */
+		if (pml4_is_shared(i))
 			continue;
 		if (!(e & PTE_PRESENT) || (e & PTE_PS))
 			continue;
