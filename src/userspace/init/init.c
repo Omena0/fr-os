@@ -29,12 +29,15 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
 #include <version.h>
 #include <sys/auxv.h>
 #include <uapi/syscall.h>
+
+extern char **environ;
 
 #define TAG FR_INIT_NAME ": "
 
@@ -326,6 +329,7 @@ static void cmd_help(void)
 	say("  clear                clear the screen and home the cursor");
 	say("  lscpu                page size, cpu count, getauxval() entries");
 	say("  strlen <string>      print the length of <string>");
+	say("  run <program> [args] exec a program from the initrd");
 	say("  exit                 explain that reboot is not implemented yet");
 }
 
@@ -431,6 +435,31 @@ static int dispatch(int argc, char **argv)
 		} else {
 			say("strlen: %lu", (unsigned long)strlen(argv[2]));
 		}
+	} else if (strcmp(argv[1], "run") == 0) {
+		/*
+		 * Hand the process over. execve only returns on failure, so
+		 * anything printed after this point is a diagnostic about why --
+		 * there is deliberately no success path back here, because a
+		 * successful exec never comes back.
+		 */
+		if (argc < 3) {
+			say("run: expected a program name");
+			say("     the initrd carries: init, hello");
+			return 0;
+		}
+
+		char *child_argv[8];
+		int child_argc = 0;
+
+		child_argv[child_argc++] = argv[2];
+		for (int a = 3; a < argc && child_argc < 7; a++)
+			child_argv[child_argc++] = argv[a];
+		child_argv[child_argc] = NULL;
+
+		execve(argv[2], child_argv, environ);
+
+		say("run: execve(\"%s\") failed: %s", argv[2], strerror(errno));
+		say("     errno %d", errno);
 	} else if (strcmp(argv[1], "exit") == 0) {
 		say("exit: reboot syscall is not implemented yet");
 		say("exit: the kernel exposes no power-management interface");
