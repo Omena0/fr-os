@@ -555,6 +555,41 @@ fatal:
 #define PIC2_VECTOR_BASE 0x28
 
 /*
+ * The two halves of the same identity, asserted against each other.
+ *
+ * `vector == PIC1_VECTOR_BASE + irq` is what the 8259s actually do once ICW2 has
+ * been written, and every IRQ constant in interrupt.h is derived from
+ * VECTOR_IRQ_BASE. If those two bases ever disagree, every handler in the tree
+ * is installed one vector away from the interrupt that is meant to reach it,
+ * and the symptom is not a fault: the interrupt is delivered, lands on a vector
+ * with a valid gate, and runs whatever is registered there. That is how a
+ * keyboard interrupt came to run `pit_irq`.
+ *
+ * Nothing in the source can catch that, because both sides are internally
+ * consistent -- which is exactly why it survived being "fixed" repeatedly.
+ */
+_Static_assert(PIC1_VECTOR_BASE == VECTOR_IRQ_BASE,
+	       "the 8259 master's ICW2 offset and VECTOR_IRQ_BASE must be the same "
+	       "number, or vector != base + irq and every IRQ handler is on the "
+		       "wrong vector");
+_Static_assert(PIC2_VECTOR_BASE == VECTOR_IRQ_SLAVE_FIRST,
+	       "the slave's ICW2 offset must be VECTOR_IRQ_BASE + 8: IRQ8 is the "
+		       "first line the slave raises, and pic_eoi()'s master/slave "
+		       "split is written in terms of it");
+_Static_assert(PIC2_VECTOR_BASE == PIC1_VECTOR_BASE + 8,
+	       "the slave must be remapped to 8 above the master, or the cascade "
+		       "identity written in ICW3 is meaningless");
+
+/* IRQ2 on the master is the cascade: it is wired, not a device. It has no
+ * handler, must never be unmasked, and must never be acknowledged directly --
+ * a slave interrupt is acknowledged on the slave and then on the master, which
+ * clears the master's in-service bit for IRQ2 as a side effect. Acknowledging
+ * "IRQ2" on its own, which is what deriving the IRQ number wrongly from the
+ * vector does, clears the cascade's in-service bit while the slave's stays set
+ * and the controller stops raising that line again. */
+#define PIC_IRQ_CASCADE 2
+
+/*
  * One remap per boot, enforced here rather than at the call sites.
  *
  * tty.c keeps its own `pic_remapped` bool with a comment saying the guard has
@@ -757,14 +792,104 @@ u64 pit_tick_count(void)
 
 void pic_eoi(uint8_t vector)
 {
+	uint8_t irq;
+
 	/*
-	 * A cascaded interrupt is delivered to the master, so the slave's
-	 * in-service bit is never cleared by acknowledging the master. The
-	 * vector range is the only reliable way to tell the two apart.
+	 * Anything outside the remapped range has no 8259 behind it. Acknowledge
+	 * nothing rather than guess: an unconditional master EOI here would clear
+	 * whatever in-service bit happened to be set, which on a non-8259 vector
+	 * means clearing an unrelated device's.
 	 */
-	if (vector >= PIC2_VECTOR_BASE && vector < PIC2_VECTOR_BASE + 8)
+	if (vector < VECTOR_IRQ_BASE || vector >= VECTOR_IRQ_MAX)
+		return;
+
+	/*
+	 * The one derivation in this file, and the one the off-by-one broke.
+	 *
+	 * The 8259s raise `vector == VECTOR_IRQ_BASE + irq`, so the IRQ number is
+	 * recovered by subtraction and nothing else. The code this replaced tested
+	 * the vector against PIC2_VECTOR_BASE directly, which is the same test
+	 * only while the two bases agree -- and the assert above is what now makes
+	 * them agree rather than leaving it to be true.
+	 */
+	irq = (uint8_t)(vector - VECTOR_IRQ_BASE);
+
+	/*
+	 * IRQ2 is the cascade, not a device. It cannot arrive here as an
+	 * interrupt of its own: a slave interrupt is delivered to the *master* as
+	 * IRQ2's vector only in the sense that the master's in-service bit for
+	 * IRQ2 is what the cascade sets, and the vector the CPU takes is the
+	 * slave's (IRQ8-15, above the boundary). If one ever does arrive,
+	 * acknowledging it on its own leaves the slave's in-service bit set and
+	 * the line stops being raised again, so refuse loudly instead.
+	 */
+	ASSERT_MSG(irq != PIC_IRQ_CASCADE,
+		   "pic_eoi: vector %u is the cascade (IRQ2); a slave interrupt is "
+		   "acknowledged on the slave and then on the master, never on the "
+		   "cascade alone",
+		   (unsigned)vector);
+
+	/*
+	 * Master/slave boundary, at IRQ8. Both lines are acknowledged for a slave
+	 * interrupt, in that order: the slave first so its in-service bit is clear
+	 * before the master's cascade bit goes, and a master EOI alone would clear
+	 * the master's IRQ2 bit while the slave still believes IRQ8-15 is being
+	 * serviced.
+	 */
+	if (irq >= 8) {
 		outb(PIC2_CMD, PIC_EOI);
+		outb(PIC1_CMD, PIC_EOI);
+		return;
+	}
+
 	outb(PIC1_CMD, PIC_EOI);
+}
+
+/*
+ * The mask register as QEMU's `info pic` would report it, so a boot log can be
+ * compared against the controller's own state rather than against intent.
+ *
+ * Both bytes in one u16, master in the low half. Read rather than remembered:
+ * a cached copy of the mask is a claim about the hardware, and this file's
+ * entire history is claims about the hardware being wrong.
+ */
+u16 pic_mask_state(void)
+{
+	return (u16)((uint16_t)inb(PIC1_DATA) | ((uint16_t)inb(PIC2_DATA) << 8));
+}
+
+/*
+ * Which remapped lines are unmasked, and whether each has a handler.
+ *
+ * This exists because the question "which lines can actually fire?" had no
+ * answer anywhere in the tree, and answering it by reading the source is exactly
+ * the mistake that produced the off-by-one: the source says what was intended,
+ * not what is enabled. An unmasked line with no handler behind it is not a
+ * cosmetic problem -- it fires forever, spends the machine's entire life in
+ * interrupt entry, and is indistinguishable from a hang.
+ *
+ * `claimed` rather than `handlers`, because idt_init() fills every vector with
+ * the do-nothing handler. Every line therefore *has* a handler; the question is
+ * whether a subsystem has claimed it.
+ */
+void pic_report_lines(void)
+{
+	unsigned irq;
+
+	for (irq = 0; irq < PIC_IRQ_COUNT; irq++) {
+		unsigned vector = VECTOR_IRQ_BASE + irq;
+		bool masked = (pic_mask_state() >> irq) & 1;
+
+		/*
+		 * The cascade is reported for completeness and is expected to be
+		 * masked. It is wired to the slave and has no device behind it;
+		 * unmasking it would ask for an interrupt that cannot exist.
+		 */
+		klog(KLOG_INFO, "pic: irq %2u vector %3u %s%s%s\n", irq, vector,
+		     masked ? "masked" : "UNMASKED",
+		     claimed[vector] ? " claimed" : " unclaimed",
+		     irq == PIC_IRQ_CASCADE ? " (cascade, must stay masked)" : "");
+	}
 }
 
 /* ------------------------------------------------- dispatch --------------- */

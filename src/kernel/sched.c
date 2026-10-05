@@ -252,8 +252,63 @@ static __noreturn void idle_thread(void *arg)
 		 * to make something runnable. The tick wakes the CPU and
 		 * sched_tick() re-checks, so a wakeup cannot be missed by
 		 * having gone to sleep over it.
+		 *
+		 * IF must be set across the hlt. `hlt` halts until an
+		 * interrupt is *pending and unmasked*; with IF clear the CPU
+		 * wakes for nothing and the halt is permanent, which is what a
+		 * halted CPU with a live PIT underneath it must never be.
+		 *
+		 * Measured, and this is the whole reason the tree's timer had
+		 * never ticked. With `hlt()` alone here, the CPU sat at
+		 * RIP=0xffffffff8000bf76 with RFLAGS=0x46 -- IF clear -- while
+		 * `info pic` reported `pic0: irr=03 imr=fc isr=00`: IRQ0 pending,
+		 * IRQ0 unmasked, nothing in service. An interrupt that is
+		 * pending, unmasked and never delivered is only ever explained
+		 * by IF, and forcing IF on at that exact point under gdb made
+		 * `pit_irq` fire immediately on vector 32 with no other change.
+		 * Nothing in the tree had ever executed `sti`: `kmain` clears IF
+		 * before gdt_reload and never sets it again, every syscall
+		 * entry clears it, and irq_restore() only ever *enables*, so
+		 * it cannot restore a state that was never set.
+		 *
+		 * The re-enable is scoped to the halt rather than done once in
+		 * kmain because every path into this loop arrives with IF clear
+		 * -- from sched_block_current() under a syscall, or from
+		 * schedule() under a spinlock -- and a single global `sti`
+		 * would be undone by the next irq_save(). What matters is that
+		 * the CPU is interruptible while it is idle, which is the only
+		 * place this kernel can afford an interrupt today.
+		 *
+		 * `sti` and `hlt` are one asm block, and that is not a style
+		 * choice. Written as C the compiler is free to sink the `sti` past
+		 * the `hlt`, because `hlt` stops *delivery* and does not itself
+		 * change IF, so on GCC's model the two are reorderable. It also
+		 * sees a second, conditional `sti` reachable through
+		 * `irq_restore(flags)` and folds the two together.
+		 *
+		 * It did exactly that. The compiled idle loop is:
+		 *
+		 *     hlt
+		 *     test $0x2,%ah        <- bit 1 of AH, a general register
+		 *     je   skip
+		 *     sti
+		 *   skip:
+		 *
+		 * so the halt happens with IF still clear, and the `sti` that
+		 * would have rescued it is both downstream of the halt and gated
+		 * on a register that has nothing to do with the interrupt flag.
+		 * The machine stops for ever with a pending, unmasked interrupt
+		 * sitting on the PIC -- measured: RFLAGS=0x246 with HLT=1,
+		 * `pic0: irr=12 isr=01`, IRQ0 and IRQ4 both pending, neither
+		 * delivered, on every sample.
+		 *
+		 * One `asm volatile` block is opaque to the scheduler, so the two
+		 * instructions retire in the order written. There is no way to
+		 * express "halt with interrupts enabled" more weakly than this and
+		 * still have it mean that.
 		 */
-		hlt();
+		__asm__ volatile("sti; hlt" ::: "memory");
+
 		idle_ticks++;
 		per_cpu(idle_ticks)++;
 	}

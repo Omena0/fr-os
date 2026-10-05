@@ -59,8 +59,71 @@
 #define VECTOR_IRQ_CASCADE            34	/* IRQ2 */
 #define VECTOR_IRQ_COM2               35	/* IRQ3 */
 #define VECTOR_IRQ_COM1               36	/* IRQ4 */
-#define VECTOR_IRQ_RTC                37	/* IRQ6 on a PC; IRQ5 is LPT2 */
+#define VECTOR_IRQ_PARALLEL           37	/* IRQ5, LPT2 or primary IDE */
+#define VECTOR_IRQ_FLOPPY             38	/* IRQ6, floppy controller */
+#define VECTOR_IRQ_RTC                40	/* IRQ8, CMOS/RTC -- the first
+						 * line on the *slave*, so
+						 * this is also the
+						 * master/slave boundary
+						 * IRQ2 == VECTOR_IRQ_MAX */
 #define VECTOR_IRQ_MAX                48
+
+/*
+ * The master/slave boundary, named so that both sides of it can be asserted
+ * against the same constant. IRQ 0-7 arrive on the master at
+ * VECTOR_IRQ_BASE + 0..7; IRQ 8-15 arrive on the slave at VECTOR_IRQ_BASE + 8..15.
+ * pic_eoi() branches on exactly this split, so it is the one boundary where a
+ * wrong answer acknowledges the wrong controller.
+ */
+#define VECTOR_IRQ_SLAVE_FIRST  (VECTOR_IRQ_BASE + 8)
+#define PIC_IRQ_COUNT           16
+
+/*
+ * Every constant above is `VECTOR_IRQ_BASE + irq`, and the whole block was once
+ * one higher than that for every line -- the off-by-one this file's neighbours
+ * have been rewritten around three times. The values are asserted rather than
+ * derived at the use site because the use sites are exactly where a silent slip
+ * is invisible: a handler installed one vector above the one the controller
+ * raises produces no fault, no diagnostic, and an interrupt that silently runs
+ * somebody else's handler.
+ *
+ * The 8259 remap in idt.c is the other half of the pair, and asserts the same
+ * identity from its side (PIC1_VECTOR_BASE == VECTOR_IRQ_BASE). Between the two
+ * sets a change to either end that is not a change to both fails the build.
+ */
+_Static_assert(VECTOR_IRQ_TIMER    == VECTOR_IRQ_BASE + 0,
+	       "IRQ0 must be VECTOR_IRQ_BASE + 0: the 8259 master is remapped to "
+	       "PIC1_VECTOR_BASE, so vector == base + irq with nothing in between");
+_Static_assert(VECTOR_IRQ_KEYBOARD == VECTOR_IRQ_BASE + 1, "IRQ1 is off by one");
+_Static_assert(VECTOR_IRQ_CASCADE  == VECTOR_IRQ_BASE + 2,
+	       "IRQ2 is the cascade and is never acknowledged directly");
+_Static_assert(VECTOR_IRQ_COM2     == VECTOR_IRQ_BASE + 3, "IRQ3 is off by one");
+_Static_assert(VECTOR_IRQ_COM1     == VECTOR_IRQ_BASE + 4, "IRQ4 is off by one");
+_Static_assert(VECTOR_IRQ_PARALLEL == VECTOR_IRQ_BASE + 5, "IRQ5 is off by one");
+_Static_assert(VECTOR_IRQ_FLOPPY   == VECTOR_IRQ_BASE + 6, "IRQ6 is off by one");
+
+/*
+ * `VECTOR_IRQ_RTC` was 37 with the comment "IRQ6 on a PC; IRQ5 is LPT2". Both
+ * halves of that were wrong, and the value contradicted the comment it was
+ * carrying: 37 is VECTOR_IRQ_BASE + 5, i.e. IRQ5, which is exactly the LPT2 the
+ * comment says it is not. The AT RTC/CMOS line is IRQ8, on the slave.
+ *
+ * Nothing used the constant, so nothing was delivered to the wrong vector by
+ * this. It is corrected because the alternative is a name and a value that
+ * disagree, which is the condition the off-by-one lived in for a day, and the
+ * assert below is what noticed.
+ */
+_Static_assert(VECTOR_IRQ_RTC == VECTOR_IRQ_BASE + 8,
+	       "the CMOS/RTC line is IRQ8 on AT hardware, which is the first line "
+	       "on the slave; 37 is IRQ5 (LPT2) and the old comment claimed 38 "
+		       "(floppy), so the constant and its comment disagreed");
+_Static_assert(VECTOR_IRQ_RTC == VECTOR_IRQ_SLAVE_FIRST,
+	       "IRQ8 is the first slave line, so pic_eoi()'s master/slave split "
+		       "must fall exactly at VECTOR_IRQ_RTC");
+_Static_assert(VECTOR_IRQ_MAX == VECTOR_IRQ_BASE + PIC_IRQ_COUNT,
+	       "VECTOR_IRQ_MAX must cover all 16 lines the two 8259s can raise, "
+	       "or interrupt_dispatch() will leave a real interrupt unacknowledged "
+	       "and the controller stops raising it");
 
 /* The highest vector for which interrupt_entry.S generates a stub. Everything
  * from here to 255 has a gate but no stub, and a vector that arrives without
@@ -232,6 +295,26 @@ void idt_request_reschedule(void);
  * what the remap exists to produce. */
 void pic_remap(void);
 void pic_eoi(uint8_t vector);
+
+/*
+ * The two 8259 mask registers as one value: master in the low byte, slave in
+ * the high. Bit n of the combined value is line n's mask, so bit 0 clear means
+ * IRQ0 is *unmasked*. Read from the controllers rather than from a cached copy,
+ * so a driver that enables a line behind this file's back is visible.
+ */
+u16 pic_mask_state(void);
+
+/*
+ * Log every remapped line with its mask state and whether a subsystem has
+ * claimed it. Answers "which lines can actually fire?" from the hardware rather
+ * than from the source, which is the only channel that has been right about the
+ * 8259s in this tree.
+ */
+void pic_report_lines(void);
+
+/* Ticks delivered since the PIT was programmed. Safe to read from any
+ * context: a single aligned load of a value only the handler writes. */
+u64 pit_tick_count(void);
 
 /* ---------------------------------------------------------- signal hook ---- */
 
