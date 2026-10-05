@@ -344,150 +344,70 @@ worth keeping from it: re-derive the line before acting, and check the claim's
 
 ## 7. KNOWN OPEN, IN PRIORITY ORDER
 
-### 7.1 USERSLAND RUNS. What is left is the keyboard.
+### 7.1 HELLO WORLD RUNS
 
-`init` boots, prints its banner, and blocks at its prompt:
-
-```
-Fr Init: Fr Init 0.1.0 (build ..., rev 00ef05b)
-Fr Init: Fr OS system bring-up -- pid 1, page size 4096 bytes
-Fr Init: running on Fr Core 0.1.0
-Fr Init: type 'help' for the command list, EOF to stop
-Fr Init>
-```
-
-Everything from the reset loop to here is in section 3. The last blocker was
-the subtlest of the lot and is worth reading in full: **the interrupt stub
-saved rdi, rsi, rdx, rcx, r8-r11 -- the System V caller-saved set *minus RAX*.**
-RAX is caller-saved, so every C handler destroyed the interrupted code's RAX,
-and IRETQ does not restore general-purpose registers. From ring 0 that is
-nearly invisible; from ring 3 it silently re-executes a faulting instruction
-with a different register than it had. The measurement that pinned it: a
-breakpoint on init's allocator store and one on the kernel's sysretq together,
-showing the kernel putting 0x200000015000 in RAX, the user arriving with
-0x200000015000, and the *same instruction* next reached with 0.
-
-**The next blocker is the PS/2 controller, and it is a separate subsystem.**
-To drive the REPL, keystrokes are injected with QEMU's `sendkey` over QMP.
-The keyboard interrupt *is* delivered -- `-d int` shows `INT=0x21`, vector 33 --
-but **one interrupt per injected burst**, not one per key, and no character
-reaches the tty. The boot log carries the reason:
+`hello` runs as PID 1, does stdio, writes to fd 1 and fd 2, and exits 0:
 
 ```
-[198.098 cpu0 tty/W] tty: 8042 answered 0xaa where an ack was expected
-[200.005 cpu0 tty/I] tty: rings 4096 bytes each, 8042 up, keyboard on vector 34
+[  659.599 cpu0 elf/I] loaded ELF entry 4013e0 phdr 400040 count 9 [400000,40a000)
+[  687.189 cpu0 process/I] exec: "hello" for "init" entry 4013e0 sp 7fffffffef10, thread pointer 409008
+hello from Fr Userland
+Fr Init brought up this process, pid 1
+direct-write-stdout
+stdout is a real fd: write() returned 20
+args: hello
+Fr Userland-stderr: this line went to fd 2
+Fr Userland-stderr absent: success path, exiting 0
 ```
 
-So the 8042 initialisation sequence is not completing: something expected an
-acknowledgement and read 0xaa (the self-test result byte) instead. Until that
-is fixed, the controller is not in a state where each key raises its own
-interrupt. Start at `ps2_write_port()` / `ps2_expect_ack()` in `tty.c` and
-establish which command in the sequence loses the ack.
+`make check` is 21/21 ISA plus **7/7 boot milestones** (`tests/boot_smoke.py`,
+committed by `smoketest`), which boots the image headless and asserts the
+milestones *in order* and the failure signatures absent.
 
-**The 8042 sequence is fixed; input is not.** The warning that was in the log,
-`tty: 8042 answered 0xaa where an ack was expected`, was the controller's
-power-on self-test byte being read as if it were a reply to the next command.
-Two defects produced it: the self test answers `0x55` *and* `0xAA`, but some
-implementations (QEMU among them) answer with `0x55` alone, so consuming "the
-second byte" swallows a later command's real reply; and `0xFF` sent to the
-*keyboard* replies `0xAA` (the BAT code), not the `0xFA` an ack check wants. Both
-readings were tried and neither is reliable, so the self test is gone and the data
-register is drained instead -- it is diagnostic, not setup, and an absent
-controller leaves the port unreadable, which the bounded waits already report
-rather than hang on.
+**How it was reached, because the order matters for reading the rest of this
+file.** Each of these was a separate wall:
 
-What is measured now, rather than guessed. With the ack check naming the command,
-the sequence reports:
+1. The `gdt_flush` far return -- a three-word frame for a two-word `LRETQ`, and
+   a `pushq` with no `$` that GAS assembled as `PUSH r/m`. §2.
+2. `gdt_flush` destroying `GS.base`. §3.
+3. `mm_create` dropping PML4[384], so no process had vmalloc mapped. §3.
+4. `build_missing_tables` leaving U/S clear at every level, so no user page was
+   reachable from ring 3. §3.
+5. `ret_to_user` building the IRETQ frame in the wrong order. §3.
+6. The interrupt stub saving the caller-saved set **minus RAX**. §3.
+7. **Every IRQ vector one higher than the remap delivers.** §3, `e0297e9`.
+8. **`execve` resolving only the literal name `init`**, so `hello` was
+   unreachable. §7.1d, `3f0eaa7`.
+9. **exec replacing the address space and then returning to its caller** --
+   `t->mm` named the new PGD while CR3 still named the old, so control went
+   back into the program that had just been replaced. `cab77dd`.
+10. **GCC sinking the `sti` past the `hlt` in the idle loop.** Written in C the
+    compiler emitted `hlt; test $0x2,%ah; je; sti` -- halting with IF clear and
+    gating the rescue on a general register. One `asm volatile("sti; hlt")`.
+    `789b351`.
 
-```
-tty: 8042 command 0xae answered 0x00, expected 0xfa
-```
+### 7.1b What is still missing
 
-`0xAE`, enable-keyboard-interface, written to the **command** port, gets no reply
-at all. The constants are right (`0x64`/`0x60`, `0xAE`, `0xF4`), the config byte
-is read and written through `0x20`/`0x60`, and `0xF4` -- enable scanning, written
-to the **data** port -- *is* acknowledged. **Command-port writes are the ones
-going unanswered while data-port writes work.** That is the next thing to
-establish, and it is a lead rather than a guess.
+**No input path delivers a byte.** The PS/2 answers nothing -- not `0xAA`,
+`0xAB`, `0x20`, `0xAE`, and not QEMU's own `sendkey` -- measured on an idle
+machine with no guest, so it is not the guest's doing. QEMU's stdio chardev
+*does* forward piped stdin to COM1 (LSR showed data-ready with byte `0x6c`, the
+third character of `help\n`), and COM1's receive interrupt is installed and
+unmasked, but `com1_irq` has never been observed entering. **`init` therefore
+cannot be driven from the REPL yet**, so `run hello` cannot be typed and the
+exec path above was reached with temporary scaffolding rather than by typing.
 
-Input is still broken. Keystrokes injected with QEMU's `sendkey` produce no
-scancode at all, so `keyboard_irq()` never runs past its output-buffer check.
-Verified with a single key held 600 ms and with a five-key burst; both give one
-`INT=0x21` and no scancode. The handler's drain loop is already correct -- reading
-the status port clears the controller's interrupt line, so a handler that takes
-one byte and returns drops the rest of the burst behind it.
+**The NUL runs in the serial log persist** -- 3, 42, 48 and ~250 bytes. The
+kernel-region one is `console_write_raw(s, n)` writing `n` bytes with no NUL
+check, called only from `tty_drain()`, so `out_ring`'s accounting is not
+draining. The loader-region ones are still untraced. The boot smoke test
+prints a warning about them on every run, deliberately: corruption long enough
+to eat a milestone can also eat a panic banner.
 
-**An intermittent failure, separate from the above and now partly explained.**
-
-Roughly one KVM run in four used to die like this:
-
-```
-#EXC #PF  vector=14 cs=0x0008 rpl=0 rip=0xffffffff8000f10a err=0x2 -> kernel panic
-cr2 0x0000000000000000
-```
-
-`rip` is `ring_push()` -- `r->buf[r->head] = src[i]` -- with `cr2 = 0`, on init's
-*first* write, because `out_ring.buf` is NULL. And `tty_init()` had demonstrably
-run: the log carried `tty: rings 4096 bytes each` with the assignment a few lines
-above that klog call.
-
-What it actually was: **`tty_init()` not always completing.** Runs that failed
-stopped the log between `syscall entry installed` and the first `tty:` line, with
-no panic and no exception -- and `-no-reboot` makes a triple fault exit QEMU,
-which in a log is indistinguishable from a hang. Note the trap in that: the
-truncation was twice mistaken for a stale build before a real rebuild cleared it.
-
-It is now pinned rather than explained. `tty_init()` reads both ring pointers back
-and logs FATAL if the storage did not attach -- the only point at which
-"attached" can be checked, since the rings are declared `.buf = NULL` -- and
-`ring_push()` refuses a detached ring instead of storing through a null pointer.
-Neither has fired since, and the intermittency has not reproduced. **That is a
-pin, not a fix, and the cause is still unknown.**
-
-Two theories that are dead, recorded so neither is re-derived:
-
-- **The demand fill zeroing the wrong frame.** It names the same frame as the PTE
-  (`page_to_phys()` is `(page - page_array) << PAGE_SHIFT`, `phys_to_virt()` is
-  `PHYS_DIRECT_MAP + phys`, and the PTE stores the same `page_to_phys()` result),
-  and that frame is inside `pmm: reserving kernel image 100000-2b9000`, so the
-  allocator cannot hand it out at all.
-- **The store being lost.** A gdb hardware watchpoint on `out_ring.buf` never fired
-  across six KVM runs -- but that experiment is void and must not be read as
-  evidence. The watchpoint was installed while the CPU was still at reset with
-  paging off, and QEMU does not attach a watchpoint to a page that does not exist
-  yet. A control watchpoint on `klog_counts` fired correctly, which is how the
-  void was found. If this is pursued, the watchpoint must be installed *after*
-  `kmain` (break `*0xffffffff80000280` first, then `watch`).Two things already fixed here and worth not re-breaking:
-- `tty_read()` must enable interrupts across its `hlt` with **`sti`**, not with
-  `irq_restore()` given flags whose IF is clear. `irq_restore()` only ever
-  enables; it does nothing when IF was clear. Getting that wrong stops the CPU
-  with nothing able to wake it, and the symptom is that *no* interrupt fires.
-- `noerr_stub` / `irq_stub` push the error code **first** and the vector
-  **second**, so the vector lands at the lower address and therefore at
-  FRAME_VECTOR. The reverse order dispatches every IRQ as vector 0.
-
-### 7.1a What the earlier contradiction actually was, for the record
-
-The `.bss` tail fault was **not** a missing demand fill. It was
-`vmm_handle_page_fault()` gating demand paging on bit 0 of the error code:
-
-```c
-	if (!(error_code & PF_PRESENT))
-		return -EACCES;
-```
-
-`PF_PRESENT` is `1 << 0`, and on x86 bit 0 set means **not present** — so the
-constant's name is the opposite of its meaning, which is Linux's naming too and
-is how a polarity slip survives. The CPU reported `0x6`, bit 0 clear, and the
-page was provably absent, so a page that is missing got refused for being
-"present".
-
-The fix is not to swap the bit — it is that **the VMA is the authority, not that
-bit**. Linux's `handle_mm_fault()` does not consult the P bit either: it looks
-the address up and lets `vma->vm_flags` decide. "The page is present" and "this
-process may write here" are different questions, and only the second is a
-permission decision. The kernel-side refusal is kept for faults at or above
-`MM_USER_LIMIT` and for reserved-bit violations.
+**One tick and then silence.** Measured on every sample: `pic0: irr=12 imr=ec
+isr=01` -- IRQ0 and IRQ4 pending, neither delivered. The `sti; hlt` fix made
+the halt interruptible and is correct, but this predates it and is not
+claimed fixed.
 
 ### 7.1c Two facts that will waste an hour if you do not know them
 
