@@ -409,6 +409,72 @@ page per fault, for a mapping made 1 MiB and touched 80 KiB of. The boot
 completes. I saw "the same instruction, forever" because I had printed `rip` and
 `rsp` and not `rdx`.
 
+**The real remaining item is the interrupt path, and I have got this wrong three
+times in a row, in the same direction.** Recording that, because the pattern is
+more useful than another guess:
+
+1. "The idle loop halts with IF clear." Half right -- the *old* binary did,
+   from the compiler sinking `sti` past `hlt`. Fixed in `789b351`, and I
+   misread `RFL=0x246` as IF-clear twice before noticing `0x246 & 0x200 != 0`.
+   **IF is set.** Every sample below is with interrupts enabled.
+2. "There is an infinite page-fault loop in memset." Wrong. `rdx` advances one
+   page per fault; it is the demand fill filling libc's 80 KiB arena. I read
+   `rip`/`rsp` being constant and did not print `rdx`.
+3. "`pic_eoi` is never reached, so the EOI is never sent." Wrong. `pic_eoi` is
+   **inlined** into `interrupt_dispatch` -- `out %al,$0x20` at `0x80002d0f` -- so
+   a breakpoint on the standalone symbol never fires no matter how many EOIs are
+   sent. I drew a conclusion from an absent breakpoint without first checking
+   whether the compiler had inlined the thing the breakpoint was on.
+
+**What is actually measured, on the current build:**
+
+```
+pic0: irr=02 imr=ec isr=01        <- IRQ0's in-service bit is stuck set
+RFL=0x246                         <- IF *set* (0x246 & 0x200)
+RIP=ffffffff8000c137              <- the instruction just past `hlt` in idle_thread
+HLT=1
+```
+
+So: one tick is delivered and announced (`pit: tick 1, IRQ0 is live`), the
+handler runs, and IRQ0's in-service bit is never cleared. The EOI instruction is
+present in the dispatch path immediately after the handler call, so either the
+handler does not return, or the range test
+`vector >= VECTOR_IRQ_BASE && vector < VECTOR_IRQ_MAX` is failing for vector 32,
+or control leaves the dispatch by a path that skips it. **The next step is to
+break on `interrupt_dispatch` and single-step from the handler return to see
+which** -- and to break at the *inlined* address `0xffffffff80002d0f` rather
+than on the `pic_eoi` symbol, which is what makes this a two-minute check
+instead of a day.
+
+Until that is answered, `com1_irq` has still never run: IRQ4 is unmasked
+(`imr=0xec`, bit 4 clear) and QEMU's stdio chardev does deliver piped bytes, but
+IRQ0's stuck in-service bit is at IRQ0's priority and the interaction between
+the two is unexamined. **No input path works, so `run hello` cannot yet be
+typed.**
+
+### 7.1b What is still missing
+
+**What is left, stated accurately after two wrong calls of my own.**
+
+I claimed twice, in this file and to the user, that the machine was stuck in an
+infinite page-fault loop in libc's `memset`. **It is not.** The evidence was
+right and I read it wrong twice:
+
+```
+##p rip=0x4049b0 rdx=0x200000000000 r8=0x200000014000 rax=0x14000 err=6
+##p rip=0x4049b0 rdx=0x200000001000 r8=0x200000014000 rax=0x14000 err=6
+##p rip=0x4049b0 rdx=0x200000002000 r8=0x200000014000 rax=0x14000 err=6
+```
+
+`rip` and `rsp` stay constant because it is one `memset` loop; `rdx` advances by
+exactly one page per fault. `r8 - rdx` starts at `0x14000` -- 80 KiB -- which is
+libc's malloc arena, and `arena_create()` asked for it with a single
+`mmap(0, 0x100000, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANON)` that
+returned `0x200000000000`. **This is the demand fill working as designed**, one
+page per fault, for a mapping made 1 MiB and touched 80 KiB of. The boot
+completes. I saw "the same instruction, forever" because I had printed `rip` and
+`rsp` and not `rdx`.
+
 **So the real remaining item is the interrupt path, and it is a single question:
 why does the first timer tick get delivered and no more.** Measured: `pit: tick
 1, IRQ0 is live` and then nothing for the rest of the run, with `pic0: irr=03
