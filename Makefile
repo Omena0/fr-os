@@ -342,9 +342,50 @@ KERNEL_VERSION_DEFS := -DKERNEL_VERSION=\"$(KERNEL_VERSION)\" \
 all: $(DISK)
 	@echo "built $(DISK)"
 
+# The boot smoke test: the only check here that boots anything at all, and the
+# one that answers the question the ISA self-test cannot -- does the kernel
+# still reach userspace. verify-isa-test compiles probes and reads
+# disassembly; it never starts a CPU, so every boot regression in this tree so
+# far has been found by a person reading a serial log by hand.
+#
+# It depends on $(DISK) and that dependency is not decoration. Twice in this
+# project's history a boot log that stopped mid-way turned out to be an image
+# make had not rebuilt, and it was read as a real bug. A check that builds
+# what it is about to boot cannot make that mistake, and tests/boot_smoke.py
+# refuses to run on an image older than its inputs as a second line of defence
+# for the case where the script is run by hand.
+#
+# run.sh is reused for the QEMU invocation (IMAGE, LOG, HEADLESS=1, RUN_TIMEOUT
+# are all set by the script); what the Makefile adds is the exit-code contract:
+#
+#   0   pass
+#   77  skipped -- no QEMU, or no usable /dev/kvm. Deliberately not 0. A smoke
+#       test that did not run has verified nothing, and a skipped test that
+#       looks like a pass is worse than no test.
+#   *   failed
+#
+# A skip is not a failure, so `check` still succeeds -- but it drops a marker
+# and the check target turns that into a loud "not exercised" line instead of
+# "all checks passed".
+.PHONY: boot-smoke
+boot-smoke: $(DISK)
+	@rm -f $(BUILD)/.boot-smoke-skipped
+	@python3 tests/boot_smoke.py --image $(DISK) $(BOOT_SMOKE_ARGS); \
+	 rc=$$?; \
+	 if [ $$rc -eq 0 ]; then exit 0; fi; \
+	 if [ $$rc -eq 77 ]; then \
+	   mkdir -p $(BUILD); : > $(BUILD)/.boot-smoke-skipped; exit 0; \
+	 fi; \
+	 exit $$rc
+
 .PHONY: check
-check: verify-isa-test
-	@echo "all checks passed"
+check: verify-isa-test boot-smoke
+	@if [ -f $(BUILD)/.boot-smoke-skipped ]; then \
+	   rm -f $(BUILD)/.boot-smoke-skipped; \
+	   echo "check: the boot smoke test was SKIPPED -- the kernel boot path was NOT exercised"; \
+	 else \
+	   echo "all checks passed"; \
+	 fi
 
 .PHONY: kernel
 kernel: $(BUILD)/kernel.elf
@@ -456,9 +497,17 @@ help:
 	@echo "make run        boot the image under QEMU"
 	@echo "make run-gdb    boot under QEMU with a GDB stub on :1234"
 	@echo "make deps       regenerate header dependency files"
+	@echo "make check      the ISA self-test plus the boot smoke test"
+	@echo "make boot-smoke boot the image and assert the kernel reached init"
 	@echo "make clean      remove build/"
 	@echo "make verify-isa PROFILE=kernel|user FILE=<elf>   run the ISA gate by hand"
 	@echo "make verify-isa-test          test the ISA gate itself"
+	@echo "python3 tests/boot_smoke.py --self-test   test the boot-log classifier"
+	@echo ""
+	@echo "boot smoke test environment:"
+	@echo "  BOOT_SMOKE_TIMEOUT=25   seconds to wait for init's prompt (0 is refused)"
+	@echo "  BOOT_SMOKE_ALLOW_TCG=1  run under emulation when /dev/kvm is unusable"
+	@echo "  FR_TMPDIR=<dir>         scratch for the image copy and serial log"
 
 # Pull in the per-object header dependencies. Every pattern rule above writes
 # one next to its object, so this list is complete by construction and is
