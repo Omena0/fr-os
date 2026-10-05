@@ -51,6 +51,34 @@
 /* User RFLAGS for a fresh process: IF set, bit 1 reserved, the rest clear. */
 #define USER_DEFAULT_RFLAGS 0x202ULL
 
+/*
+ * Exactly those two bits, no others, and the value is asserted rather than
+ * described.
+ *
+ * This constant became load-bearing in the exec path, and the reason is the
+ * IF bit. A process's first entry to ring 3 used to happen only from
+ * task_trampoline, on a kernel stack reached from the scheduler, where nothing
+ * had cleared IF on the way in. execve's transfer happens *inside a syscall*,
+ * and syscall_entry's SFMASK names bit 9 (see syscall.c's wrmsr of MSR_SFMASK),
+ * so IF is provably clear at that point: `iretq` is the only thing that can
+ * turn it back on, and the only place it can come from is this frame. A frame
+ * built without IF would return the process to ring 3 with interrupts off and
+ * nothing able to make progress -- no fault, no log line, no further output,
+ * which is precisely the failure this project has already spent hours on
+ * ("tty: about to block, rflags 2 IF=0").
+ *
+ * Asserted as an exact value rather than as "IF is set" so that clearing it,
+ * and setting anything else -- bit 2 (PF) in particular, which the CPU
+ * ignores on a privilege change but which a later frame copy would carry --
+ * both fail the build instead of needing a reader to notice.
+ */
+STATIC_ASSERT(USER_DEFAULT_RFLAGS == ((1ULL << 1) | (1ULL << 9)),
+	      "the first entry to ring 3 must carry exactly bit 1 (reserved, "
+	      "always 1) and bit 9 (IF). execve enters ring 3 from inside a "
+	      "syscall, where SFMASK has cleared IF, so this frame is the only "
+	      "thing that re-enables it; a frame without IF is a process that "
+	      "runs and never makes progress again.");
+
 /* Where the initial user stack lives, and how big it is. The top is the
  * canonical boundary minus one page so that a push that runs off the end
  * faults instead of wrapping into non-canonical space. */
@@ -391,17 +419,41 @@ static long user_copy(struct address_space *mm, void *kbuf, u64 user,
 
 		if (!page) {
 			/*
-			 * A page that will not fault in is not an error when
-			 * reading: an untouched byte of an anonymous mapping
-			 * reads as zero, and forcing the fault is what makes
-			 * that true on a lazy-mapping kernel too. Only a copy
-			 * *into* such a page is a real fault.
+			 * A page that will not fault in is an error in *both*
+			 * directions, and reading used to be treated differently:
+			 * this branch memset the destination and carried on, so
+			 * copy_from_user() returned the requested byte count and
+			 * the caller had no way to tell that not one of those bytes
+			 * came from the process.
+			 *
+			 * The stated reason -- "an untouched byte of an anonymous
+			 * mapping reads as zero" -- does not apply here, because
+			 * user_page() above has already *asked* for the page: it
+			 * called vmm_handle_page_fault() with a read error code, and
+			 * that call is what makes an untouched anonymous page
+			 * readable. It returns non-zero for exactly two reasons --
+			 * the address belongs to no VMA, or the VMA's prot denies
+			 * the access -- and neither of them means zero. Linux's
+			 * copy_from_user() reports EFAULT for both.
+			 *
+			 * What the zero-fill cost is the whole reason this is
+			 * changed rather than merely documented. It made a
+			 * *wrong address space* silent instead of loud:
+			 *
+			 *     copy_from_user dst=.. src=40d580 n=34 | t->mm->pgd=bdc56000
+			 *     tty_write       buf=..  count=34       | 34 zero bytes
+			 *
+			 * src 0x40d580 was the calling process's own stdio buffer,
+			 * which does not exist in the address space execve had just
+			 * installed. user_range_ok() only checks that the address
+			 * is below USER_ADDRESS_MAX, so it passed; the page was not
+			 * there; and the zeros were written to the console as if the
+			 * process had asked for them. 250 bytes of it, which is
+			 * where the NUL run in the log came from. A fabricated read
+			 * is the one error in this file that produces no evidence,
+			 * so it is made a fault.
 			 */
-			if (to_user)
-				return -EFAULT;
-			memset((u8 *)kbuf + done, 0, chunk);
-			done += chunk;
-			continue;
+			return -EFAULT;
 		}
 
 		/*
@@ -429,6 +481,19 @@ static long user_copy(struct address_space *mm, void *kbuf, u64 user,
 			memcpy((u8 *)kbuf + done, page + off, chunk);
 		done += chunk;
 	}
+
+	/*
+	 * The loop's postcondition, checked rather than assumed. Every path out
+	 * of it is either `return -EFAULT` or `done += chunk`, so this cannot
+	 * fire -- which is the point. copy_from_user()'s return value is a
+	 * *count*, and a count is indistinguishable from "this many bytes were
+	 * really transferred" unless it is guaranteed to be one or the other.
+	 * Callers in another file (file_read, file_write) add the count to a
+	 * total and hand it to userspace, so a short copy here would be a
+	 * syscall that reports having read data it never read.
+	 */
+	if (done != n)
+		return -EFAULT;
 	return (long)done;
 }
 
@@ -1145,8 +1210,29 @@ STATIC_ASSERT(sizeof(((struct address_space *)0)->tls_ptr) ==
 	      "mm->tls_ptr and task::fs_base must be the same width, or the "
 	      "thread pointer is truncated on its way to MSR_FS_BASE");
 
+/*
+ * The PGD has to reach CR3 whole.
+ *
+ * write_cr3() takes a u64 and phys_addr_t is a uint64_t, so the store itself
+ * cannot truncate; what a narrower field *can* do is be a 32-bit number that
+ * happens to hold the low half of a PML4 allocated above 4 GiB, which on this
+ * machine means 0 for every one of them -- a PML4 at physical 0, which is not
+ * mapped as a PML4 by anything, so every subsequent access through the
+ * recursive map lands on the first byte of physical memory. The width is the
+ * whole of the difference between "the address space is published" and "the
+ * address space is published as zero", and it is invisible in the source: the
+ * assignment and the load are both correct at whatever width they are.
+ */
+STATIC_ASSERT(sizeof(((struct address_space *)0)->pgd) == sizeof(u64),
+	      "mm->pgd must be 64 bits: a 32-bit PML4 physical address silently "
+	      "becomes 0 above the 4 GiB mark, and CR3 = 0 publishes no address "
+	      "space at all");
+STATIC_ASSERT(sizeof(((struct task *)0)->mm) == sizeof(void *),
+	      "task::mm must hold a pointer, so t->mm->pgd reads the live PML4 "
+	      "rather than a copy that can go stale");
+
 int exec_load_and_run(struct task *t, const void *image, size_t size,
-		      char *const argv[], char *const envp[])
+		      const char *name, char *const argv[], char *const envp[])
 {
 	struct address_space *new_mm;
 	struct elf_info info;
@@ -1154,6 +1240,8 @@ int exec_load_and_run(struct task *t, const void *image, size_t size,
 	int r;
 
 	if (!t)
+		return -EINVAL;
+	if (!name)
 		return -EINVAL;
 
 	new_mm = mm_create();
@@ -1212,8 +1300,25 @@ int exec_load_and_run(struct task *t, const void *image, size_t size,
 		return r;
 	}
 
-	/* The old address space is only dropped once the new one is complete,
-	 * so a failure above leaves the process exactly as it was. */
+	/*
+	 * The old address space is only dropped once the new one is complete,
+	 * so a failure above leaves the process exactly as it was.
+	 *
+	 * Note what this does *not* do: it does not put the old address space in
+	 * CR3, and it cannot. CR3 names whatever this CPU is running on, which at
+	 * this point is the old one, and exec_load_and_run() has no way to know
+	 * whether its caller is the scheduler starting a brand-new task (where
+	 * CR3 is the kernel's, and the task's PML4 is published by
+	 * context_switch) or a syscall on a running one (where CR3 is the old
+	 * process's, and nobody has published anything). It also must not switch
+	 * CR3 itself: on the scheduler's path there is nothing to switch *from*,
+	 * and switching there would unload the kernel's own address space while
+	 * the kernel is still running on it.
+	 *
+	 * So the old address space is simply released here and the caller is
+	 * responsible for having arranged CR3. The caller's half of that contract
+	 * is exec_enter_image() below.
+	 */
 	if (t->mm) {
 		mm_put(t->mm);
 		t->mm = NULL;
@@ -1246,15 +1351,42 @@ int exec_load_and_run(struct task *t, const void *image, size_t size,
 	 */
 	t->fs_base = new_mm->tls_ptr;
 
+	/*
+	 * The program name is `name`, the resolved one, and not `t->comm`.
+	 * comm is the *task* name, and an exec does not rename the task: PID 1
+	 * exec'ing `hello` is still the task called "init", so every execve of
+	 * every program from the same PID logged
+	 *
+	 *     exec: "init" entry 4013e0 sp 7fffffffef10 ...
+	 *
+	 * for an image that is not init. That is the line an executor reads to
+	 * find out which image was loaded, so it has to name the image. It is
+	 * `name` here rather than the caller's argv[0] because the container
+	 * lookup has already reduced the path to the one name that identifies
+	 * the entry, and that is the name that was actually matched.
+	 */
 	PROC_LOG(KLOG_INFO,
-		 "exec: \"%s\" entry %#lx sp %#lx, thread pointer %#lx for a "
-		 "%lu-byte TLS block",
-		 t->comm, (unsigned long)t->user_rip,
+		 "exec: \"%s\" for \"%s\" entry %#lx sp %#lx, thread pointer "
+		 "%#lx for a %lu-byte TLS block",
+		 name, t->comm, (unsigned long)t->user_rip,
 		 (unsigned long)t->user_rsp, (unsigned long)t->fs_base,
 		 (unsigned long)new_mm->tls_size);
 
-	t->thread_fn = process_user_start;
-	t->thread_arg = t;
+	/*
+	 * thread_fn is *not* set here.
+	 *
+	 * It used to be, and it is the mechanism for a task's first entry into
+	 * user mode: task_trampoline reads it off the task and calls it, so a
+	 * task the scheduler has not run yet gets process_user_start, which
+	 * iretq's to user_rip. Only process_create_init() needs that, because it
+	 * is the only caller whose task has never been scheduled.
+	 *
+	 * execve's transfer does not go through the trampoline -- see
+	 * exec_enter_image() -- so for an execve the field is read by nobody.
+	 * Leaving it set is not merely dead weight: it is a second, unused way
+	 * for a task to reach ring 3, pointing at an entry point chosen by
+	 * whichever function last ran. The one caller that needs it sets it.
+	 */
 	return 0;
 }
 
@@ -1277,6 +1409,104 @@ __noreturn void process_enter_user(struct task *t, u64 entry, u64 sp)
 	 */
 	ret_to_user(entry, sp, USER_DEFAULT_RFLAGS, 0, 0);
 	__builtin_unreachable();
+}
+
+/*
+ * Publish the address space exec just built, then enter it. execve does not
+ * return, and the two halves of "does not return" are separate and both are
+ * load-bearing.
+ *
+ * ---------------------------------------------------------------- what was wrong
+ *
+ * exec_load_and_run() used to end at `return 0`. On success it had already
+ * replaced t->mm with the new image's address space, and the syscall then
+ * returned 0 to *the caller* -- the old program, resuming at the instruction
+ * after its own SYSCALL. Two things were true at once and neither was a fault:
+ *
+ *   - CR3 still named the *old* address space. Nothing on the exec path wrote
+ *     it. The scheduler writes CR3 in context_switch, and no context switch
+ *     happens between execve's return and the caller resuming.
+ *   - every user-address translation the kernel performs goes through
+ *     t->mm -- copy_from_user(), user_range_ok(), and current_mm() in the
+ *     fault handler, which *refuses* to act unless CR3 agrees with t->mm.
+ *
+ * So the old program kept executing, in the old address space, while the
+ * kernel resolved its pointers in the new one. Measured on a KVM run of the
+ * unfixed tree, at the first write(2) after the exec:
+ *
+ *     copy_from_user dst=.. src=40d580 n=34 | t->mm->pgd=bdc56000 CR3=bdc10000
+ *     tty_write       buf=..  count=34      | t->mm->pgd=bdc56000 CR3=bdc10000
+ *     (buffer: 34 zero bytes)
+ *
+ * src 0x40d580 is the caller's own stdio buffer, inside the *old* image's
+ * [0x400000, 0x40e000). The new image is [0x400000, 0x40a000), so the page is
+ * not there at all, user_copy() took its "page will not fault in" branch and
+ * memset the destination -- and reported success. That is where the 250 NUL
+ * bytes on the console came from: init's five banner writes (34+65+62+34+55)
+ * each fetched through the wrong address space and each came back as zeroes.
+ * No #PF, because the address is below USER_ADDRESS_MAX and the range check
+ * never looks at a VMA; no panic, because nothing was actually broken as far
+ * as the CPU was concerned. And the exec'd image was never entered at all: the
+ * transfer existed only as t->thread_fn, which is read by task_trampoline --
+ * a task's *first* entry -- and PID 1 was already past its own.
+ *
+ * ---------------------------------------------------------------- what this does
+ *
+ * In order, and the order is the whole point:
+ *
+ *   1. write_cr3(t->mm->pgd). Until this the CPU is running on the old PML4
+ *      and every instruction above it -- including this function, and
+ *      ret_to_user's frame construction -- resolves through the old tables.
+ *      The new PML4 shares PML4 entries 256, 384 and 511 with the old one
+ *      (mm_shared_pml4 in mm.c), so the kernel keeps running after the switch:
+ *      direct map, vmalloc and the kernel window are the same physical tables.
+ *
+ *   2. Drop the reference the caller took on the old address space, which is
+ *      the point at which it becomes safe to release: it is no longer named by
+ *      CR3 and no longer reachable from t->mm. Releasing it before step 1
+ *      would free the page tables the CPU is walking.
+ *
+ *   3. Check the invariant that the whole bug was a violation of, and stop
+ *      the machine if it does not hold.
+ *
+ *   4. iretq into the new image, via the same ret_to_user the scheduler's
+ *      first-entry path uses, so the thread pointer, the register clearing and
+ *      the IRETQ frame are built in exactly one place.
+ *
+ * The kernel stack and the abandoned syscall frame are deliberately not
+ * cleaned up. They are the same task's, at the same place, and the next entry
+ * from ring 3 starts again at TSS.RSP0 and overwrites them; that is also what
+ * Linux does, and the alternative -- unwinding a syscall frame that is about
+ * to be abandoned -- has no way to know what the caller had open.
+ */
+static __noreturn void exec_enter_image(struct task *t,
+					 struct address_space *old_mm)
+{
+	u64 want = t->mm->pgd;
+
+	/*
+	 * The whole failure mode of the bug this replaces is "t->mm and CR3
+	 * disagree and the machine carries on". Checked *after* the write, so
+	 * that a store that did not land (a wrong field width, a macro that
+	 * compiled to something else) is caught here rather than as a fault
+	 * inside ret_to_user with a CR2 that says nothing about the cause.
+	 */
+	write_cr3(want);
+	if ((read_cr3() & ~0xFFFULL) != want)
+		panic("exec: CR3 %#lx is not the address space just built, %#lx",
+		      (unsigned long)(read_cr3() & ~0xFFFULL), (unsigned long)want);
+
+	/*
+	 * Safe now, and not one instruction earlier. mm_put() takes the
+	 * address space's own spinlock and walks the page tables through the
+	 * direct map, which is shared, so it works on either CR3 -- but the old
+	 * tables must not be *recycled* while they are still the ones the CPU is
+	 * translating with.
+	 */
+	if (old_mm)
+		mm_put(old_mm);
+
+	process_enter_user(t, t->user_rip, t->user_rsp);
 }
 
 /* ---------------------------------------------------------------- init ------ */
@@ -1431,11 +1661,22 @@ struct task *process_create_init(void)
 		return NULL;
 	}
 
-	if (exec_load_and_run(t, elf, elf_size, argv, envp) < 0) {
+	if (exec_load_and_run(t, elf, elf_size, "init", argv, envp) < 0) {
 		PROC_LOG(KLOG_FATAL, "cannot load the init image");
 		task_put(t);
 		return NULL;
 	}
+
+	/*
+	 * The one caller that needs the trampoline. This task has never been
+	 * scheduled, so task_trampoline() is what will reach ring 3 for it:
+	 * context_switch() publishes the PML4, the trampoline calls this, and
+	 * process_enter_user() iretq's to the entry. exec_load_and_run() does not
+	 * set it -- see the note there -- because for an execve the control
+	 * transfer is exec_enter_image()'s and this field would be read by nobody.
+	 */
+	t->thread_fn = process_user_start;
+	t->thread_arg = t;
 
 	/* PID 1 by definition; task_alloc() handed out something else. */
 	t->pid = 1;
@@ -1564,6 +1805,8 @@ static long execve_common(struct task *t, u64 path, u64 argv, u64 envp)
 		return n;
 	}
 
+	struct address_space *old_mm = NULL;
+
 	/* Unwrap the container here too. This used to pass init_image straight
 	 * through, so elf_validate() saw the container's magic instead of
 	 * 0x7f "ELF" and every execve returned -ENOEXEC -- on every input, not
@@ -1577,7 +1820,24 @@ static long execve_common(struct task *t, u64 path, u64 argv, u64 envp)
 	if (!elf)
 		return -ENOENT;
 
-	n = exec_load_and_run(t, elf, elf_size, kargv, kenvp);
+	old_mm = t->mm;
+	/*
+	 * `old_mm` is the address space this process is running on, and it has to
+	 * outlive exec_load_and_run() by exactly as long as it takes to switch
+	 * CR3 away from it -- which is not this function's job, because this
+	 * function also serves process_create_init(), where the caller is the
+	 * scheduler, CR3 is the kernel's, and switching it here would unload the
+	 * kernel's own address space out from under the kernel.
+	 *
+	 * Taken before the call and released in exec_enter_image() after the
+	 * write_cr3(), so the old tables are never recyclable while CR3 still
+	 * names them. That ordering is the invariant; the reference count is only
+	 * how it is kept.
+	 */
+	if (t->mm)
+		mm_get(t->mm);
+
+	n = exec_load_and_run(t, elf, elf_size, prog, kargv, kenvp);
 	if (n < 0) {
 		/* exec_load_and_run() logs the stage that failed; this line adds
 		 * the two things it has no way to know -- who asked, and for
@@ -1585,8 +1845,23 @@ static long execve_common(struct task *t, u64 path, u64 argv, u64 envp)
 		PROC_LOG(KLOG_ERROR,
 			 "execve: pid %u \"%s\" failed to load: %ld",
 			 t->pid, kpath, n);
+		if (t->mm == old_mm)
+			mm_put(old_mm);
+		return n;
 	}
-	return n;
+
+	/*
+	 * Success, and from here execve does not return to its caller: the old
+	 * image is gone and its return address is meaningless. exec_enter_image()
+	 * publishes the new PML4, releases old_mm, and iretq's into the new
+	 * entry.
+	 *
+	 * There is deliberately no `return 0` on this path, and that is the fix:
+	 * returning 0 was what resumed the *old* program with the kernel now
+	 * resolving its pointers in the new address space. See exec_enter_image()
+	 * for the measurement that pinned it.
+	 */
+	exec_enter_image(t, old_mm);
 }
 
 long sys_execve(u64 path, u64 argv, u64 envp)

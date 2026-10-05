@@ -202,13 +202,26 @@ int elf_load(struct address_space *mm, const void *image, size_t size,
 
 /*
  * Load `image` into a brand-new address space and build the initial user stack
- * (argc/argv/envp/auxv and the strings they point at) for `t`.
+ * (argc/argv/envp/auxv and the strings they point at) for `t`. `name` is the
+ * resolved program name, and is only used to make the load log say which image
+ * was loaded rather than which task asked.
  *
  * On success `t->mm` is the new address space and the task's user context is
- * primed; it enters user mode on its first schedule.
+ * primed. It does NOT enter user mode, and it does NOT write CR3: entering is
+ * the caller's business, and the two callers differ.
+ *
+ *   - process_create_init() hands the task to the scheduler, which publishes
+ *     the PML4 in context_switch() and reaches ring 3 through task_trampoline.
+ *   - execve() calls exec_enter_image(), which publishes the PML4 and iretq's
+ *     into the new image. execve does not return to its caller on success.
+ *
+ * A caller that has replaced a running process's address space and then
+ * returns to that process is not calling this correctly: CR3 still names the
+ * old one and every user pointer the kernel resolves afterwards goes through
+ * t->mm, which is now a different address space.
  */
 int exec_load_and_run(struct task *t, const void *image, size_t size,
-		      char *const argv[], char *const envp[]);
+		      const char *name, char *const argv[], char *const envp[]);
 
 /* Set up the user-context registers for the first entry into ring 3. */
 __noreturn void process_enter_user(struct task *t, u64 entry, u64 sp);
