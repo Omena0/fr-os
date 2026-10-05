@@ -38,14 +38,28 @@
 #define VECTOR_EXCEPTIONS_MAX         32
 
 /* The remapped 8259 lines. The BIOS leaves the PICs identity-mapped, which
- * collides with the CPU's own exception vectors, so these are moved up to 32. */
+ * collides with the CPU's own exception vectors, so these are moved up to 32.
+ *
+ * `vector == VECTOR_IRQ_BASE + irq`, exactly. The block used to start the
+ * numbering at IRQ *one* -- timer 33, keyboard 34, COM1 37 -- while
+ * `PIC1_VECTOR_BASE` is 0x20, so every line was delivered one vector lower than
+ * the vector its handler was installed on. Nothing about that is visible from
+ * inside: the timer landed on vector 32 where `pit_irq` was not, the keyboard
+ * on 33, and the read-modify-write in `pic_eoi()` derived the IRQ number from
+ * the wrong vector as well.
+ *
+ * It is measured, not inferred. `-d int` shows the timer arriving as INT=0x20
+ * and the keyboard as INT=0x21, which is the remap working correctly and these
+ * constants disagreeing with it. The kernel's own boot log agrees: "pic:
+ * remapped to 20-30" and "IRQ0 on vector 33" in the same run.
+ */
 #define VECTOR_IRQ_BASE               32
-#define VECTOR_IRQ_TIMER              33
-#define VECTOR_IRQ_KEYBOARD           34
-#define VECTOR_IRQ_CASCADE            35
-#define VECTOR_IRQ_COM2               36
-#define VECTOR_IRQ_COM1               37
-#define VECTOR_IRQ_RTC                38
+#define VECTOR_IRQ_TIMER              32	/* IRQ0 */
+#define VECTOR_IRQ_KEYBOARD           33	/* IRQ1 */
+#define VECTOR_IRQ_CASCADE            34	/* IRQ2 */
+#define VECTOR_IRQ_COM2               35	/* IRQ3 */
+#define VECTOR_IRQ_COM1               36	/* IRQ4 */
+#define VECTOR_IRQ_RTC                37	/* IRQ6 on a PC; IRQ5 is LPT2 */
 #define VECTOR_IRQ_MAX                48
 
 /* The highest vector for which interrupt_entry.S generates a stub. Everything
