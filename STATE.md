@@ -388,6 +388,49 @@ file.** Each of these was a separate wall:
 
 ### 7.1b What is still missing
 
+**The live blocker is an infinite page-fault loop in libc's `memset`.** Found by
+breaking on `interrupt_dispatch` and reading the frame, after the hardware
+breakpoint on `pic_eoi` came back never-hit and the "stuck in-service bit"
+turned out to be a red herring:
+
+```
+##p vector=14 err=6 rip=0x402008 cs=0x2b rsp=0x7fffffffef10
+##p vector=14 err=6 rip=0x4049b0 cs=0x2b rsp=0x7fffffffeed8
+##p vector=14 err=6 rip=0x4049b0 cs=0x2b rsp=0x7fffffffeed8   (repeats forever)
+```
+
+`cs=0x2b` is ring 3, `err=6` is write + user + **not present**, and `rip=0x4049b0`
+is inside libc's `memset`:
+
+```
+4049b0:  movups %xmm0,(%rdx)
+4049b3:  add    $0x20,%rdx
+4049b7:  movups %xmm0,-0x10(%rdx)
+4049bb:  cmp    %r8,%rdx
+4049be:  jne    4049b0
+```
+
+**The same instruction faults forever.** That is the signature of a demand fill
+that reports success without mapping anything: the handler returns, the CPU
+retries, and the page is still absent. `vmm_handle_page_fault()` returning 0
+without a mapping is the shape to look for.
+
+**Two things this clears up, both of which were wrong:**
+
+- **`pic_eoi` is never called because it should not be.** The recurring vector is
+  14, a page fault, which is outside `[VECTOR_IRQ_BASE, VECTOR_IRQ_MAX)`. The
+  dispatch's range check is doing exactly the right thing. The "stuck
+  `isr=01`" and "IRQ0 never ticks again" were *consequences* of the machine
+  spending its life in the fault path, not a PIC bug.
+- **The timer almost certainly does tick.** It was never starved by a wedged
+  PIC; there was simply no time.
+
+**No input path delivers a byte** either, and for the same underlying reason:
+init never gets far enough to be waiting for input for long, and the loop
+starves everything.
+
+### 7.1b What is still missing
+
 **No input path delivers a byte.** The PS/2 answers nothing -- not `0xAA`,
 `0xAB`, `0x20`, `0xAE`, and not QEMU's own `sendkey` -- measured on an idle
 machine with no guest, so it is not the guest's doing. QEMU's stdio chardev
