@@ -388,6 +388,44 @@ file.** Each of these was a separate wall:
 
 ### 7.1b What is still missing
 
+**What is left, stated accurately after two wrong calls of my own.**
+
+I claimed twice, in this file and to the user, that the machine was stuck in an
+infinite page-fault loop in libc's `memset`. **It is not.** The evidence was
+right and I read it wrong twice:
+
+```
+##p rip=0x4049b0 rdx=0x200000000000 r8=0x200000014000 rax=0x14000 err=6
+##p rip=0x4049b0 rdx=0x200000001000 r8=0x200000014000 rax=0x14000 err=6
+##p rip=0x4049b0 rdx=0x200000002000 r8=0x200000014000 rax=0x14000 err=6
+```
+
+`rip` and `rsp` stay constant because it is one `memset` loop; `rdx` advances by
+exactly one page per fault. `r8 - rdx` starts at `0x14000` -- 80 KiB -- which is
+libc's malloc arena, and `arena_create()` asked for it with a single
+`mmap(0, 0x100000, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANON)` that
+returned `0x200000000000`. **This is the demand fill working as designed**, one
+page per fault, for a mapping made 1 MiB and touched 80 KiB of. The boot
+completes. I saw "the same instruction, forever" because I had printed `rip` and
+`rsp` and not `rdx`.
+
+**So the real remaining item is the interrupt path, and it is a single question:
+why does the first timer tick get delivered and no more.** Measured: `pit: tick
+1, IRQ0 is live` and then nothing for the rest of the run, with `pic0: irr=03
+imr=ec isr=01` -- IRQ0 pending, unmasked, and its in-service bit set. A hardware
+breakpoint on `pic_eoi` -- which is a valid location, four of them, all set --
+was never hit.
+
+Everything I said about that being explained by the fault loop is therefore
+withdrawn; there was no fault loop. `pic_eoi` really is not being reached, and
+that is the thing to find. `pic_eoi()` itself looks correct (it ends
+`outb(PIC1_CMD, PIC_EOI)`), and `interrupt_dispatch()` calls it after the handler
+and inside the `vector >= VECTOR_IRQ_BASE && vector < VECTOR_IRQ_MAX` range, so
+either the range test is failing for vector 32 or control is not returning from
+the dispatch at all.
+
+### 7.1b What is still missing
+
 **The live blocker is an infinite page-fault loop in libc's `memset`.** Found by
 breaking on `interrupt_dispatch` and reading the frame, after the hardware
 breakpoint on `pic_eoi` came back never-hit and the "stuck in-service bit"
