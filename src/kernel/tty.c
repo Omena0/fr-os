@@ -17,6 +17,7 @@
 #include <interrupt.h>
 #include <io.h>
 #include <klog.h>
+#include <sched.h>
 #include <spinlock.h>
 #include <tty.h>
 #include <types.h>
@@ -299,48 +300,35 @@ size_t tty_read(char *buf, size_t count, bool block)
 			return 0;
 
 		/*
-		 * Nothing buffered, a wait was requested: halt until the keyboard
-		 * interrupt arrives.
+		 * Nothing buffered and a wait was requested: give the CPU up.
 		 *
-		 * Interrupts are enabled across the halt whatever the caller had
-		 * set, because `hlt` with IF clear stops the core permanently --
-		 * the keyboard line can never be delivered, so nothing can wake it.
-		 * The caller's IF state is restored afterwards, so a caller that
-		 * disabled interrupts for a reason still has them disabled on
-		 * return.
+		 * This used to `sti; hlt;` -- enable interrupts, halt, wait for
+		 * something to wake the core. That is wrong in two separate ways,
+		 * and both showed up.
 		 *
-		 * This used to decline instead: `if (!irqs_enabled()) return 0;`.
-		 * Every syscall arrives with IF clear, because SYSCALL's SFMASK
-		 * clears it, so *every* blocking read on the syscall path returned 0
-		 * the instant it was called -- and 0 is how the caller above says
-		 * "the terminal is closed". init therefore saw EOF at its first
-		 * prompt and exited, with a keyboard that worked fine.
+		 * A terminal read that halts the whole processor is not a process
+		 * blocking on input, it is the machine stopping: nothing else runs,
+		 * nothing else can make progress, and the only thing that ever ends
+		 * it is a device that may never speak. Yielding is what "block"
+		 * means, and the scheduler already knows how.
 		 *
-		 * A terminal that hangs the kernel on a read would be worse, which
-		 * is why the decline existed; but the answer was wrong in a way that
-		 * no caller could distinguish from a closed terminal. Declining to
-		 * block is not the same as reporting end-of-file, and returning
-		 * both as 0 is what made this invisible.
+		 * And enabling interrupts here is much worse than wasteful. Every
+		 * syscall arrives with IF clear -- SYSCALL's SFMASK clears it -- so
+		 * this was the *first* time a timer tick could land while a process
+		 * was inside the kernel's syscall path. The kernel has never been
+		 * tested that way and does not survive it: with interrupts enabled
+		 * in a blocking read, runs died at `ret` in this function with a
+		 * *user* address as the stack pointer, and elsewhere jumped to
+		 * linear 0x400. Both are the interrupt/return path, not this loop.
+		 *
+		 * Yielding leaves interrupts off, exactly as every other blocking
+		 * path in the kernel does, and lets the idle task run -- which is
+		 * what keeps the timer ticking, since the idle task is what a
+		 * halted CPU was pretending to be.
 		 */
-		/*
-		 * `sti`, not `irq_restore` with IF cleared. irq_restore() only
-		 * ever *enables* -- it calls sti when the saved flags had IF set and
-		 * does nothing otherwise -- so handing it flags with IF clear is a
-		 * no-op, and the hlt below then stopped the core with nothing able
-		 * to wake it. That is exactly the failure this code exists to avoid,
-		 * and it looked like working code.
-		 */
-		{
-			u64 flags = irq_save();
-
-			sti();
-			hlt();
-			irq_restore(flags);
-		}
+		sched_block_current();
 	}
 }
-
-
 
 u64 tty_read_dropped(void)
 {
