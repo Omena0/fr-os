@@ -5,13 +5,16 @@
  * Two rings, and neither of them is a scheduler. The output ring decouples a
  * process's write() from the console: a process must never block because the
  * UART is slow, and the console must never be entered with the ring lock held.
- * The input ring decouples the keyboard interrupt from read(), which is the
- * arrangement the UART receive path is documented to use as well
- * (src/kernel/drivers/serial.c): the interrupt pushes a byte, and whoever reads
- * takes it out.
+ * The input ring decouples the input interrupts from read(): both the keyboard
+ * and COM1 push a byte, tty_read() takes it out, and a byte arriving while a
+ * reader is asleep wakes that reader through the scheduler rather than making
+ * the reader come and fetch it.
  *
- * The blocking read is a halt loop rather than a wait queue. See tty_read()
- * for why that is a deliberate interim choice and not an oversight.
+ * Two input sources feed the one ring. The keyboard is on IRQ1 and COM1 on
+ * IRQ4, and both are drained completely in their handlers. COM1 is also polled
+ * once per pass of tty_read(), which is a fallback for a UART whose receive
+ * interrupt does not arrive rather than a replacement for it -- see
+ * tty_poll_serial().
  */
 #include <console.h>
 #include <interrupt.h>
@@ -200,9 +203,38 @@ u64 tty_write_dropped(void)
 /* ------------------------------------------------------------- input -------- */
 
 /*
- * Push one byte of input. Called only from the keyboard interrupt, which runs
- * with interrupts already off, so the only contention is with a reader on
- * another CPU.
+ * The task blocked in tty_read(), if any.
+ *
+ * One pointer rather than a queue, because one tty has one reader: two processes
+ * reading the same terminal is a race for bytes, not a queue, and a queue here
+ * would only decide who lost it. A second reader arriving while one is blocked
+ * overwrites this and the first is never woken -- which is a caller bug (both
+ * are blocked in read() on the same descriptor) and not something a tty can
+ * make correct.
+ *
+ * Guarded by in_lock, and that is the whole correctness argument for the
+ * wakeup: tty_read() publishes and re-checks the ring under in_lock, and the
+ * interrupt handler pushes and reads this pointer under the same in_lock. The
+ * two therefore cannot interleave, which is what makes the publish-then-recheck
+ * order in tty_read() sufficient rather than merely hopeful.
+ */
+static struct task *tty_waiter;
+
+/*
+ * Push one byte of input, and wake the reader waiting for it.
+ *
+ * Called from the keyboard interrupt and from the COM1 receive interrupt, both
+ * of which run with interrupts already off, so the only contention is with a
+ * reader on another CPU.
+ *
+ * The wakeup happens outside in_lock. sched_wake() takes the run queue's lock
+ * and may switch tasks outright, and holding a ring lock across a context
+ * switch is the lock nesting this file exists to avoid -- tty_drain() releases
+ * out_lock before touching the console for exactly this reason. Taking the
+ * waiter under the lock and calling sched_wake() after the unlock is safe
+ * because the waiter has already been cleared: a second interrupt arriving in
+ * the gap finds no waiter and leaves the task alone, rather than waking it
+ * twice.
  *
  * A full input ring drops the new byte rather than the oldest. The old byte is
  * the one a program is most likely to be waiting on, and a program that is
@@ -211,6 +243,7 @@ u64 tty_write_dropped(void)
  */
 static void tty_in_push(char c)
 {
+	struct task *wake = NULL;
 	u64 flags = spinlock_irqsave(&in_lock);
 
 	/*
@@ -222,35 +255,36 @@ static void tty_in_push(char c)
 	if (ring_push(&in_ring, (const u8 *)&c, 1) == 0)
 		in_dropped++;
 
+	if (tty_waiter) {
+		wake = tty_waiter;
+		tty_waiter = NULL;
+	}
+
 	spinlock_unlock_irqrestore(&in_lock, flags);
+
+	if (wake)
+		sched_wake(wake);
 }
 
 /*
  * Copy out of the input ring, waiting for a byte first if `block`.
  *
- * Waiting is a halt loop, not a spin. hlt() is not a busy-wait: the CPU stops
- * until the next interrupt, which is exactly the condition being waited for,
- * and it releases the core to whatever else the machine wants to run. A spin
- * here would pin a CPU at 100% for the entire time a person takes to press a
- * key.
+ * Waiting is a sleep, not a spin and not a halt: the reader records itself as
+ * the tty's waiter, calls sched_block_current(), and an input interrupt calls
+ * sched_wake() on it. Nothing polls here while a person takes to press a key,
+ * and the CPU is not held by a halted core either -- the idle task is, which is
+ * what it is for.
  *
- * The one thing that must not happen is halting with interrupts off, because
- * nothing can then wake the core and the machine stops. That is checked rather
- * than assumed: tty_read() is reachable from a syscall path whose interrupt
- * state is not this file's to guarantee, and a hang during early boot is far
- * worse than a read that reports "no input" when there was none to have.
- *
- * When the scheduler's wait-queue path lands, this becomes
- * sched_block_current()/sched_wake() and the reader is a sleep rather than a
- * halted core. The conditional below is the only part that changes: the ring
- * operations and the return value are already what a blocked reader needs.
+ * The wakeup and the ring that triggers it must be published together, and
+ * tty_waiter is guarded by in_lock for exactly that reason. See tty_read() for
+ * the ordering and the three cases it has to survive.
  */
 /*
  * Move anything the serial port has received into the input ring.
  *
  * COM1 is the console's primary channel -- run.sh's own header is a page about
  * why -- and it can receive the entire time. Nothing read it. `serial_getc()`
- * exists, works, and has no callers: the only consumer of COM1 was the transmit
+ * exists, works, and had no callers: the only consumer of COM1 was the transmit
  * side, so the console could print to the terminal and could not be typed at.
  * That is the gap this closes.
  *
@@ -259,11 +293,22 @@ static void tty_in_push(char c)
  * line are both legitimate sources for the same ring -- and a console with two
  * working channels is better than one with two broken ones.
  *
- * Polled, not interrupted. COM1's receive interrupt is IRQ4, which nothing here
- * routes or unmasks, and giving the 8250 an interrupt is a larger change than
- * the tty needs in order to become usable. The read loop already halts between
- * checks and the PIT wakes it ten times a second, so this costs one port read
- * per wakeup and nothing at all when no byte is waiting.
+ * Kept, and kept polled, as the second consumer of the receive FIFO rather than
+ * as a replacement for the interrupt. Two reasons, and both are load-bearing.
+ *
+ * The fallback: an interrupt-driven input path is only as good as the device
+ * behind it. This one is the console's own port, and a UART that does not
+ * interrupt -- or an 8250 whose IER is still zero because serial_init() writes
+ * 0x00 there -- would otherwise make the terminal permanently untypable, with
+ * nothing in the log to say why. Polled, that machine reads its input.
+ *
+ * And the cost is bounded: this runs once per pass of tty_read()'s loop, so a
+ * reader that is not blocked pays one LSR read and nothing else.
+ *
+ * It cannot double-consume. serial_getc() and com1_irq() both drain the same
+ * receive FIFO, and a byte leaves the FIFO when the RBR is read: whichever of
+ * the two reads it first has it, and the other sees the data-ready bit clear.
+ * There is no window in which both hold the same byte.
  */
 static void tty_poll_serial(void)
 {
@@ -273,6 +318,121 @@ static void tty_poll_serial(void)
 		tty_in_push((uint8_t)c);
 }
 
+/* ------------------------------------------------- COM1 receive interrupt --- */
+
+/*
+ * Interrupt enable register. Offset 1 from the base, bit 0 = "received data
+ * available".
+ *
+ * Named here rather than taken from drivers/serial.h because serial.h exposes
+ * the base address and the line status bits and nothing else -- serial.c keeps
+ * the IER bit definitions to itself, which is defensible for a header that
+ * documents output. The consequence is that nobody outside serial.c can turn
+ * the UART's interrupts on, and serial_init() writes 0x00 there: the receiver
+ * is off from boot until something here sets it. Reported to whoever owns the
+ * driver; until then this is where the bit is set, and it is set exactly once,
+ * in tty_init().
+ */
+#define UART_IER          1
+#define UART_IER_RX_AVAILABLE 0x01
+
+/*
+ * Bytes the receive interrupt handler will take in one pass.
+ *
+ * A 16550 receive FIFO holds 16. Four times that is comfortably more than the
+ * device can hold, so the bound cannot be reached with bytes still in the FIFO
+ * -- and it is there anyway because a poll with no bound is a hang, which is
+ * this file's own rule for every other device poll in it.
+ *
+ * The bound is not what makes a burst arrive whole; draining to the data-ready
+ * bit going clear is. The line is level-sensitive on the FIFO trigger level, so
+ * a device that still had bytes left would re-raise it anyway.
+ */
+#define COM1_FIFO_CAP     16
+#define COM1_DRAIN_LIMIT  (COM1_FIFO_CAP * 4)
+
+/*
+ * Master 8259 data port, shared with the keyboard's unmask below. The remap in
+ * idt.c left both lines masked; IRQ1 is bit 1 of that byte and IRQ4 is bit 4.
+ */
+#define PIC1_DATA_PORT       0x21
+#define PIC1_IRQ_KEYBOARD_BIT 0x02
+#define PIC1_IRQ_COM1_BIT    0x10
+
+/*
+ * The pins. All four are about the same failure: an interrupt that is never
+ * delivered because a number was wrong, which looks exactly like a device that
+ * does not work.
+ *
+ * VECTOR_IRQ_COM1 was 37 for a while -- one higher than the remap delivers --
+ * and while it was, every IRQ in the kernel landed on the wrong vector. Nothing
+ * inside the kernel can see that: the handler is installed on the number it is
+ * named, the CPU arrives on a different one, and the two only disagree in a
+ * register dump nobody takes. This assert is the check that would have caught
+ * it, evaluated by the compiler instead of by a boot.
+ */
+_Static_assert(VECTOR_IRQ_COM1 == VECTOR_IRQ_BASE + 4,
+	       "COM1 is IRQ4 and the remap delivers VECTOR_IRQ_BASE + irq; a "
+	       "handler on any other vector is never entered");
+_Static_assert(VECTOR_IRQ_COM1 < VECTOR_STUB_MAX,
+	       "interrupt_entry.S generates no stub at or past VECTOR_STUB_MAX, "
+	       "so this vector would be absorbed by the default handler");
+_Static_assert(VECTOR_IRQ_COM1 != VECTOR_IRQ_KEYBOARD,
+	       "two drivers on one vector is the race idt_set_handler() warns "
+	       "about");
+_Static_assert(PIC1_IRQ_COM1_BIT == (1u << 4),
+	       "IRQ4 is bit 4 of the master's interrupt mask register");
+_Static_assert(UART_IER_RX_AVAILABLE == 1,
+	       "bit 0 of the UART's interrupt enable register is the receiver");
+_Static_assert(COM1_DRAIN_LIMIT >= COM1_FIFO_CAP,
+	       "the drain bound must exceed what the receive FIFO can hold, or a "
+	       "burst is truncated with bytes still in the device");
+
+/*
+ * The register offsets this file touches are not assertable against each other
+ * and are deliberately not pretended to be. Only UART_IER is named here; the
+ * receive buffer and line status offsets live inside serial.c and are reached
+ * through serial_getc(), so a constant that would "check" them would be checking
+ * this file's copy of a number rather than the driver's.
+ */
+
+/*
+ * COM1 receive interrupt.
+ *
+ * Drains the FIFO completely, in a loop, and that loop is not a refinement.
+ *
+ * The receive interrupt is level-sensitive on the trigger level rather than
+ * latched per byte: reading the line status register does not acknowledge
+ * anything, and it is the FIFO dropping below the trigger level that ends the
+ * interrupt. So a handler that takes one byte and returns has, at that
+ * moment, a FIFO still above the trigger with an interrupt line still asserted
+ * -- and the PIC has already been told, by the EOI that interrupt_dispatch()
+ * issues on the way out, that IRQ4 has been serviced. Whether the next byte is
+ * ever delivered then depends on the device re-asserting a line the
+ * acknowledgement just told it was cleared. Taking the whole burst in one pass
+ * is what removes the question.
+ *
+ * The same reasoning is why this cannot be a single serial_getc() call: the
+ * loop is the handler.
+ *
+ * Nothing is logged from here. This runs in interrupt context with the console
+ * lock reachable from the interrupted code, and tty_in_push() already declines
+ * to log for the same reason. tty_read_dropped() and the boot line from
+ * tty_init() are how the path reports itself.
+ */
+static void com1_irq(struct interrupt_frame *frame)
+{
+	unsigned int drained = 0;
+	char c;
+
+	(void)frame;
+
+	while (drained < COM1_DRAIN_LIMIT && serial_getc(&c)) {
+		tty_in_push((uint8_t)c);
+		drained++;
+	}
+}
+
 size_t tty_read(char *buf, size_t count, bool block)
 {
 	if (!buf || count == 0)
@@ -280,14 +440,60 @@ size_t tty_read(char *buf, size_t count, bool block)
 
 	for (;;) {
 		u64 flags;
+		struct task *me;
 		size_t n;
 
 		/* Serial first, so a byte that arrived while the ring was empty is
-		 * seen before deciding the ring is empty at all. */
+		 * seen before deciding the ring is empty at all. This is the
+		 * fallback for a UART whose receive interrupt does not fire, and it
+		 * shares the FIFO with the COM1 handler rather than duplicating it:
+		 * a byte leaves the receive FIFO when the RBR is read, so whichever
+		 * of the two gets there first has it and the other cannot push the
+		 * same byte twice. */
 		tty_poll_serial();
+
+		me = block ? current_task() : NULL;
 
 		flags = spinlock_irqsave(&in_lock);
 		n = ring_pop(&in_ring, (u8 *)buf, count);
+
+		/*
+		 * Publish, then look again -- both under in_lock, which is what
+		 * makes the pair atomic with respect to the interrupt handler.
+		 *
+		 * The gap this closes is real and is not hypothetical. Between the
+		 * ring_pop() above finding nothing and this task being recorded as
+		 * the waiter, an interrupt can arrive: the handler pushes the byte
+		 * and reads tty_waiter, finds NULL, and wakes nobody. The byte is
+		 * in the ring and this task is about to sleep on an empty ring, so
+		 * nothing wakes it until the *next* byte arrives -- one keystroke
+		 * late, forever if there is only ever one keystroke.
+		 *
+		 * Ordering it the other way is not available: the waiter cannot be
+		 * published before the ring is found empty, because then a reader
+		 * that finds a full ring would have to undo the publication, and
+		 * the window would simply move.
+		 *
+		 * So the second ring_pop() runs after the publication and before
+		 * the unlock, and both it and the handler's push-and-take-waiter
+		 * hold in_lock. Exactly one of three things happens:
+		 *
+		 *   - the handler completes first: the byte is in the ring, this
+		 *     pop finds it, and the task returns the data instead of
+		 *     sleeping;
+		 *   - this task completes first: the pop finds nothing, the waiter
+		 *     is cleared, and the handler then sees no waiter -- but the
+		 *     byte it pushed is still in the ring, so the loop's next pass
+		 *     pops it;
+		 *   - a reader on another CPU does it first: same as the second
+		 *     case, and tty_waiter is cleared so the handler does not wake
+		 *     a task that has already been served.
+		 */
+		if (n == 0 && me) {
+			tty_waiter = me;
+			n = ring_pop(&in_ring, (u8 *)buf, count);
+			tty_waiter = NULL;
+		}
 		spinlock_unlock_irqrestore(&in_lock, flags);
 
 		if (n != 0)
@@ -295,8 +501,14 @@ size_t tty_read(char *buf, size_t count, bool block)
 
 		/* Nothing buffered and no wait requested. Reporting 0 is how a
 		 * caller tells an idle terminal from a closed one, and it is what
-		 * makes a poll loop terminate. */
-		if (!block)
+		 * makes a poll loop terminate.
+		 *
+		 * `me == NULL` with block requested means current_task() gave
+		 * nothing, and sched_block_current() would then be a no-op: the
+		 * loop would spin here forever with no other task to run and
+		 * nothing to wake it. Reporting 0 is the honest answer for a
+		 * caller that is not a task. */
+		if (!me)
 			return 0;
 
 		/*
@@ -325,6 +537,29 @@ size_t tty_read(char *buf, size_t count, bool block)
 		 * path in the kernel does, and lets the idle task run -- which is
 		 * what keeps the timer ticking, since the idle task is what a
 		 * halted CPU was pretending to be.
+		 *
+		 * Note what is deliberately NOT here, given that the two faults
+		 * above both involved interrupt state. A syscall arrives with IF
+		 * clear, and this function does not turn it back on: the idle task
+		 * is the thing that re-enables interrupts around its hlt, and it
+		 * does that for the whole machine regardless of who blocked last.
+		 * Setting IF here would be the same enabling that killed the runs
+		 * above, and it would also be redundant -- there is no state this
+		 * function can leave behind that the idle loop does not already
+		 * establish for itself.
+		 *
+		 * MEASURED, and it is the boundary of what is known about the
+		 * wakeup below. With this file's half complete -- handler on vector
+		 * 36, IRQ4 unmasked, guest read-back of the master's mask showing
+		 * 0xec, and the UART's receive line visibly asserted (pic0 irr bit
+		 * 4) -- com1_irq() still never runs. The machine takes exactly one
+		 * timer tick and then delivers nothing further: over 26 s at
+		 * 100 Hz, one `pit: tick` line (tick 100 never arrives), pic0
+		 * reading isr=01 in 16 of 16 samples, the CPU in the idle halt in
+		 * 40 of 40 samples. An 8259 blocks equal-or-lower-priority requests
+		 * while an in-service bit is set, and IRQ4 is below IRQ0, so the
+		 * COM1 handler is waiting on the timer path clearing, not on
+		 * anything in this file. Reported to whoever owns idt.c.
 		 */
 		sched_block_current();
 	}
@@ -616,10 +851,8 @@ static void keyboard_scancode(uint8_t sc)
 		tty_in_push(c);
 }
 
-/* Master 8259 data port. The remap in idt.c left both lines masked, and IRQ1 is
- * bit 1 of that byte. */
-#define PIC1_DATA_PORT 0x21
-#define PIC1_IRQ_KEYBOARD_BIT 0x02
+/* Master 8259 data port and the keyboard's line bit are defined with the COM1
+ * ones above, so that both unmasked lines are named in the same place. */
 
 static void keyboard_irq(struct interrupt_frame *frame)
 {
@@ -768,13 +1001,53 @@ void tty_init(void)
 	 * entered by the same interrupt.
 	 */
 	idt_set_handler(VECTOR_IRQ_KEYBOARD, keyboard_irq, IST_NONE, 0);
+	idt_set_handler(VECTOR_IRQ_COM1, com1_irq, IST_NONE, 0);
+
+	/*
+	 * The UART's own half of the same rule. serial_init() programs the
+	 * interrupt enable register to 0x00, so the receiver has been raising
+	 * nothing since boot and no amount of unmasking IRQ4 would produce an
+	 * interrupt. Read-modify-write rather than a plain assignment: bit 1 is
+	 * the transmit-empty interrupt, which belongs to whoever wants it, and
+	 * silently clearing it here would make this file responsible for a
+	 * decision it did not make.
+	 *
+	 * Still before the PIC unmask below, so the line cannot become visible
+	 * before there is something behind it.
+	 */
+	outb(COM1 + UART_IER,
+	     (uint8_t)(inb(COM1 + UART_IER) | UART_IER_RX_AVAILABLE));
 
 	config = inb(PIC1_DATA_PORT);
-	config &= (uint8_t)~PIC1_IRQ_KEYBOARD_BIT;
+	config &= (uint8_t)~(PIC1_IRQ_KEYBOARD_BIT | PIC1_IRQ_COM1_BIT);
 	outb(PIC1_DATA_PORT, config);
+
+	/*
+	 * Read both lines back. This is a pin and not politeness: the two
+	 * unmasked bits are the entire difference between a tty that can be
+	 * typed at and one that cannot, and the failure mode is completely
+	 * silent -- the poll still works, so the console keeps printing, the
+	 * kernel looks healthy, and a person types at a terminal that is not
+	 * listening. OCPW1 reads back the mask register, so this says what the
+	 * device is actually using rather than what was written to it.
+	 */
+	config = inb(PIC1_DATA_PORT);
+	if (config & (PIC1_IRQ_KEYBOARD_BIT | PIC1_IRQ_COM1_BIT)) {
+		klog(KLOG_FATAL, "tty: PIC1 unmask did not take, mask is %#x "
+		     "(keyboard %#x, COM1 %#x)\n", (unsigned)config,
+		     (unsigned)!!(config & PIC1_IRQ_KEYBOARD_BIT),
+		     (unsigned)!!(config & PIC1_IRQ_COM1_BIT));
+		return;
+	}
+
+	if (!(inb(COM1 + UART_IER) & UART_IER_RX_AVAILABLE))
+		klog(KLOG_FATAL, "tty: COM1 receive interrupt enable did not "
+		     "take, IER is %#x\n", (unsigned)inb(COM1 + UART_IER));
+
 
 	irq_restore(flags);
 
 	klog(KLOG_INFO, "tty: rings %u bytes each, 8042 up, keyboard on "
-	     "vector %u\n", (unsigned)TTY_RING_CAP, VECTOR_IRQ_KEYBOARD);
+	     "vector %u, COM1 receive on vector %u\n", (unsigned)TTY_RING_CAP,
+	     VECTOR_IRQ_KEYBOARD, VECTOR_IRQ_COM1);
 }
