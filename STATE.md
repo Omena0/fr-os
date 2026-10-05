@@ -489,6 +489,52 @@ process may write here" are different questions, and only the second is a
 permission decision. The kernel-side refusal is kept for faults at or above
 `MM_USER_LIMIT` and for reserved-bit violations.
 
+### 7.1c Two facts that will waste an hour if you do not know them
+
+**`-d int` output is lost when QEMU is killed, not absent.** It is buffered. Every
+harness here stops QEMU with a signal and then kills it, so the tail of
+`-D file` never reaches disk and the file reads empty — which looks exactly
+like "no interrupts were delivered". Let QEMU exit on its own if you need the
+trace. **An empty `-d int` file is not evidence of anything.**
+
+**`-d int` also produces nothing under `-enable-kvm`**, because it logs TCG
+translation-block events and KVM services interrupts in hardware without them
+appearing there. Every piece of `-d int` evidence in this project came from
+`-cpu max`. Comparing a KVM run against an earlier TCG run and concluding
+something changed is comparing the accelerator.
+
+**The PS/2 controller in this QEMU answers nothing at all, and that is QEMU's
+doing, not the guest's.** Measured on an idle machine with no guest, through
+QEMU's own monitor: unassigned ports (`0x2f0`, `0xe0`, `0x3e0`) read
+`0xffffffff`, while `0x64`/`0x60`/`0x61` read real values — so the device is
+present and initialised. But no command produces a reply: not `0xAA` (self
+test), `0xAB`, `0x20` or `0xAE`, and **not QEMU's own `sendkey`**, which does
+not even raise the output-buffer-full bit. Do not spend time trying to make the
+guest initialise its way out of this.
+
+**QEMU's stdio chardev does forward piped stdin to COM1.** Read COM1's LSR
+through the monitor while piping with the pipe held open and the data written
+several seconds in: the data-ready bit set and the byte was `0x6c`, the third
+character of `help\n`. The console is reachable by typing at it.
+
+### 7.1d execve could not run anything but init — fixed, unexercised
+
+`hello` is built by the same Makefile rule as init and placed in the same
+initrd container, and there was no way to run it. `execve` said so itself:
+*"There is no filesystem, so there is exactly one executable: the image linked
+into the kernel"*, accepting only `/init`, `/bin/init`, `/sbin/init`.
+
+The container was never init-specific — it carries a name and length per entry
+plus a count, and the lookup already walked all of them. It just compared every
+name against the literal `"init"`. Now generalised, and only the last path
+component is significant, since there is no filesystem to give a leading slash
+any meaning. init gains `run <program> [args]`.
+
+**Not verified end to end**, because there is no way to type the command: no
+input reaches init yet. The container parse is confirmed by hand (both entries
+present, payload base 73) and PID 1 is created again, but `run hello` has not
+been observed to execute hello.
+
 ### 7.1b Closed this session, in the order it was found
 
 1. `gdt_flush`'s far return — §2.
