@@ -1,0 +1,1 @@
+/home/omena0/Github/os/docs/site/script.js

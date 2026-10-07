@@ -1,259 +1,55 @@
-<!DOCTYPE html>
-<html lang="en" data-site-prefix="/fr-os/">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Build/makefile-structure — Fr OS</title>
-  <meta property="og:title" content="Build/makefile-structure — Fr OS">
-  <meta name="description" content="Build/makefile-structure — Fr OS documentation">
-  <meta property="og:description" content="Build/makefile-structure — Fr OS documentation">
-  <meta property="og:type" content="website">
-  <meta property="og:site_name" content="Fr OS Docs">
-  <meta name="theme-color" content="#6366f1">
-  <meta name="color-scheme" content="dark">
-  <link rel="icon" href="/fr-os/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/fr-os/style.css">
-  <link rel="stylesheet" href="/fr-os/fonts.css" media="print" onload="this.media='all'">
-</head>
-<body>
-  <!-- Header -->
-  <header class="site-header">
-    <button class="menu-toggle" aria-label="Toggle menu">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
-        <path d="M3 12h18M3 6h18M3 18h18"/>
-      </svg>
-    </button>
-    <div class="header-brand-row">
-      <a href="index.html" class="header-brand">
-          <span class="logo">F</span>
-          Fr OS
-      </a>
-      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
-    </div>
-    <div class="header-search">
-      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
-    </div>
-    <nav class="header-nav">
-      <a href="index.html">Docs</a>
-    </nav>
-  </header>
+<!DOCTYPE html><html lang=en data-site-prefix=/fr-os/><head><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Build/makefile-structure — Fr OS</title><meta property=og:title content="Build/makefile-structure — Fr OS"><meta name=description content="Build/makefile-structure — Fr OS documentation"><meta property=og:description content="Build/makefile-structure — Fr OS documentation"><meta property=og:type content=website><meta property=og:site_name content="Fr OS Docs"><meta name=theme-color content=#6366f1><meta name=color-scheme content=dark><link rel=icon href=/fr-os/favicon.svg type=image/svg+xml><link rel=stylesheet href=/fr-os/style.css><link rel=stylesheet href=/fr-os/fonts.css media=print onload='this.media="all"'></head><body><header class=site-header><button class=menu-toggle aria-label="Toggle menu"><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" viewBox="0 0 24 24"><path d="M3 12h18M3 6h18M3 18h18"/></svg></button><div class=header-brand-row><a rel=prefetch href=/fr-os/build/index.html class=header-brand><span class=logo>F</span> Fr OS</a><div class=version-selector-wrap><select id=version-selector class=version-selector aria-label="Select version">{config.get("_version_options", "")}</select></div></div><div class=header-search><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" class="header-search-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type=text id=header-search placeholder="Search docs… (Ctrl+K)"autocomplete=off><div id=search-results class=search-results></div></div><nav class=header-nav><a rel=prefetch href=/fr-os/build/index.html>Docs</a></nav></header><aside class=sidebar><div class=search-box><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" class="search-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg> <input type=text id=sidebar-search placeholder="Search docs…"></div><div class=sidebar-section><div class="sidebar-heading collapsed"data-section=fr-os>Fr OS</div><ul class=sidebar-links><li><a rel=prefetch href=/fr-os/index.html>Overview</a></li><li><a rel=prefetch href=/fr-os/architecture/overview.html>Architecture</a></li><li><a rel=prefetch href=/fr-os/architecture/memory-layout.html>Memory Layout</a></li><li><a rel=prefetch href=/fr-os/architecture/posix-compliance.html>POSIX Compliance</a></li><li><a rel=prefetch href=/fr-os/architecture/security-model.html>Security Model</a></li><li><a rel=prefetch href=/fr-os/architecture/performance-mandate.html>Performance Mandate</a></li></ul></div><div class=sidebar-section><div class="sidebar-heading collapsed"data-section=fr-boot>Fr Boot</div><ul class=sidebar-links><li><a rel=prefetch href=/fr-os/bootloader/overview.html>Overview</a></li><li><a rel=prefetch href=/fr-os/bootloader/stage1.html>Stage 1</a></li><li><a rel=prefetch href=/fr-os/bootloader/stage2.html>Stage 2</a></li><li><a rel=prefetch href=/fr-os/bootloader/kernel-handoff.html>Kernel Handoff</a></li><li><a rel=prefetch href=/fr-os/bootloader/memory-map.html>Memory Map</a></li><li><a rel=prefetch href=/fr-os/bootloader/serial-output.html>Serial Output</a></li><li><a rel=prefetch href=/fr-os/bootloader/build.html>Build</a></li></ul></div><div class=sidebar-section><div class="sidebar-heading collapsed"data-section=fr-core>Fr Core</div><ul class=sidebar-links><li><a rel=prefetch href=/fr-os/kernel/overview.html>Overview</a></li><li><a rel=prefetch href=/fr-os/kernel/early-boot.html>Early Boot</a></li><li><a rel=prefetch href=/fr-os/kernel/interrupt-handling.html>Interrupts</a></li><li><a rel=prefetch href=/fr-os/kernel/context-switching.html>Context Switching</a></li><li><a rel=prefetch href=/fr-os/kernel/privilege-levels.html>Privilege Levels</a></li><li><a rel=prefetch href=/fr-os/kernel/syscall-abi.html>Syscall ABI</a></li><li><a rel=prefetch href=/fr-os/kernel/panic-system.html>Panic</a></li><li><a rel=prefetch href=/fr-os/kernel/logging.html>Logging</a></li></ul></div><div class=sidebar-section><div class="sidebar-heading collapsed"data-section=memory>Memory</div><ul class=sidebar-links><li><a rel=prefetch href=/fr-os/memory/overview.html>Overview</a></li><li><a rel=prefetch href=/fr-os/memory/physical-allocator.html>Physical Allocator</a></li><li><a rel=prefetch href=/fr-os/memory/buddy-allocator.html>Buddy Allocator</a></li><li><a rel=prefetch href=/fr-os/memory/slab-allocator.html>SLAB</a></li><li><a rel=prefetch href=/fr-os/memory/virtual-memory.html>Virtual Memory</a></li><li><a rel=prefetch href=/fr-os/memory/userspace-malloc.html>Userspace malloc</a></li></ul></div><div class=sidebar-section><div class="sidebar-heading collapsed"data-section=scheduling>Scheduling</div><ul class=sidebar-links><li><a rel=prefetch href=/fr-os/scheduling/overview.html>Overview</a></li><li><a rel=prefetch href=/fr-os/scheduling/mlfq.html>MLFQ</a></li><li><a rel=prefetch href=/fr-os/scheduling/realtime-scheduler.html>Realtime</a></li><li><a rel=prefetch href=/fr-os/scheduling/multicore-overview.html>Multicore</a></li></ul></div><div class=sidebar-section><div class="sidebar-heading collapsed"data-section=syscalls>Syscalls</div><ul class=sidebar-links><li><a rel=prefetch href=/fr-os/syscalls/overview.html>Overview</a></li><li><a rel=prefetch href=/fr-os/syscalls/dispatch-path.html>Dispatch Path</a></li><li><a rel=prefetch href=/fr-os/syscalls/process-syscalls.html>Process</a></li><li><a rel=prefetch href=/fr-os/syscalls/memory-syscalls.html>Memory</a></li><li><a rel=prefetch href=/fr-os/syscalls/file-syscalls.html>File</a></li></ul></div><div class=sidebar-section><div class="sidebar-heading collapsed"data-section=fr-libc-and-fr-userland>Fr Libc and Fr Userland</div><ul class=sidebar-links><li><a rel=prefetch href=/fr-os/userspace/overview.html>Overview</a></li><li><a rel=prefetch href=/fr-os/userspace/libc.html>Fr Libc</a></li><li><a rel=prefetch href=/fr-os/userspace/process-model.html>Process Model</a></li><li><a rel=prefetch href=/fr-os/userspace/elf-loading.html>ELF Loading</a></li><li><a rel=prefetch href=/fr-os/userspace/init-system.html>Fr Init</a></li></ul></div><div class=sidebar-section><div class="sidebar-heading collapsed"data-section=designed-not-built>Designed, Not Built</div><ul class=sidebar-links><li><a rel=prefetch href=/fr-os/filesystem/overview.html>Filesystem</a></li><li><a rel=prefetch href=/fr-os/networking/overview.html>Networking</a></li><li><a rel=prefetch href=/fr-os/ipc/overview.html>IPC</a></li><li><a rel=prefetch href=/fr-os/drivers/overview.html>Drivers</a></li><li><a rel=prefetch href=/fr-os/security/overview.html>Security</a></li></ul></div><div class=sidebar-section><div class=sidebar-heading data-section=building-and-debugging>Building and Debugging</div><ul class=sidebar-links><li><a rel=prefetch href=/fr-os/build/overview.html>Build Overview</a></li><li><a rel=prefetch href=/fr-os/build/toolchain.html>Toolchain</a></li><li><a rel=prefetch href=/fr-os/build/build/makefile-structure.html class=active>Makefile</a></li><li><a rel=prefetch href=/fr-os/build/qemu-setup.html>QEMU</a></li><li><a rel=prefetch href=/fr-os/build/testing.html>Testing</a></li><li><a rel=prefetch href=/fr-os/debugging/overview.html>Debugging</a></li><li><a rel=prefetch href=/fr-os/debugging/serial-diagnostics.html>Serial Diagnostics</a></li></ul></div></aside><div class=sidebar-overlay></div><main class=main><div class=content><h1>Makefile Structure</h1><h2>Top-Level Makefile</h2><p>The repository root contains a single top-level <code>Makefile</code> that orchestrates all sub-builds:</p><pre><code class=language-makefile><span class=hl-comment># Top-level Makefile</span>
 
-  <!-- Sidebar -->
-  <aside class="sidebar">
-<div class="search-box">
-  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
-    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
-  </svg>
-  <input type="text" id="sidebar-search" placeholder="Search docs…">
-</div>
-<div class="sidebar-section">
-  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
-  <ul class="sidebar-links">
-    <li><a href="../index.html">Overview</a></li>
-    <li><a href="../architecture/overview.html">Architecture</a></li>
-    <li><a href="../architecture/memory-layout.html">Memory Layout</a></li>
-    <li><a href="../architecture/posix-compliance.html">POSIX Compliance</a></li>
-    <li><a href="../architecture/security-model.html">Security Model</a></li>
-    <li><a href="../architecture/performance-mandate.html">Performance Mandate</a></li>
-  </ul>
-</div>
-<div class="sidebar-section">
-  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
-  <ul class="sidebar-links">
-    <li><a href="../bootloader/overview.html">Overview</a></li>
-    <li><a href="../bootloader/stage1.html">Stage 1</a></li>
-    <li><a href="../bootloader/stage2.html">Stage 2</a></li>
-    <li><a href="../bootloader/kernel-handoff.html">Kernel Handoff</a></li>
-    <li><a href="../bootloader/memory-map.html">Memory Map</a></li>
-    <li><a href="../bootloader/serial-output.html">Serial Output</a></li>
-    <li><a href="../bootloader/build.html">Build</a></li>
-  </ul>
-</div>
-<div class="sidebar-section">
-  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
-  <ul class="sidebar-links">
-    <li><a href="../kernel/overview.html">Overview</a></li>
-    <li><a href="../kernel/early-boot.html">Early Boot</a></li>
-    <li><a href="../kernel/interrupt-handling.html">Interrupts</a></li>
-    <li><a href="../kernel/context-switching.html">Context Switching</a></li>
-    <li><a href="../kernel/privilege-levels.html">Privilege Levels</a></li>
-    <li><a href="../kernel/syscall-abi.html">Syscall ABI</a></li>
-    <li><a href="../kernel/panic-system.html">Panic</a></li>
-    <li><a href="../kernel/logging.html">Logging</a></li>
-  </ul>
-</div>
-<div class="sidebar-section">
-  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
-  <ul class="sidebar-links">
-    <li><a href="../memory/overview.html">Overview</a></li>
-    <li><a href="../memory/physical-allocator.html">Physical Allocator</a></li>
-    <li><a href="../memory/buddy-allocator.html">Buddy Allocator</a></li>
-    <li><a href="../memory/slab-allocator.html">SLAB</a></li>
-    <li><a href="../memory/virtual-memory.html">Virtual Memory</a></li>
-    <li><a href="../memory/userspace-malloc.html">Userspace malloc</a></li>
-  </ul>
-</div>
-<div class="sidebar-section">
-  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
-  <ul class="sidebar-links">
-    <li><a href="../scheduling/overview.html">Overview</a></li>
-    <li><a href="../scheduling/mlfq.html">MLFQ</a></li>
-    <li><a href="../scheduling/realtime-scheduler.html">Realtime</a></li>
-    <li><a href="../scheduling/multicore-overview.html">Multicore</a></li>
-  </ul>
-</div>
-<div class="sidebar-section">
-  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
-  <ul class="sidebar-links">
-    <li><a href="../syscalls/overview.html">Overview</a></li>
-    <li><a href="../syscalls/dispatch-path.html">Dispatch Path</a></li>
-    <li><a href="../syscalls/process-syscalls.html">Process</a></li>
-    <li><a href="../syscalls/memory-syscalls.html">Memory</a></li>
-    <li><a href="../syscalls/file-syscalls.html">File</a></li>
-  </ul>
-</div>
-<div class="sidebar-section">
-  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
-  <ul class="sidebar-links">
-    <li><a href="../userspace/overview.html">Overview</a></li>
-    <li><a href="../userspace/libc.html">Fr Libc</a></li>
-    <li><a href="../userspace/process-model.html">Process Model</a></li>
-    <li><a href="../userspace/elf-loading.html">ELF Loading</a></li>
-    <li><a href="../userspace/init-system.html">Fr Init</a></li>
-  </ul>
-</div>
-<div class="sidebar-section">
-  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
-  <ul class="sidebar-links">
-    <li><a href="../filesystem/overview.html">Filesystem</a></li>
-    <li><a href="../networking/overview.html">Networking</a></li>
-    <li><a href="../ipc/overview.html">IPC</a></li>
-    <li><a href="../drivers/overview.html">Drivers</a></li>
-    <li><a href="../security/overview.html">Security</a></li>
-  </ul>
-</div>
-<div class="sidebar-section">
-  <div class="sidebar-heading" data-section="building-and-debugging">Building and Debugging</div>
-  <ul class="sidebar-links">
-    <li><a href="overview.html">Build Overview</a></li>
-    <li><a href="toolchain.html">Toolchain</a></li>
-    <li><a href="build/makefile-structure.html" class="active">Makefile</a></li>
-    <li><a href="qemu-setup.html">QEMU</a></li>
-    <li><a href="testing.html">Testing</a></li>
-    <li><a href="../debugging/overview.html">Debugging</a></li>
-    <li><a href="../debugging/serial-diagnostics.html">Serial Diagnostics</a></li>
-  </ul>
-</div>
-  </aside>
-  <div class="sidebar-overlay"></div>
+<span class=hl-string-special-symbol>CROSS</span>    <span class=hl-operator>:=</span> x86_64-elf
+<span class=hl-string-special-symbol>CC</span>       <span class=hl-operator>:=</span> <span class=hl-operator>$(</span><span class=hl-string>CROSS</span><span class=hl-operator>)</span>-gcc
+<span class=hl-string-special-symbol>LD</span>       <span class=hl-operator>:=</span> <span class=hl-operator>$(</span><span class=hl-string>CROSS</span><span class=hl-operator>)</span>-ld
+<span class=hl-string-special-symbol>OBJCOPY</span>  <span class=hl-operator>:=</span> <span class=hl-operator>$(</span><span class=hl-string>CROSS</span><span class=hl-operator>)</span>-objcopy
+<span class=hl-string-special-symbol>NASM</span>     <span class=hl-operator>:=</span> nasm
+<span class=hl-string-special-symbol>QEMU</span>     <span class=hl-operator>:=</span> qemu-system-x86_64
 
-  <!-- Main -->
-  <main class="main">
-    <div class="content">
-      
-      <h1>Makefile Structure</h1>
-<h2>Top-Level Makefile</h2>
-<p>The repository root contains a single top-level <code>Makefile</code> that orchestrates all sub-builds:</p>
-<pre><code class="language-makefile"><span class="hl-comment"># Top-level Makefile</span>
+<span class=hl-string-special-symbol>BUILDDIR</span> <span class=hl-operator>:=</span> build
 
-<span class="hl-string-special-symbol">CROSS</span>    <span class="hl-operator">:=</span> x86_64-elf
-<span class="hl-string-special-symbol">CC</span>       <span class="hl-operator">:=</span> <span class="hl-operator">$(</span><span class="hl-string">CROSS</span><span class="hl-operator">)</span>-gcc
-<span class="hl-string-special-symbol">LD</span>       <span class="hl-operator">:=</span> <span class="hl-operator">$(</span><span class="hl-string">CROSS</span><span class="hl-operator">)</span>-ld
-<span class="hl-string-special-symbol">OBJCOPY</span>  <span class="hl-operator">:=</span> <span class="hl-operator">$(</span><span class="hl-string">CROSS</span><span class="hl-operator">)</span>-objcopy
-<span class="hl-string-special-symbol">NASM</span>     <span class="hl-operator">:=</span> nasm
-<span class="hl-string-special-symbol">QEMU</span>     <span class="hl-operator">:=</span> qemu-system-x86_64
+<span class=hl-function-builtin>.PHONY</span><span class=hl-operator>:</span> all clean run iso test <span class=hl-function>check</span>
 
-<span class="hl-string-special-symbol">BUILDDIR</span> <span class="hl-operator">:=</span> build
+<span class=hl-function>all</span><span class=hl-operator>:</span> <span class=hl-operator>$(</span><span class=hl-string>BUILDDIR</span><span class=hl-operator>)</span>/disk.img
 
-<span class="hl-function-builtin">.PHONY</span><span class="hl-operator">:</span> all clean run iso test <span class="hl-function">check</span>
+<span class=hl-function>clean</span><span class=hl-operator>:</span>
+    <span class=hl-function>rm</span> <span class=hl-function>-rf</span> <span class=hl-operator>$(</span><span class=hl-string>BUILDDIR</span><span class=hl-operator>)</span>
 
-<span class="hl-function">all</span><span class="hl-operator">:</span> <span class="hl-operator">$(</span><span class="hl-string">BUILDDIR</span><span class="hl-operator">)</span>/disk.img
+run<span class=hl-operator>:</span> all
+    <span class=hl-operator>$(</span><span class=hl-string>QEMU</span><span class=hl-operator>)</span> <span class=hl-function>-enable-kvm</span> <span class=hl-function>-cpu</span> <span class=hl-function>host</span> <span class=hl-function>-smp</span> <span class=hl-function>18</span> <span class=hl-function>-m</span> <span class=hl-function>4G</span> \
+        <span class=hl-function>-drive</span> format=raw,file=<span class=hl-operator>$(</span><span class=hl-string>BUILDDIR</span><span class=hl-operator>)</span>/disk.img \
+        <span class=hl-function>-serial</span> <span class=hl-function>stdio</span> <span class=hl-function>-display</span> <span class=hl-function>gtk</span> -no-reboot
 
-<span class="hl-function">clean</span><span class="hl-operator">:</span>
-    <span class="hl-function">rm</span> <span class="hl-function">-rf</span> <span class="hl-operator">$(</span><span class="hl-string">BUILDDIR</span><span class="hl-operator">)</span>
+iso<span class=hl-operator>:</span> <span class=hl-operator>$(</span><span class=hl-string>BUILDDIR</span><span class=hl-operator>)</span>/os.iso
 
-run<span class="hl-operator">:</span> all
-    <span class="hl-operator">$(</span><span class="hl-string">QEMU</span><span class="hl-operator">)</span> <span class="hl-function">-enable-kvm</span> <span class="hl-function">-cpu</span> <span class="hl-function">host</span> <span class="hl-function">-smp</span> <span class="hl-function">18</span> <span class="hl-function">-m</span> <span class="hl-function">4G</span> \
-        <span class="hl-function">-drive</span> format=raw,file=<span class="hl-operator">$(</span><span class="hl-string">BUILDDIR</span><span class="hl-operator">)</span>/disk.img \
-        <span class="hl-function">-serial</span> <span class="hl-function">stdio</span> <span class="hl-function">-display</span> <span class="hl-function">gtk</span> -no-reboot
+<span class=hl-function>test</span><span class=hl-operator>:</span> unit-tests
 
-iso<span class="hl-operator">:</span> <span class="hl-operator">$(</span><span class="hl-string">BUILDDIR</span><span class="hl-operator">)</span>/os.iso
+<span class=hl-function>check</span><span class=hl-operator>:</span> unit-tests integration-tests
 
-<span class="hl-function">test</span><span class="hl-operator">:</span> unit-tests
+<span class=hl-comment># Include sub-build rules:</span>
+<span class=hl-keyword-import>include</span> <span class=hl-string-special-path>src/boot/Makefile.inc</span>
+<span class=hl-keyword-import>include</span> <span class=hl-string-special-path>src/kernel/Makefile.inc</span>
+<span class=hl-keyword-import>include</span> <span class=hl-string-special-path>src/libc/Makefile.inc</span>
+<span class=hl-keyword-import>include</span> <span class=hl-string-special-path>src/userspace/Makefile.inc</span>
+<span class=hl-keyword-import>include</span> <span class=hl-string-special-path>src/initrd/Makefile.inc</span>
+<span class=hl-keyword-import>include</span> <span class=hl-string-special-path>src/disk/Makefile.inc</span>
+</code></pre><h2>Sub-Build Makefile Fragments</h2><h3><code>src/boot/Makefile.inc</code></h3><pre><code class=language-makefile><span class=hl-string-special-symbol>BOOT_STAGE1_SRC</span> <span class=hl-operator>:=</span> src/boot/stage1.asm
+<span class=hl-string-special-symbol>BOOT_STAGE2_SRC</span> <span class=hl-operator>:=</span> <span class=hl-operator>$</span><span class=hl-operator>(</span><span class=hl-function-builtin>wildcard</span> src/boot/stage2/*.c src/boot/stage2/*.asm<span class=hl-operator>)</span>
 
-<span class="hl-function">check</span><span class="hl-operator">:</span> unit-tests integration-tests
+<span class=hl-operator>$(</span><span class=hl-string>BUILDDIR</span><span class=hl-operator>)</span>/stage1.bin<span class=hl-operator>:</span> <span class=hl-operator>$(</span><span class=hl-string>BOOT_STAGE1_SRC</span><span class=hl-operator>)</span>
+    <span class=hl-operator>$(</span><span class=hl-string>NASM</span><span class=hl-operator>)</span> <span class=hl-function>-f</span> <span class=hl-function>bin</span> <span class=hl-function>-o</span> <span class=hl-operator>$</span><span class=hl-character-special>@</span> <span class=hl-operator>$</span><span class=hl-character-special>&lt;</span>
 
-<span class="hl-comment"># Include sub-build rules:</span>
-<span class="hl-keyword-import">include</span> <span class="hl-string-special-path">src/boot/Makefile.inc</span>
-<span class="hl-keyword-import">include</span> <span class="hl-string-special-path">src/kernel/Makefile.inc</span>
-<span class="hl-keyword-import">include</span> <span class="hl-string-special-path">src/libc/Makefile.inc</span>
-<span class="hl-keyword-import">include</span> <span class="hl-string-special-path">src/userspace/Makefile.inc</span>
-<span class="hl-keyword-import">include</span> <span class="hl-string-special-path">src/initrd/Makefile.inc</span>
-<span class="hl-keyword-import">include</span> <span class="hl-string-special-path">src/disk/Makefile.inc</span>
-</code></pre>
-<h2>Sub-Build Makefile Fragments</h2>
-<h3><code>src/boot/Makefile.inc</code></h3>
-<pre><code class="language-makefile"><span class="hl-string-special-symbol">BOOT_STAGE1_SRC</span> <span class="hl-operator">:=</span> src/boot/stage1.asm
-<span class="hl-string-special-symbol">BOOT_STAGE2_SRC</span> <span class="hl-operator">:=</span> <span class="hl-operator">$</span><span class="hl-operator">(</span><span class="hl-function-builtin">wildcard</span> src/boot/stage2/*.c src/boot/stage2/*.asm<span class="hl-operator">)</span>
-
-<span class="hl-operator">$(</span><span class="hl-string">BUILDDIR</span><span class="hl-operator">)</span>/stage1.bin<span class="hl-operator">:</span> <span class="hl-operator">$(</span><span class="hl-string">BOOT_STAGE1_SRC</span><span class="hl-operator">)</span>
-    <span class="hl-operator">$(</span><span class="hl-string">NASM</span><span class="hl-operator">)</span> <span class="hl-function">-f</span> <span class="hl-function">bin</span> <span class="hl-function">-o</span> <span class="hl-operator">$</span><span class="hl-character-special">@</span> <span class="hl-operator">$</span><span class="hl-character-special">&lt;</span>
-
-<span class="hl-operator">$(</span><span class="hl-string">BUILDDIR</span><span class="hl-operator">)</span>/stage2.elf<span class="hl-operator">:</span> <span class="hl-operator">$(</span><span class="hl-string">BOOT_STAGE2_SRC</span><span class="hl-operator">)</span>
-    i686-elf-gcc -m32 -ffreestanding -nostdlib -o <span class="hl-operator">$</span><span class="hl-character-special">@</span> <span class="hl-operator">$</span><span class="hl-character-special">^</span> \
-        -T src/boot/stage2/link.ld
-</code></pre>
-<h3><code>src/kernel/Makefile.inc</code></h3>
-<pre><code class="language-makefile"><span class="hl-string-special-symbol">KERNEL_SRCS</span> <span class="hl-operator">:=</span> <span class="hl-operator">$</span><span class="hl-operator">(</span><span class="hl-function-builtin">wildcard</span> src/kernel/**/*.c src/kernel/**/*.asm<span class="hl-operator">)</span>
-<span class="hl-string-special-symbol">KERNEL_CFLAGS</span> <span class="hl-operator">:=</span> -ffreestanding -nostdlib -mno-red-zone -mno-mmx -mno-sse \
+<span class=hl-operator>$(</span><span class=hl-string>BUILDDIR</span><span class=hl-operator>)</span>/stage2.elf<span class=hl-operator>:</span> <span class=hl-operator>$(</span><span class=hl-string>BOOT_STAGE2_SRC</span><span class=hl-operator>)</span>
+    i686-elf-gcc -m32 -ffreestanding -nostdlib -o <span class=hl-operator>$</span><span class=hl-character-special>@</span> <span class=hl-operator>$</span><span class=hl-character-special>^</span> \
+        -T src/boot/stage2/link.ld</code></pre><h3><code>src/kernel/Makefile.inc</code></h3><pre><code class=language-makefile><span class=hl-string-special-symbol>KERNEL_SRCS</span> <span class=hl-operator>:=</span> <span class=hl-operator>$</span><span class=hl-operator>(</span><span class=hl-function-builtin>wildcard</span> src/kernel/**/*.c src/kernel/**/*.asm<span class=hl-operator>)</span>
+<span class=hl-string-special-symbol>KERNEL_CFLAGS</span> <span class=hl-operator>:=</span> -ffreestanding -nostdlib -mno-red-zone -mno-mmx -mno-sse \
     -Wall -Wextra -O2 -g -mcmodel=kernel \
     -mno-implicit-float
 
-<span class="hl-operator">$(</span><span class="hl-string">BUILDDIR</span><span class="hl-operator">)</span>/kernel.elf<span class="hl-operator">:</span> <span class="hl-operator">$(</span><span class="hl-string">KERNEL_SRCS</span><span class="hl-operator">)</span>
-    <span class="hl-operator">$(</span><span class="hl-string">CC</span><span class="hl-operator">)</span> <span class="hl-operator">$(</span><span class="hl-string">KERNEL_CFLAGS</span><span class="hl-operator">)</span> -o <span class="hl-operator">$</span><span class="hl-character-special">@</span> <span class="hl-operator">$</span><span class="hl-character-special">^</span> -T src/kernel/link.ld
-    <span class="hl-operator">$(</span><span class="hl-string">OBJCOPY</span><span class="hl-operator">)</span> --strip-debug -O binary <span class="hl-operator">$</span><span class="hl-character-special">@</span> <span class="hl-operator">$(</span><span class="hl-string">BUILDDIR</span><span class="hl-operator">)</span>/kernel.bin
-</code></pre>
-<h2>Key Compiler Flags</h2>
-<table>
-<thead>
-<tr>
-<th>Flag</th>
-<th>Reason</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>-ffreestanding</code></td>
-<td>No standard library; kernel provides its own runtime</td>
-</tr>
-<tr>
-<td><code>-nostdlib</code></td>
-<td>Do not link against host libc</td>
-</tr>
-<tr>
-<td><code>-mno-red-zone</code></td>
-<td>Disable red zone (required for interrupt handlers — ISRs can interrupt at any time)</td>
-</tr>
-<tr>
-<td><code>-mno-mmx -mno-sse -mno-implicit-float</code></td>
-<td>No FPU/SIMD in kernel (FPU context managed manually via CR0.TS)</td>
-</tr>
-<tr>
-<td><code>-mcmodel=kernel</code></td>
-<td>Place kernel in the upper half of the address space (above 0xFFFF800000000000)</td>
-</tr>
-<tr>
-<td><code>-O2</code></td>
-<td>Enable optimizations</td>
-</tr>
-<tr>
-<td><code>-g</code></td>
-<td>Include debug symbols in ELF (stripped to <code>.bin</code> by objcopy)</td>
-</tr>
-</tbody>
-</table>
-<h2>Linker Script: <code>src/kernel/link.ld</code></h2>
-<pre><code class="language-ld">OUTPUT_FORMAT(elf64-x86-64)
+<span class=hl-operator>$(</span><span class=hl-string>BUILDDIR</span><span class=hl-operator>)</span>/kernel.elf<span class=hl-operator>:</span> <span class=hl-operator>$(</span><span class=hl-string>KERNEL_SRCS</span><span class=hl-operator>)</span>
+    <span class=hl-operator>$(</span><span class=hl-string>CC</span><span class=hl-operator>)</span> <span class=hl-operator>$(</span><span class=hl-string>KERNEL_CFLAGS</span><span class=hl-operator>)</span> -o <span class=hl-operator>$</span><span class=hl-character-special>@</span> <span class=hl-operator>$</span><span class=hl-character-special>^</span> -T src/kernel/link.ld
+    <span class=hl-operator>$(</span><span class=hl-string>OBJCOPY</span><span class=hl-operator>)</span> --strip-debug -O binary <span class=hl-operator>$</span><span class=hl-character-special>@</span> <span class=hl-operator>$(</span><span class=hl-string>BUILDDIR</span><span class=hl-operator>)</span>/kernel.bin</code></pre><h2>Key Compiler Flags</h2><table><thead><tr><th>Flag</th><th>Reason</th></tr></thead><tbody><tr><td><code>-ffreestanding</code></td><td>No standard library; kernel provides its own runtime</td></tr><tr><td><code>-nostdlib</code></td><td>Do not link against host libc</td></tr><tr><td><code>-mno-red-zone</code></td><td>Disable red zone (required for interrupt handlers — ISRs can interrupt at any time)</td></tr><tr><td><code>-mno-mmx -mno-sse -mno-implicit-float</code></td><td>No FPU/SIMD in kernel (FPU context managed manually via CR0.TS)</td></tr><tr><td><code>-mcmodel=kernel</code></td><td>Place kernel in the upper half of the address space (above 0xFFFF800000000000)</td></tr><tr><td><code>-O2</code></td><td>Enable optimizations</td></tr><tr><td><code>-g</code></td><td>Include debug symbols in ELF (stripped to <code>.bin</code> by objcopy)</td></tr></tbody></table><h2>Linker Script: <code>src/kernel/link.ld</code></h2><pre><code class=language-ld>OUTPUT_FORMAT(elf64-x86-64)
 OUTPUT_ARCH(i386:x86-64)
 
 ENTRY(kernel_start)
@@ -266,39 +62,6 @@ SECTIONS {
     . = ALIGN(4096);
     .data   : { *(.data*) }
     .bss    : { *(COMMON) *(.bss*) }
-}
-</code></pre>
-<h2>Dependency Tracking</h2>
-<p>The Makefile uses automatic dependency generation:</p>
-<pre><code class="language-makefile"><span class="hl-string-special-symbol">DEPFLAGS</span> <span class="hl-operator">=</span> -MMD -MP -MF <span class="hl-operator">$(</span><span class="hl-string">BUILDDIR</span><span class="hl-operator">)</span>/<span class="hl-operator">$</span><span class="hl-character-special">*</span>.d
--include <span class="hl-operator">$</span><span class="hl-operator">(</span><span class="hl-function-builtin">wildcard</span> <span class="hl-operator">$(</span><span class="hl-string">BUILDDIR</span><span class="hl-operator">)</span>/**/*.d<span class="hl-operator">)</span>
-</code></pre>
-<p><code>-MMD -MP</code> cause GCC to write a <code>.d</code> file alongside each object file listing all header dependencies. The <code>-include</code> re-reads those <code>.d</code> files so header changes trigger recompilation.</p>
-<h2>Related Documents</h2>
-<ul>
-<li><a href="overview.html">overview.md</a></li>
-<li><a href="toolchain.html">toolchain.md</a></li>
-<li><a href="cross-compilation.html">cross-compilation.md</a></li>
-<li><a href="qemu-setup.html">qemu-setup.md</a></li>
-</ul>
-    </div>
-    <footer class="site-footer">
-      &copy; 2026 Omena0 &middot; Fr OS Documentation
-    </footer>
-  </main>
-
-  <!-- Back to top -->
-  <button class="back-to-top" aria-label="Back to top">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-        <path d="M18 15l-6-6-6 6"/>
-      </svg>
-    </button>
-
-    
-    <script id="code-refs-data" type="application/json">[]</script>
-    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
-    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
-    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
-    <script src="/fr-os/script.js" defer></script>
-</body>
-</html>
+}</code></pre><h2>Dependency Tracking</h2><p>The Makefile uses automatic dependency generation:</p><pre><code class=language-makefile><span class=hl-string-special-symbol>DEPFLAGS</span> <span class=hl-operator>=</span> -MMD -MP -MF <span class=hl-operator>$(</span><span class=hl-string>BUILDDIR</span><span class=hl-operator>)</span>/<span class=hl-operator>$</span><span class=hl-character-special>*</span>.d
+-include <span class=hl-operator>$</span><span class=hl-operator>(</span><span class=hl-function-builtin>wildcard</span> <span class=hl-operator>$(</span><span class=hl-string>BUILDDIR</span><span class=hl-operator>)</span>/**/*.d<span class=hl-operator>)</span>
+</code></pre><p><code>-MMD -MP</code> cause GCC to write a <code>.d</code> file alongside each object file listing all header dependencies. The <code>-include</code> re-reads those <code>.d</code> files so header changes trigger recompilation.</p><h2>Related Documents</h2><ul><li><a rel=prefetch href=/fr-os/build/overview.html>overview.md</a></li><li><a rel=prefetch href=/fr-os/build/toolchain.html>toolchain.md</a></li><li><a rel=prefetch href=/fr-os/build/cross-compilation.html>cross-compilation.md</a></li><li><a rel=prefetch href=/fr-os/build/qemu-setup.html>qemu-setup.md</a></li></ul></div><footer class=site-footer>&copy; 2026 Omena0 &middot; Fr OS Documentation</footer></main><button class=back-to-top aria-label="Back to top"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></svg></button><script id=code-refs-data type=application/json>[]</script><script id=search-config type=application/json>{"pages":true,"titles":true,"headings":true,"content":true,"symbols":true,"files":true}</script><script id=features-config type=application/json>{"backlinks":true,"related":true,"auto_link":true,"versioning":true,"search":true,"code_references":true,"link_preview":true,"code_highlighting":true,"blockquotes":true,"ext_tags":true,"inline_copy":true}</script><script id=custom-tags-config type=application/json>{"ext":{"label":"Extensions","display":"ext","class":"ext-tag"}}</script><script src=/fr-os/script.js defer></script></body></html>
