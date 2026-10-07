@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="/fr-os/">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Userspace/libc — Fr OS</title>
+  <meta property="og:title" content="Userspace/libc — Fr OS">
+  <meta name="description" content="Userspace/libc — Fr OS documentation">
+  <meta property="og:description" content="Userspace/libc — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="/fr-os/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/fr-os/style.css">
+  <link rel="stylesheet" href="/fr-os/fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="../index.html">Overview</a></li>
+    <li><a href="../architecture/overview.html">Architecture</a></li>
+    <li><a href="../architecture/memory-layout.html">Memory Layout</a></li>
+    <li><a href="../architecture/posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="../architecture/security-model.html">Security Model</a></li>
+    <li><a href="../architecture/performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="../bootloader/overview.html">Overview</a></li>
+    <li><a href="../bootloader/stage1.html">Stage 1</a></li>
+    <li><a href="../bootloader/stage2.html">Stage 2</a></li>
+    <li><a href="../bootloader/kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="../bootloader/memory-map.html">Memory Map</a></li>
+    <li><a href="../bootloader/serial-output.html">Serial Output</a></li>
+    <li><a href="../bootloader/build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="../kernel/overview.html">Overview</a></li>
+    <li><a href="../kernel/early-boot.html">Early Boot</a></li>
+    <li><a href="../kernel/interrupt-handling.html">Interrupts</a></li>
+    <li><a href="../kernel/context-switching.html">Context Switching</a></li>
+    <li><a href="../kernel/privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="../kernel/syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="../kernel/panic-system.html">Panic</a></li>
+    <li><a href="../kernel/logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="../memory/overview.html">Overview</a></li>
+    <li><a href="../memory/physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="../memory/buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="../memory/slab-allocator.html">SLAB</a></li>
+    <li><a href="../memory/virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="../memory/userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="../scheduling/overview.html">Overview</a></li>
+    <li><a href="../scheduling/mlfq.html">MLFQ</a></li>
+    <li><a href="../scheduling/realtime-scheduler.html">Realtime</a></li>
+    <li><a href="../scheduling/multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="../syscalls/overview.html">Overview</a></li>
+    <li><a href="../syscalls/dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="../syscalls/process-syscalls.html">Process</a></li>
+    <li><a href="../syscalls/memory-syscalls.html">Memory</a></li>
+    <li><a href="../syscalls/file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="userspace/libc.html" class="active">Fr Libc</a></li>
+    <li><a href="process-model.html">Process Model</a></li>
+    <li><a href="elf-loading.html">ELF Loading</a></li>
+    <li><a href="init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="../filesystem/overview.html">Filesystem</a></li>
+    <li><a href="../networking/overview.html">Networking</a></li>
+    <li><a href="../ipc/overview.html">IPC</a></li>
+    <li><a href="../drivers/overview.html">Drivers</a></li>
+    <li><a href="../security/overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="../build/overview.html">Build Overview</a></li>
+    <li><a href="../build/toolchain.html">Toolchain</a></li>
+    <li><a href="../build/makefile-structure.html">Makefile</a></li>
+    <li><a href="../build/qemu-setup.html">QEMU</a></li>
+    <li><a href="../build/testing.html">Testing</a></li>
+    <li><a href="../debugging/overview.html">Debugging</a></li>
+    <li><a href="../debugging/serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>C Library (libc)</h1>
+<h2>Overview</h2>
+<p>The C library (<code><a href="userspace/libc.html" class="filename-reference">libc</a>.so.1</code>) provides the POSIX C runtime. It is the primary interface between application code and the kernel — most applications never call syscalls directly; they call libc wrappers.</p>
+<h2>Component Map</h2>
+<pre><code>libc.so.1
+  ├── syscall wrappers     (open, read, write, fork, ...)
+  ├── stdio                (FILE *, printf, fgets, fopen, fclose, ...)
+  ├── stdlib               (malloc, free, atoi, strtol, qsort, ...)
+  ├── string               (memcpy, memset, strlen, strcpy, strcmp, ...)
+  ├── time                 (time, clock_gettime, strftime, ...)
+  ├── signal               (signal, sigaction, sigemptyset, ...)
+  ├── setjmp               (setjmp, longjmp — non-local exit)
+  ├── ctype                (isalpha, isdigit, toupper, ...)
+  ├── locale               (setlocale, nl_langinfo, ...)
+  ├── environment          (getenv, setenv, putenv, environ)
+  ├── errno                (thread-local errno variable)
+  └── startup              (_start, __libc_init, __cxa_atexit, ...)
+</code></pre>
+<h2>Syscall Wrappers</h2>
+<p>Each syscall has a thin wrapper that:
+1. Calls the kernel via the <code>SYSCALL</code> instruction.
+2. On negative return: negates the value, stores in <code>errno</code>, returns -1.
+3. On success: returns the value directly.</p>
+<pre><code class="language-c"><span class="hl-type-builtin">int</span> <span class="hl-function">open</span><span class="hl-punctuation-bracket">(</span><span class="hl-keyword-modifier">const</span> <span class="hl-type-builtin">char</span> <span class="hl-operator">*</span><span class="hl-variable">path</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">int</span> <span class="hl-variable-parameter">flags</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-punctuation-special">...</span><span class="hl-punctuation-bracket">)</span> <span class="hl-punctuation-bracket">{</span>
+    <span class="hl-type">va_list</span> <span class="hl-variable">ap</span><span class="hl-punctuation-delimiter">;</span> <span class="hl-function-call">va_start</span><span class="hl-punctuation-bracket">(</span><span class="hl-variable">ap</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">flags</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+    <span class="hl-type">mode_t</span> <span class="hl-variable">mode</span> <span class="hl-operator">=</span> <span class="hl-function-call">va_arg</span><span class="hl-punctuation-bracket">(</span><span class="hl-variable">ap</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">mode_t</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span> <span class="hl-function-call">va_end</span><span class="hl-punctuation-bracket">(</span><span class="hl-variable">ap</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+    <span class="hl-type-builtin">long</span> <span class="hl-variable">ret</span> <span class="hl-operator">=</span> <span class="hl-function-call">__syscall3</span><span class="hl-punctuation-bracket">(</span><span class="hl-variable">SYS_open</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">long</span><span class="hl-punctuation-bracket">)</span><span class="hl-variable">path</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">long</span><span class="hl-punctuation-bracket">)</span><span class="hl-variable">flags</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">long</span><span class="hl-punctuation-bracket">)</span><span class="hl-variable">mode</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+    <span class="hl-keyword-conditional">if</span> <span class="hl-punctuation-bracket">(</span><span class="hl-variable">ret</span> <span class="hl-operator">&lt;</span> <span class="hl-number">0</span><span class="hl-punctuation-bracket">)</span> <span class="hl-punctuation-bracket">{</span> <span class="hl-variable">errno</span> <span class="hl-operator">=</span> <span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">int</span><span class="hl-punctuation-bracket">)</span><span class="hl-operator">-</span><span class="hl-variable">ret</span><span class="hl-punctuation-delimiter">;</span> <span class="hl-keyword-return">return</span> <span class="hl-number">-1</span><span class="hl-punctuation-delimiter">;</span> <span class="hl-punctuation-bracket">}</span>
+    <span class="hl-keyword-return">return</span> <span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">int</span><span class="hl-punctuation-bracket">)</span><span class="hl-variable">ret</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-punctuation-bracket">}</span>
+</code></pre>
+<p><code>errno</code> is a per-thread variable (stored in TLS).</p>
+<h2>stdio (Buffered I/O)</h2>
+<p><code>FILE <em></code> wraps a file descriptor with an in-memory buffer:
+- </em><em>Read buffer</em><em>: <code>fread</code>/<code>fgets</code>/<code>fgetc</code> read a large chunk at once from the fd and serve subsequent calls from the buffer.
+- </em><em>Write buffer</em><em>: <code>fwrite</code>/<code>fputs</code>/<code>fputc</code> accumulate writes in the buffer. The buffer is flushed on <code>fflush</code>, <code>\n</code> (line-buffered streams), or when the buffer is full.
+- </em><em>Line buffering</em><em>: <code>stdout</code> to a terminal is line-buffered. <code>stdout</code> to a file or pipe is fully buffered.
+- </em><em>Unbuffered</em>*: <code>stderr</code> is unbuffered (writes go directly to the fd).</p>
+<h2>malloc Implementation</h2>
+<p>The libc <code>malloc</code> is the hardened allocator (see <a href="../security/hardened-allocator.html">security/hardened-allocator.md</a>):
+- Size classes: 8, 16, 32, ..., 1024, 2048 bytes (per-thread cache, then per-CPU magazine).
+- Large allocations (&gt; 32 KB): direct <code>mmap(MAP_ANONYMOUS)</code>.
+- All allocations: canary words, ASLR-influenced placement.</p>
+<p><code>free(ptr)</code> with <code>ptr == NULL</code> is a no-op (required by C standard).</p>
+<h2><code>_start</code> and Program Startup</h2>
+<p>The program's entry point (set in the ELF header, or <code>_start</code> for static executables):</p>
+<pre><code class="language-asm"><span class="hl-label">_start</span><span class="hl-punctuation-delimiter">:</span>
+    <span class="hl-function-builtin">xor</span> <span class="hl-variable-builtin">rbp</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable-builtin">rbp</span>          <span class="hl-comment">; clear frame pointer (ABI requirement)</span>
+    <span class="hl-function-builtin">mov</span> <span class="hl-variable-builtin">rdi</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-punctuation-bracket">[</span><span class="hl-variable-builtin">rsp</span><span class="hl-punctuation-bracket">]</span>        <span class="hl-comment">; argc</span>
+    <span class="hl-function-builtin">lea</span> <span class="hl-variable-builtin">rsi</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-punctuation-bracket">[</span><span class="hl-variable-builtin">rsp</span><span class="hl-operator">+</span><span class="hl-number">8</span><span class="hl-punctuation-bracket">]</span>      <span class="hl-comment">; argv</span>
+    <span class="hl-function-builtin">lea</span> <span class="hl-variable-builtin">rdx</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-punctuation-bracket">[</span><span class="hl-variable-builtin">rsp</span><span class="hl-operator">+</span><span class="hl-number">8</span> <span class="hl-operator">+</span> <span class="hl-variable-builtin">rdi</span><span class="hl-operator">*</span>8 <span class="hl-operator">+</span> <span class="hl-number">8</span><span class="hl-punctuation-bracket">]</span>  <span class="hl-comment">; envp</span>
+    <span class="hl-function-builtin">call</span> <span class="hl-variable-builtin">__libc_init</span>       <span class="hl-comment">; set up libc internal state, TLS, etc.</span>
+    <span class="hl-function-builtin">call</span> <span class="hl-variable-builtin">main</span>              <span class="hl-comment">; call application's main()</span>
+    <span class="hl-function-builtin">mov</span> <span class="hl-variable-builtin">rdi</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable-builtin">rax</span>           <span class="hl-comment">; main return value</span>
+    <span class="hl-function-builtin">call</span> <span class="hl-variable-builtin">exit</span>              <span class="hl-comment">; call exit handlers and _exit</span>
+</code></pre>
+<p><code>__libc_init</code>:
+1. Sets up TLS for the main thread.
+2. Initializes <code>environ</code> pointer.
+3. Calls <code>__cxa_atexit</code> registrations from <code>.init_array</code>.
+4. Returns.</p>
+<h2><code>exit</code> and Shutdown</h2>
+<p><code>exit(status)</code>:
+1. Calls all <code>atexit</code> handlers in reverse registration order.
+2. Flushes and closes all open <code>FILE *</code> streams.
+3. Calls <code>sys_exit_group(status)</code>.</p>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="dynamic-linker.html">dynamic-linker.md</a></li>
+<li><a href="libc-threading.html">libc-threading.md</a></li>
+<li><a href="elf-loading.html">elf-loading.md</a></li>
+<li><a href="../security/hardened-allocator.html">security/hardened-allocator.md</a></li>
+<li><a href="../memory/userspace-malloc.html">memory/userspace-malloc.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="/fr-os/script.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="/fr-os/">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kernel/kernel-libraries — Fr OS</title>
+  <meta property="og:title" content="Kernel/kernel-libraries — Fr OS">
+  <meta name="description" content="Kernel/kernel-libraries — Fr OS documentation">
+  <meta property="og:description" content="Kernel/kernel-libraries — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="/fr-os/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/fr-os/style.css">
+  <link rel="stylesheet" href="/fr-os/fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="../index.html">Overview</a></li>
+    <li><a href="../architecture/overview.html">Architecture</a></li>
+    <li><a href="../architecture/memory-layout.html">Memory Layout</a></li>
+    <li><a href="../architecture/posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="../architecture/security-model.html">Security Model</a></li>
+    <li><a href="../architecture/performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="../bootloader/overview.html">Overview</a></li>
+    <li><a href="../bootloader/stage1.html">Stage 1</a></li>
+    <li><a href="../bootloader/stage2.html">Stage 2</a></li>
+    <li><a href="../bootloader/kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="../bootloader/memory-map.html">Memory Map</a></li>
+    <li><a href="../bootloader/serial-output.html">Serial Output</a></li>
+    <li><a href="../bootloader/build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="early-boot.html">Early Boot</a></li>
+    <li><a href="interrupt-handling.html">Interrupts</a></li>
+    <li><a href="context-switching.html">Context Switching</a></li>
+    <li><a href="privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="panic-system.html">Panic</a></li>
+    <li><a href="logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="../memory/overview.html">Overview</a></li>
+    <li><a href="../memory/physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="../memory/buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="../memory/slab-allocator.html">SLAB</a></li>
+    <li><a href="../memory/virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="../memory/userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="../scheduling/overview.html">Overview</a></li>
+    <li><a href="../scheduling/mlfq.html">MLFQ</a></li>
+    <li><a href="../scheduling/realtime-scheduler.html">Realtime</a></li>
+    <li><a href="../scheduling/multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="../syscalls/overview.html">Overview</a></li>
+    <li><a href="../syscalls/dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="../syscalls/process-syscalls.html">Process</a></li>
+    <li><a href="../syscalls/memory-syscalls.html">Memory</a></li>
+    <li><a href="../syscalls/file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="../userspace/overview.html">Overview</a></li>
+    <li><a href="../userspace/libc.html">Fr Libc</a></li>
+    <li><a href="../userspace/process-model.html">Process Model</a></li>
+    <li><a href="../userspace/elf-loading.html">ELF Loading</a></li>
+    <li><a href="../userspace/init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="../filesystem/overview.html">Filesystem</a></li>
+    <li><a href="../networking/overview.html">Networking</a></li>
+    <li><a href="../ipc/overview.html">IPC</a></li>
+    <li><a href="../drivers/overview.html">Drivers</a></li>
+    <li><a href="../security/overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="../build/overview.html">Build Overview</a></li>
+    <li><a href="../build/toolchain.html">Toolchain</a></li>
+    <li><a href="../build/makefile-structure.html">Makefile</a></li>
+    <li><a href="../build/qemu-setup.html">QEMU</a></li>
+    <li><a href="../build/testing.html">Testing</a></li>
+    <li><a href="../debugging/overview.html">Debugging</a></li>
+    <li><a href="../debugging/serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>Kernel Libraries</h1>
+<h2>Overview</h2>
+<p>The kernel maintains an internal utility library (<code>lib/</code>) providing common data structures, synchronization primitives, string utilities, and memory helpers used throughout the kernel. This library is not exposed to userspace.</p>
+<h2>Memory Utilities</h2>
+<h3><code>kmalloc</code> / <code>kfree</code></h3>
+<p>The primary kernel allocation API, backed by the SLAB allocator for small objects and <code>vmalloc</code> for large:</p>
+<pre><code class="language-c"><span class="hl-type-builtin">void</span> <span class="hl-operator">*</span><span class="hl-function">kmalloc</span><span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">size_t</span> <span class="hl-variable-parameter">size</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type">gfp_t</span> <span class="hl-variable-parameter">flags</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">void</span>  <span class="hl-function">kfree</span><span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">void</span> <span class="hl-operator">*</span><span class="hl-variable">ptr</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">void</span> <span class="hl-operator">*</span><span class="hl-function">kzalloc</span><span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">size_t</span> <span class="hl-variable-parameter">size</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type">gfp_t</span> <span class="hl-variable-parameter">flags</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>  <span class="hl-comment">// zero-initialized</span>
+<span class="hl-type-builtin">void</span> <span class="hl-operator">*</span><span class="hl-function">krealloc</span><span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">void</span> <span class="hl-operator">*</span><span class="hl-variable">ptr</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">size_t</span> <span class="hl-variable-parameter">size</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type">gfp_t</span> <span class="hl-variable-parameter">flags</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<p><code>gfp_t</code> flags control allocation behavior:</p>
+<ul>
+<li><code>GFP_KERNEL</code>: May sleep; used in process context.</li>
+<li><code>GFP_ATOMIC</code>: May not sleep; used in interrupt context.</li>
+<li><code>GFP_ZERO</code>: Zero the allocation.</li>
+<li><code>GFP_DMA</code>: Allocate from DMA-capable memory zone.</li>
+</ul>
+<h3><code>copy_from_user</code> / <code>copy_to_user</code></h3>
+<p>Safe memory access to userspace buffers:</p>
+<pre><code class="language-c"><span class="hl-type-builtin">int</span> <span class="hl-function">copy_from_user</span><span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">void</span> <span class="hl-operator">*</span><span class="hl-variable">dst</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-keyword-modifier">const</span> <span class="hl-type-builtin">void</span> <span class="hl-variable">__user</span> <span class="hl-operator">*</span><span class="hl-variable">src</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">size_t</span> <span class="hl-variable-parameter">len</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">int</span> <span class="hl-function">copy_to_user</span><span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">void</span> <span class="hl-variable">__user</span> <span class="hl-operator">*</span><span class="hl-variable">dst</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-keyword-modifier">const</span> <span class="hl-type-builtin">void</span> <span class="hl-operator">*</span><span class="hl-variable">src</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">size_t</span> <span class="hl-variable-parameter">len</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<p>These functions validate the userspace pointer range, temporarily enable SMAP access (<code>STAC</code>/<code>CLAC</code>), and handle page faults during the copy. Return 0 on success, number of bytes not copied on partial failure.</p>
+<h2>String Utilities</h2>
+<pre><code class="language-c"><span class="hl-type-builtin">size_t</span> <span class="hl-function">kstrlen</span><span class="hl-punctuation-bracket">(</span><span class="hl-keyword-modifier">const</span> <span class="hl-type-builtin">char</span> <span class="hl-operator">*</span><span class="hl-variable">s</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">char</span>  <span class="hl-operator">*</span><span class="hl-function">kstrdup</span><span class="hl-punctuation-bracket">(</span><span class="hl-keyword-modifier">const</span> <span class="hl-type-builtin">char</span> <span class="hl-operator">*</span><span class="hl-variable">s</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type">gfp_t</span> <span class="hl-variable-parameter">flags</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">int</span>    <span class="hl-function">kstrcmp</span><span class="hl-punctuation-bracket">(</span><span class="hl-keyword-modifier">const</span> <span class="hl-type-builtin">char</span> <span class="hl-operator">*</span><span class="hl-variable">a</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-keyword-modifier">const</span> <span class="hl-type-builtin">char</span> <span class="hl-operator">*</span><span class="hl-variable">b</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">int</span>    <span class="hl-function">kstrncmp</span><span class="hl-punctuation-bracket">(</span><span class="hl-keyword-modifier">const</span> <span class="hl-type-builtin">char</span> <span class="hl-operator">*</span><span class="hl-variable">a</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-keyword-modifier">const</span> <span class="hl-type-builtin">char</span> <span class="hl-operator">*</span><span class="hl-variable">b</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">size_t</span> <span class="hl-variable-parameter">n</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">char</span>  <span class="hl-operator">*</span><span class="hl-function">kstrcpy</span><span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">char</span> <span class="hl-operator">*</span><span class="hl-variable">dst</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-keyword-modifier">const</span> <span class="hl-type-builtin">char</span> <span class="hl-operator">*</span><span class="hl-variable">src</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">char</span>  <span class="hl-operator">*</span><span class="hl-function">kstrncpy</span><span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">char</span> <span class="hl-operator">*</span><span class="hl-variable">dst</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-keyword-modifier">const</span> <span class="hl-type-builtin">char</span> <span class="hl-operator">*</span><span class="hl-variable">src</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">size_t</span> <span class="hl-variable-parameter">n</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">int</span>    <span class="hl-function">ksnprintf</span><span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">char</span> <span class="hl-operator">*</span><span class="hl-variable">buf</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">size_t</span> <span class="hl-variable-parameter">size</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-keyword-modifier">const</span> <span class="hl-type-builtin">char</span> <span class="hl-operator">*</span><span class="hl-variable">fmt</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-punctuation-special">...</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<p><code>ksnprintf</code> is a minimal printf-like formatter supporting <code>%d</code>, <code>%u</code>, <code>%x</code>, <code>%s</code>, <code>%p</code>, <code>%zu</code>. It does not support floating-point.</p>
+<h2>Synchronization Primitives</h2>
+<h3>Spinlock</h3>
+<pre><code class="language-c"><span class="hl-keyword-type">typedef</span> <span class="hl-keyword-type">struct</span> <span class="hl-punctuation-bracket">{</span> <span class="hl-type">atomic_t</span> <span class="hl-property">val</span><span class="hl-punctuation-delimiter">;</span> <span class="hl-punctuation-bracket">}</span> <span class="hl-type-definition">spinlock_t</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">void</span> <span class="hl-function">spin_lock</span><span class="hl-punctuation-bracket">(</span><span class="hl-type">spinlock_t</span> <span class="hl-operator">*</span><span class="hl-variable">l</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">void</span> <span class="hl-function">spin_unlock</span><span class="hl-punctuation-bracket">(</span><span class="hl-type">spinlock_t</span> <span class="hl-operator">*</span><span class="hl-variable">l</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">void</span> <span class="hl-function">spin_lock_irqsave</span><span class="hl-punctuation-bracket">(</span><span class="hl-type">spinlock_t</span> <span class="hl-operator">*</span><span class="hl-variable">l</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">unsigned</span> <span class="hl-type-builtin">long</span> <span class="hl-operator">*</span><span class="hl-variable">flags</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">void</span> <span class="hl-function">spin_unlock_irqrestore</span><span class="hl-punctuation-bracket">(</span><span class="hl-type">spinlock_t</span> <span class="hl-operator">*</span><span class="hl-variable">l</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">unsigned</span> <span class="hl-type-builtin">long</span> <span class="hl-variable-parameter">flags</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<p>Spinlocks disable preemption. The <code>irqsave</code> variant also disables interrupts and saves the RFLAGS.IF state.</p>
+<h3>Mutex</h3>
+<pre><code class="language-c"><span class="hl-keyword-type">typedef</span> <span class="hl-keyword-type">struct</span> <span class="hl-punctuation-bracket">{</span> <span class="hl-punctuation-special">...</span> <span class="hl-punctuation-bracket">}</span> <span class="hl-type-definition">mutex_t</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">void</span> <span class="hl-function">mutex_lock</span><span class="hl-punctuation-bracket">(</span><span class="hl-type">mutex_t</span> <span class="hl-operator">*</span><span class="hl-variable">m</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>     <span class="hl-comment">// may sleep</span>
+<span class="hl-type-builtin">void</span> <span class="hl-function">mutex_unlock</span><span class="hl-punctuation-bracket">(</span><span class="hl-type">mutex_t</span> <span class="hl-operator">*</span><span class="hl-variable">m</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">int</span>  <span class="hl-function">mutex_trylock</span><span class="hl-punctuation-bracket">(</span><span class="hl-type">mutex_t</span> <span class="hl-operator">*</span><span class="hl-variable">m</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>  <span class="hl-comment">// non-blocking</span>
+</code></pre>
+<p>Mutexes allow the current thread to sleep while waiting. Only usable in process context (not in interrupt handlers).</p>
+<h3>RW Lock</h3>
+<pre><code class="language-c"><span class="hl-keyword-type">typedef</span> <span class="hl-keyword-type">struct</span> <span class="hl-punctuation-bracket">{</span> <span class="hl-punctuation-special">...</span> <span class="hl-punctuation-bracket">}</span> <span class="hl-type-definition">rwlock_t</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">void</span> <span class="hl-function">read_lock</span><span class="hl-punctuation-bracket">(</span><span class="hl-type">rwlock_t</span> <span class="hl-operator">*</span><span class="hl-variable">l</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">void</span> <span class="hl-function">read_unlock</span><span class="hl-punctuation-bracket">(</span><span class="hl-type">rwlock_t</span> <span class="hl-operator">*</span><span class="hl-variable">l</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">void</span> <span class="hl-function">write_lock</span><span class="hl-punctuation-bracket">(</span><span class="hl-type">rwlock_t</span> <span class="hl-operator">*</span><span class="hl-variable">l</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">void</span> <span class="hl-function">write_unlock</span><span class="hl-punctuation-bracket">(</span><span class="hl-type">rwlock_t</span> <span class="hl-operator">*</span><span class="hl-variable">l</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<p>Multiple concurrent readers; exclusive writer.</p>
+<h3>Completion</h3>
+<pre><code class="language-c"><span class="hl-keyword-type">typedef</span> <span class="hl-keyword-type">struct</span> <span class="hl-punctuation-bracket">{</span> <span class="hl-punctuation-special">...</span> <span class="hl-punctuation-bracket">}</span> <span class="hl-type-definition">completion_t</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">void</span> <span class="hl-function">init_completion</span><span class="hl-punctuation-bracket">(</span><span class="hl-type">completion_t</span> <span class="hl-operator">*</span><span class="hl-variable">c</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">void</span> <span class="hl-function">complete</span><span class="hl-punctuation-bracket">(</span><span class="hl-type">completion_t</span> <span class="hl-operator">*</span><span class="hl-variable">c</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>        <span class="hl-comment">// signal</span>
+<span class="hl-type-builtin">void</span> <span class="hl-function">wait_for_completion</span><span class="hl-punctuation-bracket">(</span><span class="hl-type">completion_t</span> <span class="hl-operator">*</span><span class="hl-variable">c</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span> <span class="hl-comment">// block until signaled</span>
+</code></pre>
+<p>Used to synchronize initialization between producer and consumer threads.</p>
+<h3>Atomic Operations</h3>
+<pre><code class="language-c"><span class="hl-keyword-type">typedef</span> <span class="hl-keyword-type">struct</span> <span class="hl-punctuation-bracket">{</span> <span class="hl-type-builtin">int32_t</span> <span class="hl-property">val</span><span class="hl-punctuation-delimiter">;</span> <span class="hl-punctuation-bracket">}</span> <span class="hl-type-definition">atomic_t</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">int</span>  <span class="hl-function">atomic_read</span><span class="hl-punctuation-bracket">(</span><span class="hl-keyword-modifier">const</span> <span class="hl-type">atomic_t</span> <span class="hl-operator">*</span><span class="hl-variable">a</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">void</span> <span class="hl-function">atomic_set</span><span class="hl-punctuation-bracket">(</span><span class="hl-type">atomic_t</span> <span class="hl-operator">*</span><span class="hl-variable">a</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">int</span> <span class="hl-variable-parameter">v</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">int</span>  <span class="hl-function">atomic_add_return</span><span class="hl-punctuation-bracket">(</span><span class="hl-type">atomic_t</span> <span class="hl-operator">*</span><span class="hl-variable">a</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">int</span> <span class="hl-variable-parameter">v</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">int</span>  <span class="hl-function">atomic_sub_return</span><span class="hl-punctuation-bracket">(</span><span class="hl-type">atomic_t</span> <span class="hl-operator">*</span><span class="hl-variable">a</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">int</span> <span class="hl-variable-parameter">v</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">bool</span> <span class="hl-function">atomic_cmpxchg</span><span class="hl-punctuation-bracket">(</span><span class="hl-type">atomic_t</span> <span class="hl-operator">*</span><span class="hl-variable">a</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">int</span> <span class="hl-variable-parameter">old</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">int</span> <span class="hl-variable-parameter">new</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">int</span>  <span class="hl-function">atomic_fetch_and</span><span class="hl-punctuation-bracket">(</span><span class="hl-type">atomic_t</span> <span class="hl-operator">*</span><span class="hl-variable">a</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">int</span> <span class="hl-variable-parameter">mask</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">int</span>  <span class="hl-function">atomic_fetch_or</span><span class="hl-punctuation-bracket">(</span><span class="hl-type">atomic_t</span> <span class="hl-operator">*</span><span class="hl-variable">a</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">int</span> <span class="hl-variable-parameter">mask</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<p>Implemented using x86 <code>LOCK</code> prefix instructions or <code>CMPXCHG</code>.</p>
+<h2>Linked Lists</h2>
+<p>Intrusive doubly-linked list (embed <code>struct list_head</code> in your struct):</p>
+<pre><code class="language-c"><span class="hl-keyword-type">struct</span> <span class="hl-type">list_head</span> <span class="hl-punctuation-bracket">{</span> <span class="hl-keyword-type">struct</span> <span class="hl-type">list_head</span> <span class="hl-operator">*</span><span class="hl-property">next</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-operator">*</span><span class="hl-property">prev</span><span class="hl-punctuation-delimiter">;</span> <span class="hl-punctuation-bracket">}</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">void</span> <span class="hl-function">list_add</span><span class="hl-punctuation-bracket">(</span><span class="hl-keyword-type">struct</span> <span class="hl-type">list_head</span> <span class="hl-operator">*</span><span class="hl-variable">new</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-keyword-type">struct</span> <span class="hl-type">list_head</span> <span class="hl-operator">*</span><span class="hl-variable">head</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">void</span> <span class="hl-function">list_add_tail</span><span class="hl-punctuation-bracket">(</span><span class="hl-keyword-type">struct</span> <span class="hl-type">list_head</span> <span class="hl-operator">*</span><span class="hl-variable">new</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-keyword-type">struct</span> <span class="hl-type">list_head</span> <span class="hl-operator">*</span><span class="hl-variable">head</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">void</span> <span class="hl-function">list_del</span><span class="hl-punctuation-bracket">(</span><span class="hl-keyword-type">struct</span> <span class="hl-type">list_head</span> <span class="hl-operator">*</span><span class="hl-variable">entry</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">bool</span> <span class="hl-function">list_empty</span><span class="hl-punctuation-bracket">(</span><span class="hl-keyword-modifier">const</span> <span class="hl-keyword-type">struct</span> <span class="hl-type">list_head</span> <span class="hl-operator">*</span><span class="hl-variable">head</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-keyword-directive-define">#define</span> <span class="hl-function-macro">list_for_each</span><span class="hl-punctuation-bracket">(</span><span class="hl-variable-parameter">pos</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable-parameter">head</span><span class="hl-punctuation-bracket">)</span> <span class="hl-punctuation-delimiter">.</span><span class="hl-punctuation-delimiter">.</span><span class="hl-punctuation-delimiter">.</span>
+<span class="hl-keyword-directive-define">#define</span> <span class="hl-function-macro">list_entry</span><span class="hl-punctuation-bracket">(</span><span class="hl-variable-parameter">ptr</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable-parameter">type</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable-parameter">member</span><span class="hl-punctuation-bracket">)</span> <span class="hl-function-call">container_of</span><span class="hl-punctuation-bracket">(</span><span class="hl-variable">ptr</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">type</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">member</span><span class="hl-punctuation-bracket">)</span>
+</code></pre>
+<h2>Hash Tables</h2>
+<pre><code class="language-c"><span class="hl-keyword-type">struct</span> <span class="hl-type">hlist_head</span> <span class="hl-punctuation-bracket">{</span> <span class="hl-keyword-type">struct</span> <span class="hl-type">hlist_node</span> <span class="hl-operator">*</span><span class="hl-property">first</span><span class="hl-punctuation-delimiter">;</span> <span class="hl-punctuation-bracket">}</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-keyword-type">struct</span> <span class="hl-type">hlist_node</span> <span class="hl-punctuation-bracket">{</span> <span class="hl-keyword-type">struct</span> <span class="hl-type">hlist_node</span> <span class="hl-operator">*</span><span class="hl-property">next</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-operator">*</span><span class="hl-operator">*</span><span class="hl-property">pprev</span><span class="hl-punctuation-delimiter">;</span> <span class="hl-punctuation-bracket">}</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<p>Used throughout the kernel for per-bucket chaining (PID table, inode table, socket table).</p>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="../memory/slab-allocator.html">memory/slab-allocator.md</a></li>
+<li><a href="../memory/virtual-memory.html">memory/virtual-memory.md</a></li>
+<li><a href="overview.html">kernel/overview.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="/fr-os/script.js" defer></script>
+</body>
+</html>

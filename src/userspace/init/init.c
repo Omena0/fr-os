@@ -19,12 +19,9 @@
  * Core 0.1.0" -- as this process's own identity is how userspace used to
  * introduce itself as the kernel.
  *
- * Input-layer assumption (see echo_line below): getline() reads and returns a
- * line but performs no terminal echo of its own. Everything typed therefore
- * has to be echoed here, or the user sees nothing at all. The alternative
- * convention — getline echoes as it reads — is not supported because the two
- * behaviours cannot be distinguished at run time and echoing twice is far
- * more confusing than echoing once too late.
+ * Input-layer assumption: the terminal is in raw mode and sends \r for
+ * Enter, so getline() is not used. The REPL reads byte-by-byte and
+ * implements its own echo and backspace handling.
  */
 #include <stdarg.h>
 #include <stdio.h>
@@ -86,20 +83,6 @@ static void say(const char *fmt, ...)
  * erase. It would be unreachable only if something upstream had already
  * interpreted and consumed the key, and nothing does.
  */
-static void echo_line(const char *s)
-{
-	for (; *s; s++) {
-		unsigned char c = (unsigned char)*s;
-
-		if (c == 0x7f || c == 0x08) {
-			fputs("\b \b", stdout);
-		} else if (c >= 0x20 && c != 0x7f) {
-			putchar(c);
-		}
-	}
-	putchar('\n');
-}
-
 /*
  * Split in place on runs of spaces and tabs into an argv-style vector.
  *
@@ -393,18 +376,18 @@ static int dispatch(int argc, char **argv)
 {
 	int i;
 
-	if (argc < 2) {
+	if (argc < 1) {
 		say("empty line, try 'help'");
 		return 0;
 	}
 
-	if (strcmp(argv[1], "help") == 0) {
+	if (strcmp(argv[0], "help") == 0) {
 		cmd_help();
-	} else if (strcmp(argv[1], "echo") == 0) {
-		for (i = 2; i < argc; i++)
-			printf("%s%s", (i > 2) ? " " : "", argv[i]);
+	} else if (strcmp(argv[0], "echo") == 0) {
+		for (i = 1; i < argc; i++)
+			printf("%s%s", (i > 1) ? " " : "", argv[i]);
 		putchar('\n');
-	} else if (strcmp(argv[1], "version") == 0) {
+	} else if (strcmp(argv[0], "version") == 0) {
 		/*
 		 * Three names, in the order the hierarchy runs: this process, the
 		 * project it belongs to, and the kernel underneath both. The
@@ -415,34 +398,34 @@ static int dispatch(int argc, char **argv)
 		 */
 		say("%s %s (build %s, rev %s)", FR_INIT_NAME, KERNEL_VERSION,
 		    KERNEL_BUILD_STAMP, KERNEL_GIT_REV);
-		say("%s %s, running on %s", FR_PROJECT_NAME, KERNEL_VERSION,
+		say("%s %s, running on %s", FR_INIT_NAME, FR_PROJECT_NAME,
 		    KERNEL_VERSION_STRING);
 		say("userspace       %s (pid 1), programs run as %s",
 		    FR_INIT_NAME, FR_USERLAND_NAME);
-	} else if (strcmp(argv[1], "mem") == 0) {
+	} else if (strcmp(argv[0], "mem") == 0) {
 		bench_mem();
-	} else if (strcmp(argv[1], "time") == 0) {
+	} else if (strcmp(argv[0], "time") == 0) {
 		show_time();
-	} else if (strcmp(argv[1], "uptime") == 0) {
+	} else if (strcmp(argv[0], "uptime") == 0) {
 		cmd_uptime();
-	} else if (strcmp(argv[1], "clear") == 0) {
+	} else if (strcmp(argv[0], "clear") == 0) {
 		fputs("\033[2J\033[H", stdout);
-	} else if (strcmp(argv[1], "lscpu") == 0) {
+	} else if (strcmp(argv[0], "lscpu") == 0) {
 		cmd_lscpu();
-	} else if (strcmp(argv[1], "strlen") == 0) {
-		if (argc < 3) {
+	} else if (strcmp(argv[0], "strlen") == 0) {
+		if (argc < 2) {
 			say("strlen: expected an argument");
 		} else {
-			say("strlen: %lu", (unsigned long)strlen(argv[2]));
+			say("strlen: %lu", (unsigned long)strlen(argv[1]));
 		}
-	} else if (strcmp(argv[1], "run") == 0) {
+	} else if (strcmp(argv[0], "run") == 0) {
 		/*
 		 * Hand the process over. execve only returns on failure, so
 		 * anything printed after this point is a diagnostic about why --
 		 * there is deliberately no success path back here, because a
 		 * successful exec never comes back.
 		 */
-		if (argc < 3) {
+		if (argc < 2) {
 			say("run: expected a program name");
 			say("     the initrd carries: init, hello");
 			return 0;
@@ -451,30 +434,29 @@ static int dispatch(int argc, char **argv)
 		char *child_argv[8];
 		int child_argc = 0;
 
-		child_argv[child_argc++] = argv[2];
-		for (int a = 3; a < argc && child_argc < 7; a++)
+		child_argv[child_argc++] = argv[1];
+		for (int a = 2; a < argc && child_argc < 7; a++)
 			child_argv[child_argc++] = argv[a];
 		child_argv[child_argc] = NULL;
 
-		execve(argv[2], child_argv, environ);
+		execve(argv[1], child_argv, environ);
 
-		say("run: execve(\"%s\") failed: %s", argv[2], strerror(errno));
+		say("run: execve(\"%s\") failed: %s", argv[1], strerror(errno));
 		say("     errno %d", errno);
-	} else if (strcmp(argv[1], "exit") == 0) {
+	} else if (strcmp(argv[0], "exit") == 0) {
 		say("exit: reboot syscall is not implemented yet");
 		say("exit: the kernel exposes no power-management interface");
 		say("exit: refusing to halt, continuing the REPL");
 	} else {
-		say("unknown command '%s' - try 'help'", argv[1]);
+		say("unknown command '%s' - try 'help'", argv[0]);
 	}
 	return 0;
 }
 
 int main(void)
 {
-	char *line = NULL;
+	char line[256];
 	size_t cap = 0;
-	int rc;
 
 	printf("%s%s %s (build %s, rev %s)\n", TAG, FR_INIT_NAME,
 	       KERNEL_VERSION, KERNEL_BUILD_STAMP, KERNEL_GIT_REV);
@@ -487,42 +469,43 @@ int main(void)
 	for (;;) {
 		int argc;
 		char *argv[32];
+		int c;
 
 		/* The prompt is derived from FR_INIT_NAME rather than spelled
 		 * "init>", so it names the component the same way every other
 		 * line this process prints does. */
 		fputs(FR_INIT_NAME "> ", stdout);
+		fflush(stdout);
 
-		rc = getline(&line, &cap, stdin);
-		if (rc < 0)
-			break;
+		/* Read one byte at a time. The terminal is in raw mode and
+		 * sends \r for Enter, not \n, so getline() would block forever.
+		 * Byte-by-byte reading also lets us handle backspace. */
+		cap = 0;
+		for (;;) {
+			ssize_t n = read(0, &c, 1);
+			if (n <= 0) {
+				putchar('\n');
+				break;
+			}
 
-		/*
-		 * Ctrl-C arrives as a literal 0x03 byte inside the line rather
-		 * than as a signal: there is no signal delivery in this kernel,
-		 * so the console hands the byte to getline like any other. Treat a
-		 * line that begins with it as an aborted command.
-		 */
-		if (line[0] == 0x03) {
-			say("^C");
-			continue;
+			if (c == '\r' || c == '\n') {
+				putchar('\n');
+				break;
+			}
+			if (c == '\b' || c == 0x7f) {
+				if (cap > 0) {
+					cap--;
+					line[cap] = '\0';
+					fputs("\b \b", stdout);
+				}
+				continue;
+			}
+			if (c < 0x20 || c == 0x7f)
+				continue;
+			line[cap++] = (char)c;
+			line[cap] = '\0';
 		}
 
-		echo_line(line);
-
-		/*
-		 * Strip the line terminator here rather than with strcspn, which
-		 * this libc does not declare. The console sends CR, LF or CRLF
-		 * depending on the terminal, and getline leaves the terminator in
-		 * the buffer, so every variant has to be collapsed.
-		 */
-		{
-			char *nl = line;
-
-			while (*nl && *nl != '\r' && *nl != '\n')
-				nl++;
-			*nl = '\0';
-		}
 		if (line[0] == '\0')
 			continue;
 
@@ -531,7 +514,6 @@ int main(void)
 			break;
 	}
 
-	free(line);
 	fflush(stdout);
 	printf("%sstdin closed, init exiting\n", TAG);
 	return 0;

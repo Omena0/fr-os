@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="/fr-os/">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Memory/memory-compaction — Fr OS</title>
+  <meta property="og:title" content="Memory/memory-compaction — Fr OS">
+  <meta name="description" content="Memory/memory-compaction — Fr OS documentation">
+  <meta property="og:description" content="Memory/memory-compaction — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="/fr-os/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/fr-os/style.css">
+  <link rel="stylesheet" href="/fr-os/fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="../index.html">Overview</a></li>
+    <li><a href="../architecture/overview.html">Architecture</a></li>
+    <li><a href="../architecture/memory-layout.html">Memory Layout</a></li>
+    <li><a href="../architecture/posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="../architecture/security-model.html">Security Model</a></li>
+    <li><a href="../architecture/performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="../bootloader/overview.html">Overview</a></li>
+    <li><a href="../bootloader/stage1.html">Stage 1</a></li>
+    <li><a href="../bootloader/stage2.html">Stage 2</a></li>
+    <li><a href="../bootloader/kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="../bootloader/memory-map.html">Memory Map</a></li>
+    <li><a href="../bootloader/serial-output.html">Serial Output</a></li>
+    <li><a href="../bootloader/build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="../kernel/overview.html">Overview</a></li>
+    <li><a href="../kernel/early-boot.html">Early Boot</a></li>
+    <li><a href="../kernel/interrupt-handling.html">Interrupts</a></li>
+    <li><a href="../kernel/context-switching.html">Context Switching</a></li>
+    <li><a href="../kernel/privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="../kernel/syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="../kernel/panic-system.html">Panic</a></li>
+    <li><a href="../kernel/logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="slab-allocator.html">SLAB</a></li>
+    <li><a href="virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="../scheduling/overview.html">Overview</a></li>
+    <li><a href="../scheduling/mlfq.html">MLFQ</a></li>
+    <li><a href="../scheduling/realtime-scheduler.html">Realtime</a></li>
+    <li><a href="../scheduling/multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="../syscalls/overview.html">Overview</a></li>
+    <li><a href="../syscalls/dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="../syscalls/process-syscalls.html">Process</a></li>
+    <li><a href="../syscalls/memory-syscalls.html">Memory</a></li>
+    <li><a href="../syscalls/file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="../userspace/overview.html">Overview</a></li>
+    <li><a href="../userspace/libc.html">Fr Libc</a></li>
+    <li><a href="../userspace/process-model.html">Process Model</a></li>
+    <li><a href="../userspace/elf-loading.html">ELF Loading</a></li>
+    <li><a href="../userspace/init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="../filesystem/overview.html">Filesystem</a></li>
+    <li><a href="../networking/overview.html">Networking</a></li>
+    <li><a href="../ipc/overview.html">IPC</a></li>
+    <li><a href="../drivers/overview.html">Drivers</a></li>
+    <li><a href="../security/overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="../build/overview.html">Build Overview</a></li>
+    <li><a href="../build/toolchain.html">Toolchain</a></li>
+    <li><a href="../build/makefile-structure.html">Makefile</a></li>
+    <li><a href="../build/qemu-setup.html">QEMU</a></li>
+    <li><a href="../build/testing.html">Testing</a></li>
+    <li><a href="../debugging/overview.html">Debugging</a></li>
+    <li><a href="../debugging/serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>Memory Compaction</h1>
+<h2>Overview</h2>
+<p>Memory compaction is the process of defragmenting physical memory by moving pages to consolidate free space. Over time, physical memory becomes fragmented: many small free regions rather than a few large contiguous ones. Compaction moves page-reclaimable pages to lower physical addresses to create large free blocks at higher addresses.</p>
+<h2>Why Compaction</h2>
+<p>The buddy allocator requires physically contiguous pages for order &gt; 0 allocations. Fragmentation makes it impossible to satisfy large allocations (order 9 for 2 MB huge pages) even when total free memory is sufficient. Compaction enables:</p>
+<ul>
+<li>2 MB huge page allocation.</li>
+<li>Large DMA-contiguous buffers.</li>
+<li>Order-8+ kernel allocations.</li>
+</ul>
+<h2>Compaction Daemon (<code>kcompactd</code>)</h2>
+<p>A kernel thread (<code>kcompactd</code>) runs continuously at idle priority. It is woken when:</p>
+<ul>
+<li>A large allocation fails due to fragmentation.</li>
+<li>The system is otherwise idle (opportunistic compaction).</li>
+</ul>
+<p><code>kcompactd</code> is per-NUMA-node: one thread per node.</p>
+<h2>Compaction Algorithm</h2>
+<p>Compaction scans memory in two directions simultaneously:</p>
+<pre><code>Low address  →→→→  [migration scanner]
+                        ↑ moves pages ↓
+             [free scanner]  ←←←←  High address
+</code></pre>
+<ol>
+<li><strong>Free scanner</strong> (from high addresses): Scans downward for free page blocks. Adds them to a "free target" list.</li>
+<li><strong>Migration scanner</strong> (from low addresses): Scans upward for movable pages (clean page cache pages, anonymous pages with swap, pages marked <code>__GFP_MOVABLE</code>).</li>
+<li>For each movable page found by the migration scanner:
+   a. Allocate a replacement page from the free scanner's list (from high addresses).
+   b. Copy the page content.
+   c. Update all references to the old page (page table entries, page cache index) to point to the new page.
+   d. Release the old page to the buddy allocator (now at a lower address).</li>
+<li>Scanners stop when they meet in the middle.</li>
+</ol>
+<p>Result: movable pages are concentrated at low addresses; free blocks are consolidated at high addresses. The next large allocation succeeds from the high-address free region.</p>
+<h2>Movable vs. Non-Movable Pages</h2>
+<table>
+<thead>
+<tr>
+<th>Page type</th>
+<th>Movable?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Anonymous pages (with swap)</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Clean page cache pages</td>
+<td>Yes (just re-read from disk if needed)</td>
+</tr>
+<tr>
+<td>Dirty page cache pages</td>
+<td>Yes (but costly — requires write-back first)</td>
+</tr>
+<tr>
+<td>Kernel SLAB objects</td>
+<td>No (unless slab is empty and can be freed as a whole)</td>
+</tr>
+<tr>
+<td>Locked pages (<code>mlock</code>)</td>
+<td>No</td>
+</tr>
+<tr>
+<td>DMA-locked buffers</td>
+<td>No</td>
+</tr>
+</tbody>
+</table>
+<p>Compaction only moves movable pages. Non-movable pages act as "obstacles" that limit how much compaction can achieve.</p>
+<h2>Compaction Cost</h2>
+<p>Compaction is I/O intensive (may trigger dirty page write-back). It uses CPU to copy page data. The compaction daemon limits its run time to <code>COMPACTION_MAX_BUDGET_MS</code> (default: 20 ms) per wakeup to avoid impacting interactive workloads.</p>
+<p>When compaction is triggered synchronously (by a failing large allocation, <code>GFP_NORETRY</code> not set), it runs without a budget limit but at the allocating process's priority.</p>
+<h2>Interaction with THP</h2>
+<p>The transparent huge page promotion path calls the compaction subsystem when a 2 MB-aligned allocation fails. Compaction attempts to free a 2 MB contiguous region at an aligned address before THP promotion.</p>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="buddy-allocator.html">buddy-allocator.md</a></li>
+<li><a href="page-reclamation.html">page-reclamation.md</a></li>
+<li><a href="huge-pages.html">huge-pages.md</a></li>
+<li><a href="physical-allocator.html">physical-allocator.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="/fr-os/script.js" defer></script>
+</body>
+</html>

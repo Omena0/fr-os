@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Virtual Memory Manager (VMM) manages per-process virtual address spaces. It maps virtual pages to physical frames, handles page faults, and provides the `mmap`/`munmap`/`mprotect` syscall interface.
+The Virtual Memory Manager (VMM) manages per-process virtual address spaces. It maps virtual pages to physical frames, handles page faults, and provides the `mmap`/`munmap`/`mprotect` syscall interface[^intel-sdm-vol3a][^amd-apm-vol2].
 
 ## Virtual Memory Areas (VMAs)
 
@@ -115,7 +115,7 @@ Pages are not physically allocated until the process accesses them (demand pagin
 
 ## Page Fault Handling
 
-On a page fault (`#PF`, vector 14):
+On a page fault (`#PF`, vector 14)[^intel-sdm-interrupts]:
 
 1. Get fault address from CR2.
 2. Look up the VMA for the fault address (binary search over the sorted list).
@@ -130,7 +130,7 @@ On a page fault (`#PF`, vector 14):
 *Not implemented. See "Not Yet Implemented" above; this is the plan for when a
 second CPU exists.*
 
-When a page table entry is modified (unmapped, permission changed), all CPUs that may have the old entry in their TLB must be notified. This is done via TLB shootdown IPIs:
+When a page table entry is modified (unmapped, permission changed), all CPUs that may have the old entry in their TLB must be notified. This is done via TLB shootdown IPIs[^intel-sdm-vol3a][^amd-apm-vol2]:
 
 1. Modify the page table entry.
 2. Flush the local TLB for the affected address (`invlpg`).
@@ -155,3 +155,15 @@ Shootdown is batched: multiple address invalidations are collected and sent in a
 - [userspace-malloc.md](userspace-malloc.md)
 - [huge-pages.md](huge-pages.md)
 - [security/aslr.md](../security/aslr.md)
+
+## References
+
+- [Intel 64 and IA-32 Architectures Software Developer's Manual, Volume 3A — Paging][intel-sdm-vol3a]
+- [Intel 64 and IA-32 Architectures Software Developer's Manual, Volume 3A — Interrupts and Exceptions][intel-sdm-interrupts]
+- [AMD64 Architecture Programmer's Manual, Volume 2 — System Programming][amd-apm-vol2]
+- [Linux Kernel Documentation — Memory Management][linux-mm]
+
+[intel-sdm-vol3a]: https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html#vol3a "Intel SDM Volume 3A: System Programming Guide, Part 1"
+[intel-sdm-interrupts]: https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html#vol3a "Intel SDM Volume 3A: Interrupts and Exceptions"
+[amd-apm-vol2]: https://www.amd.com/en/developer/architecture-programmer-manuals.html "AMD64 Architecture Programmer's Manual Volume 2"
+[linux-mm]: https://www.kernel.org/doc/html/latest/core-api/memory-allocation.html "Linux Kernel Memory Management API"

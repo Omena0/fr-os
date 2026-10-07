@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="/fr-os/">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Architecture/memory-layout — Fr OS</title>
+  <meta property="og:title" content="Architecture/memory-layout — Fr OS">
+  <meta name="description" content="Architecture/memory-layout — Fr OS documentation">
+  <meta property="og:description" content="Architecture/memory-layout — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="/fr-os/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/fr-os/style.css">
+  <link rel="stylesheet" href="/fr-os/fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="../index.html">Overview</a></li>
+    <li><a href="overview.html">Architecture</a></li>
+    <li><a href="architecture/memory-layout.html" class="active">Memory Layout</a></li>
+    <li><a href="posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="security-model.html">Security Model</a></li>
+    <li><a href="performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="../bootloader/overview.html">Overview</a></li>
+    <li><a href="../bootloader/stage1.html">Stage 1</a></li>
+    <li><a href="../bootloader/stage2.html">Stage 2</a></li>
+    <li><a href="../bootloader/kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="../bootloader/memory-map.html">Memory Map</a></li>
+    <li><a href="../bootloader/serial-output.html">Serial Output</a></li>
+    <li><a href="../bootloader/build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="../kernel/overview.html">Overview</a></li>
+    <li><a href="../kernel/early-boot.html">Early Boot</a></li>
+    <li><a href="../kernel/interrupt-handling.html">Interrupts</a></li>
+    <li><a href="../kernel/context-switching.html">Context Switching</a></li>
+    <li><a href="../kernel/privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="../kernel/syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="../kernel/panic-system.html">Panic</a></li>
+    <li><a href="../kernel/logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="../memory/overview.html">Overview</a></li>
+    <li><a href="../memory/physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="../memory/buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="../memory/slab-allocator.html">SLAB</a></li>
+    <li><a href="../memory/virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="../memory/userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="../scheduling/overview.html">Overview</a></li>
+    <li><a href="../scheduling/mlfq.html">MLFQ</a></li>
+    <li><a href="../scheduling/realtime-scheduler.html">Realtime</a></li>
+    <li><a href="../scheduling/multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="../syscalls/overview.html">Overview</a></li>
+    <li><a href="../syscalls/dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="../syscalls/process-syscalls.html">Process</a></li>
+    <li><a href="../syscalls/memory-syscalls.html">Memory</a></li>
+    <li><a href="../syscalls/file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="../userspace/overview.html">Overview</a></li>
+    <li><a href="../userspace/libc.html">Fr Libc</a></li>
+    <li><a href="../userspace/process-model.html">Process Model</a></li>
+    <li><a href="../userspace/elf-loading.html">ELF Loading</a></li>
+    <li><a href="../userspace/init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="../filesystem/overview.html">Filesystem</a></li>
+    <li><a href="../networking/overview.html">Networking</a></li>
+    <li><a href="../ipc/overview.html">IPC</a></li>
+    <li><a href="../drivers/overview.html">Drivers</a></li>
+    <li><a href="../security/overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="../build/overview.html">Build Overview</a></li>
+    <li><a href="../build/toolchain.html">Toolchain</a></li>
+    <li><a href="../build/makefile-structure.html">Makefile</a></li>
+    <li><a href="../build/qemu-setup.html">QEMU</a></li>
+    <li><a href="../build/testing.html">Testing</a></li>
+    <li><a href="../debugging/overview.html">Debugging</a></li>
+    <li><a href="../debugging/serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>Memory Layout</h1>
+<p>This document describes what <code>Fr Core</code> actually does. Where a previous version
+of this file described a design, the design is not in the tree; the discrepancies
+are called out in <a href="#not-implemented">Not Implemented</a> at the bottom rather than
+left implicit.</p>
+<p>Every address below is a constant you can grep for. The ones in the tables come
+from <code>src/include/boot.h</code>, <code>src/kernel/include/vmm.h</code>, <code>src/kernel/include/pmm.h</code>
+and <code>src/kernel/process.c</code>.</p>
+<h2>Physical Address Space</h2>
+<p>The physical address space layout is established by the BIOS E820 memory map[^acpi-e820] and
+passed to the kernel by stage 2 in <code>struct bootinfo</code>.</p>
+<pre><code>Physical Address Range        Usage
+─────────────────────────     ─────────────────────────────────────────
+0x0000_0000 – 0x0000_7BFF    Real mode IVT, BIOS data area
+0x0000_7C00 – 0x0000_7DFF    Stage 1 (MBR) and the drive byte at 0x7DFC
+0x0000_7E00 – 0x0000_FFFF    Stage 1 real-mode stack
+0x0000_8000 – 0x0000_DFFF    Stage 2 image
+0x0000_E000 – 0x0001_FFFF    Stage 2 32-bit stack (72 KiB, grows down)
+0x0002_0000 – 0x0002_0FFF    Firmware bounce window (one 512-byte sector)
+0x0002_1000 – 0x0002_2FFF    Program-header and VBE scratch
+0x0009_0000 – 0x0009_0BFF    E820 map, up to 128 entries of 24 bytes
+0x0009_1000 – 0x0009_10E7    struct bootinfo
+0x0010_0000 – 0x002C_7FFF    The kernel image (268 KB today; 0x1D0000 max)
+0x002D_0000 – 0x002D_FFFF    Stage 2's bootstrap page tables
+0x0010_0000 – ...            Free conventional memory
+[MMIO regions]               Device memory (E820 type 2/3/4, reserved)
+</code></pre>
+<p>The PMM manages only frames an E820 entry marks <code>USABLE</code> (type 1), and then
+removes three ranges from that set before handing it to the buddy allocator:</p>
+<ul>
+<li><code>&#91;0, 1 MiB)</code> — the bootloader is still running out of it (<code>main.c</code>).</li>
+<li><code>0x100000 .. phys(_ebss)</code> — the kernel image, derived from the link-time
+  <code>_ebss</code> (<code>pmm.c</code>'s <code>reserve_kernel_image()</code>).</li>
+<li>the PMM's own metadata arena: the presence bitmaps and the page array
+  (<code>pmm.c</code>).</li>
+</ul>
+<p>Stage 2's bootstrap page tables at <code>0x2D0000</code> are reserved by <code>main.c</code> after
+<code>pmm_init()</code> returns, because they sit above the image end and are reachable by
+the allocator.</p>
+<h2>Virtual Address Space (x86-64, 48-bit)</h2>
+<pre><code>Virtual Address Range                          Usage
+────────────────────────────────────────────   ─────────────────────────────
+0x0000_0000_0000_0000                         NULL guard page (unmapped)
+0x0000_0000_0001_0000 – 0x0000_7FFF_FFFF_FFFF   User address space (128 TB)
+  0x0000_0000_0001_0000                       ELF load base (load_bias = 0)
+  0x0000_0001_0000_0000                       brk heap base (MM_BRK_BASE)
+  0x0000_0002_0000_0000                       mmap region base (MM_MMAP_BASE)
+  0x0000_0007_FFF7_FF00_0000                  mmap region limit
+  0x0000_0007_FFFF_FF00_0000                  Initial user stack top
+──────── canonical hole ───────────────────────────────────────────────────────
+0xFFFF_8000_0000_0000 – 0xFFFF_FFFF_FFFF_FFFF   Kernel address space (128 TB)
+  0xFFFF_8000_0000_0000                       Direct map, 0 – 4 GiB
+  0xFFFF_8000_0400_0000                       (direct map ends here)
+  0xFFFF_C000_0000_0000                       vmalloc area
+  0xFFFFFFFF_8000_0000                       Kernel window, +16 MiB
+  0xFFFFFFFF_8019_1300                       Per-CPU data
+  0xFFFFFFFF_801C_8000                       Kernel stack top (32 KiB)
+</code></pre>
+<p>The user half is bounded above by <code>USER_ADDRESS_MAX</code> (<code>0x0000800000000000</code>). The
+stack occupies the top 8 MiB of it (<code>USER_STACK_SIZE</code>); <code>mmap</code> allocates upwards
+from <code>MM_MMAP_BASE</code> and stops at the stack base. There is no free-space search
+over already-mapped holes: <code>mm_find_free()</code> starts above everything handed out
+so far, so a fragmented address space runs out rather than filling gaps.</p>
+<h3>The direct map is 4 GiB, not 64 TB</h3>
+<p><code>PHYS_DIRECT_MAP</code> is <code>0xFFFF800000000000</code> and <code>phys_to_virt(p)</code> is
+<code>PHYS_DIRECT_MAP + p</code>, so the mapping is an identity map over whatever the
+direct-map constructor chose to cover. That constructor uses
+<code>DIRECT_MAP_BYTES = (4ULL &lt;&lt; 30)</code> (<code>src/kernel/vmm.c</code>) — <strong>4 GiB</strong>. The boot log
+says the extent on every run, and which of two page sizes it used:</p>
+<pre><code>vmm: direct map 0-4 GiB, 1 GiB pages      &lt;- CPUID.0x80000001 EDX bit 26 set
+vmm: direct map 0-4 GiB, 2 MiB pages      &lt;- bit 26 clear
+</code></pre>
+<p><code>map_direct_map()</code> picks between them at <code>src/kernel/vmm.c:221</code>: 1 GiB pages as
+PDPT entries with <code>PS=1</code> when <code>cpu_features.has_1gb_pages</code> is set, and 2 MiB
+pages through a PD otherwise[^intel-sdm-vol3a][^amd-apm-vol2]. The 2 MiB path is the fallback and the 4 KiB path
+is deliberately not used at all — a 4 GiB machine mapped with 4 KiB pages needs
+2048 page-table pages and 2048 TLB entries, so almost every access to ordinary
+memory would be a page walk; with 2 MiB pages it needs four and four, and with
+1 GiB pages one.</p>
+<p><code>ZONE_HIGH</code> exists and is populated on a machine with more than 4 GiB of RAM, and
+the PMM will hand out frames above 4 GiB as a fallback from <code>ZONE_NORMAL</code>. Those
+frames are <em>not</em> reachable through the direct map: anything that dereferences
+<code>phys_to_virt()</code> of one — <code>GFP_ZERO</code>'s memset, <code>pt_alloc_zeroed</code>, <code>slab_new</code>,
+<code>clone_table</code> — faults. On a 4 GiB reference machine the zone is empty and this
+is latent.</p>
+<p>This was audit finding <strong>#35</strong>, a three-way disagreement between this document,
+<code>vmm.c</code> and <code>pmm.h</code>. <strong>The code is authoritative and the documents were both
+wrong</strong>: <code>DIRECT_MAP_BYTES</code> in <code>src/kernel/vmm.c</code> decides, and the header text
+in <code>src/kernel/include/pmm.h</code> describing <code>ZONE_HIGH</code> as "reachable through the
+direct map" has been corrected to say the opposite. Both corrections are landed
+(2026-10-02). The hazard itself is unchanged: a ZONE_HIGH allocation is still
+permitted, still handed out, and still faults in every consumer that touches it.</p>
+<p>One thing did survive that resolution and was corrected later the same day: this
+page also stated the page size, and it was wrong independently of the extent. The
+extent was a three-way disagreement; the page size was this page alone against the
+code. Resolving a disagreement by choosing the authoritative side and marking the
+item done does not re-derive the other two sides — it only settles the question
+that was asked. The 4 KiB/2 MiB/1 GiB choice was a separate question that nobody
+had asked yet, and it took until <code>has_1gb_pages</code> was finally assigned
+(<code>cpu_features.c:218</code>) before anyone could notice that the 1 GiB path had never
+run.</p>
+<h3>The kernel window</h3>
+<p>The kernel is linked at <code>KERNEL_VIRT_BASE = 0xFFFFFFFF80000000</code> and stage 2
+copies the image to physical <code>KERNEL_LANDING_ADDR = 0x100000</code>. The two are not
+the same offset and the difference is 1 MiB, so every higher-half address
+translates as:</p>
+<pre><code>phys = (virt - KERNEL_VIRT_BASE) + KERNEL_LANDING_ADDR
+</code></pre>
+<p>The window is 16 MiB, 4 KiB pages, reached through <strong>PML4 511 / PDPT 510</strong>. The
+4 KiB granularity is forced by geometry, not preference: <code>0x100000</code> is not 2 MiB
+aligned, so the first 2 MiB cannot be a 2 MiB page. This layout follows the
+System V AMD64 ABI[^sysv-abi-memory] for kernel virtual address space.</p>
+<h2>Kernel Heap</h2>
+<p>Kernel dynamic memory comes in two forms:</p>
+<ul>
+<li><strong>SLAB allocator</strong> (<code>kmalloc</code>/<code>kfree</code>): fixed-size kernel objects, backed by
+  order-0 buddy pages, with a per-CPU magazine in front of each cache.</li>
+<li><strong><code>vmalloc()</code>/<code>vfree()</code></strong>: large, variable-size allocations from the vmalloc
+  area at <code>0xFFFFC00000000000</code>.</li>
+</ul>
+<p>Neither is exposed to userspace.</p>
+<h2>Not Implemented</h2>
+<p>These were claimed by earlier versions of this page and are not in the tree. They
+are listed so nobody writes code against them.</p>
+<ul>
+<li><strong>ASLR — there is none.</strong> Not for the executable load base, not for the stack,
+  not for <code>mmap</code>. Every one of those is at a fixed address: <code>exec_load_and_run()</code>
+  calls <code>elf_load()</code> with <code>load_bias == 0</code>, the initial user stack top is
+  <code>0x00007FFFFFFFF000</code>, and <code>mmap</code> starts at <code>MM_MMAP_BASE</code>
+  (<code>0x0000200000000000</code>). There is no randomisation of any kind.</li>
+<li><strong>KASLR — there is none.</strong> The kernel image is loaded at its link address
+  every time. <code>KASLR_SLIDE_BITS</code> is defined in <code>boot.h</code> and nothing uses it.</li>
+<li><strong>A 64 TB direct map</strong> — it is 4 GiB. See above.</li>
+<li><strong>A VDSO</strong> at <code>0x0000_7FFF_FFFF_0000</code> — there is no vDSO; that address is just
+  the top of the range <code>USER_ADDRESS_MAX</code> leaves usable.</li>
+<li><strong>Per-thread interrupt stacks</strong> at <code>0xFFFFFFFF_FFE0_0000</code> — there is one
+  kernel stack per task, allocated from vmalloc, and no separate IST stack (IST
+  pointers are zero, with a comment in <code>gdt.c</code> explaining that a vmalloc'd page
+  is not representable in the 32-bit IST field).</li>
+<li><strong>NX on the direct map or the kernel window</strong> — both are mapped RWX. See
+  <code>security/<a href="../security/nx-enforcement.html" class="filename-reference">nx-enforcement.md</a></code>.</li>
+</ul>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="../memory/overview.html">memory/overview.md</a></li>
+<li><a href="../memory/virtual-memory.html">memory/virtual-memory.md</a></li>
+<li><a href="../memory/physical-allocator.html">memory/physical-allocator.md</a></li>
+<li><a href="../security/aslr.html">security/aslr.md</a></li>
+</ul>
+<h2>References</h2>
+<ul>
+<li><a href="https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html#vol3a" title="Intel SDM Volume 3A: System Programming Guide, Part 1">Intel 64 and IA-32 Architectures Software Developer's Manual, Volume 3A — Paging</a></li>
+<li><a href="https://www.amd.com/en/developer/architecture-programmer-manuals.html" title="AMD64 Architecture Programmer's Manual Volume 2">AMD64 Architecture Programmer's Manual, Volume 2 — System Programming</a></li>
+<li><a href="../https:/gitlab.com/x86-psABIs/x86-64-ABI/-/blob/master/abi.html" title="System V AMD64 ABI - Memory Layout">System V Application Binary Interface AMD64 Architecture Processor Supplement — Memory Layout</a></li>
+<li><a href="https://www.kernel.org/doc/html/latest/core-api/memory-allocation.html" title="Linux Kernel Memory Management API">Linux Kernel Documentation — Memory Management</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="/fr-os/script.js" defer></script>
+</body>
+</html>

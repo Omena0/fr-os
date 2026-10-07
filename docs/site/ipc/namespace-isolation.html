@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="/fr-os/">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ipc/namespace-isolation — Fr OS</title>
+  <meta property="og:title" content="Ipc/namespace-isolation — Fr OS">
+  <meta name="description" content="Ipc/namespace-isolation — Fr OS documentation">
+  <meta property="og:description" content="Ipc/namespace-isolation — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="/fr-os/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/fr-os/style.css">
+  <link rel="stylesheet" href="/fr-os/fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="../index.html">Overview</a></li>
+    <li><a href="../architecture/overview.html">Architecture</a></li>
+    <li><a href="../architecture/memory-layout.html">Memory Layout</a></li>
+    <li><a href="../architecture/posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="../architecture/security-model.html">Security Model</a></li>
+    <li><a href="../architecture/performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="../bootloader/overview.html">Overview</a></li>
+    <li><a href="../bootloader/stage1.html">Stage 1</a></li>
+    <li><a href="../bootloader/stage2.html">Stage 2</a></li>
+    <li><a href="../bootloader/kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="../bootloader/memory-map.html">Memory Map</a></li>
+    <li><a href="../bootloader/serial-output.html">Serial Output</a></li>
+    <li><a href="../bootloader/build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="../kernel/overview.html">Overview</a></li>
+    <li><a href="../kernel/early-boot.html">Early Boot</a></li>
+    <li><a href="../kernel/interrupt-handling.html">Interrupts</a></li>
+    <li><a href="../kernel/context-switching.html">Context Switching</a></li>
+    <li><a href="../kernel/privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="../kernel/syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="../kernel/panic-system.html">Panic</a></li>
+    <li><a href="../kernel/logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="../memory/overview.html">Overview</a></li>
+    <li><a href="../memory/physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="../memory/buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="../memory/slab-allocator.html">SLAB</a></li>
+    <li><a href="../memory/virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="../memory/userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="../scheduling/overview.html">Overview</a></li>
+    <li><a href="../scheduling/mlfq.html">MLFQ</a></li>
+    <li><a href="../scheduling/realtime-scheduler.html">Realtime</a></li>
+    <li><a href="../scheduling/multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="../syscalls/overview.html">Overview</a></li>
+    <li><a href="../syscalls/dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="../syscalls/process-syscalls.html">Process</a></li>
+    <li><a href="../syscalls/memory-syscalls.html">Memory</a></li>
+    <li><a href="../syscalls/file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="../userspace/overview.html">Overview</a></li>
+    <li><a href="../userspace/libc.html">Fr Libc</a></li>
+    <li><a href="../userspace/process-model.html">Process Model</a></li>
+    <li><a href="../userspace/elf-loading.html">ELF Loading</a></li>
+    <li><a href="../userspace/init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="../filesystem/overview.html">Filesystem</a></li>
+    <li><a href="../networking/overview.html">Networking</a></li>
+    <li><a href="overview.html">IPC</a></li>
+    <li><a href="../drivers/overview.html">Drivers</a></li>
+    <li><a href="../security/overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="../build/overview.html">Build Overview</a></li>
+    <li><a href="../build/toolchain.html">Toolchain</a></li>
+    <li><a href="../build/makefile-structure.html">Makefile</a></li>
+    <li><a href="../build/qemu-setup.html">QEMU</a></li>
+    <li><a href="../build/testing.html">Testing</a></li>
+    <li><a href="../debugging/overview.html">Debugging</a></li>
+    <li><a href="../debugging/serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>IPC Namespace Isolation</h1>
+<h2>Overview</h2>
+<p>Namespaces partition global resources so that processes within a namespace see their own isolated view of those resources. Processes in different namespaces cannot interact via the corresponding resource.</p>
+<p>The OS implements the following namespaces relevant to IPC and process isolation:</p>
+<table>
+<thead>
+<tr>
+<th>Namespace</th>
+<th>Clone flag</th>
+<th>Isolates</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PID namespace</td>
+<td><code>CLONE_NEWPID</code></td>
+<td>Process IDs; nested PID trees</td>
+</tr>
+<tr>
+<td>Mount namespace</td>
+<td><code>CLONE_NEWNS</code></td>
+<td>Filesystem mount tree</td>
+</tr>
+<tr>
+<td>IPC namespace</td>
+<td><code>CLONE_NEWIPC</code></td>
+<td>POSIX shared memory, semaphore namespaces</td>
+</tr>
+<tr>
+<td>Resource namespace</td>
+<td><code>CLONE_NEWRESOURCE</code></td>
+<td>Resource limits (planned)</td>
+</tr>
+</tbody>
+</table>
+<h2>IPC Namespace</h2>
+<p>An IPC namespace contains its own:</p>
+<ul>
+<li>Named POSIX shared memory objects (<code>shm_open</code> namespace).</li>
+<li>Named POSIX semaphores (<code>sem_open</code> namespace).</li>
+</ul>
+<p>Processes in different IPC namespaces cannot see or access each other's named IPC objects.</p>
+<p>Creation:</p>
+<pre><code class="language-c"><span class="hl-comment">// Unshare IPC namespace (creates a fresh, empty namespace for this process)</span>
+<span class="hl-function-call">unshare</span><span class="hl-punctuation-bracket">(</span><span class="hl-constant">CLONE_NEWIPC</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+
+<span class="hl-comment">// Fork a child with a new IPC namespace</span>
+<span class="hl-function-call">clone</span><span class="hl-punctuation-bracket">(</span><span class="hl-variable">child_fn</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">stack</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-constant">CLONE_NEWIPC</span> <span class="hl-operator">|</span> <span class="hl-constant">SIGCHLD</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">arg</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<h2>PID Namespace</h2>
+<p>In a PID namespace, process IDs are scoped to the namespace:</p>
+<ul>
+<li>The first process in a new PID namespace has PID 1 within that namespace.</li>
+<li>The kernel maps the namespace-local PID to a global PID internally.</li>
+<li>A process can see PIDs in its namespace and all parent namespaces (but not child namespaces).</li>
+</ul>
+<pre><code class="language-c"><span class="hl-comment">// child sees itself as PID 1; parent sees it as a global PID</span>
+<span class="hl-function-call">clone</span><span class="hl-punctuation-bracket">(</span><span class="hl-variable">child_fn</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">stack</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-constant">CLONE_NEWPID</span> <span class="hl-operator">|</span> <span class="hl-constant">SIGCHLD</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">arg</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<h2>Mount Namespace</h2>
+<p>Mount namespaces allow different processes to have different views of the filesystem:</p>
+<ul>
+<li>A process in a new mount namespace starts with a copy of the parent's mount tree (unless <code>MS_PRIVATE</code> propagation mode is used).</li>
+<li>Mounts made inside the new namespace are not visible outside (and vice versa, by default).</li>
+</ul>
+<p>This is the mechanism used by container runtimes to give each container its own root filesystem.</p>
+<h2>Namespace Inheritance</h2>
+<p>By default, a process inherits all namespaces from its parent. New namespaces are created only when explicitly requested via:</p>
+<ul>
+<li><code>clone(fn, stack, CLONE_NEW* | ..., arg)</code> — child starts in new namespace.</li>
+<li><code>unshare(CLONE_NEW*)</code> — calling process moves into a new namespace.</li>
+<li><code>setns(nsfd, nstype)</code> — join an existing namespace (identified by an fd from <code>/proc/&lt;pid&gt;/ns/&lt;type&gt;</code>).</li>
+</ul>
+<h2>Namespace File Descriptors</h2>
+<p>Each namespace has a file in <code>/proc/&lt;pid&gt;/ns/</code>:</p>
+<pre><code>/proc/&lt;pid&gt;/ns/pid    → fd referencing the process's PID namespace
+/proc/&lt;pid&gt;/ns/mnt    → fd referencing the mount namespace
+/proc/&lt;pid&gt;/ns/ipc    → fd referencing the IPC namespace
+</code></pre>
+<p>Opening this file returns a namespace fd. <code>setns(fd, 0)</code> allows any process with sufficient capabilities to join that namespace.</p>
+<h2>Capability Requirements</h2>
+<p>Creating a new namespace requires <code>CAP_SYS_ADMIN</code>. Joining an existing namespace also requires <code>CAP_SYS_ADMIN</code> (or the process is the owner of the namespace — a future user namespace feature).</p>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="shared-memory.html">shared-memory.md</a></li>
+<li><a href="overview.html">ipc/overview.md</a></li>
+<li><a href="../security/namespaces.html">security/namespaces.md</a></li>
+<li><a href="../filesystem/mount-system.html">filesystem/mount-system.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="/fr-os/script.js" defer></script>
+</body>
+</html>

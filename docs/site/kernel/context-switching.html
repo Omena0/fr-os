@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="/fr-os/">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kernel/context-switching — Fr OS</title>
+  <meta property="og:title" content="Kernel/context-switching — Fr OS">
+  <meta name="description" content="Kernel/context-switching — Fr OS documentation">
+  <meta property="og:description" content="Kernel/context-switching — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="/fr-os/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/fr-os/style.css">
+  <link rel="stylesheet" href="/fr-os/fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="../index.html">Overview</a></li>
+    <li><a href="../architecture/overview.html">Architecture</a></li>
+    <li><a href="../architecture/memory-layout.html">Memory Layout</a></li>
+    <li><a href="../architecture/posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="../architecture/security-model.html">Security Model</a></li>
+    <li><a href="../architecture/performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="../bootloader/overview.html">Overview</a></li>
+    <li><a href="../bootloader/stage1.html">Stage 1</a></li>
+    <li><a href="../bootloader/stage2.html">Stage 2</a></li>
+    <li><a href="../bootloader/kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="../bootloader/memory-map.html">Memory Map</a></li>
+    <li><a href="../bootloader/serial-output.html">Serial Output</a></li>
+    <li><a href="../bootloader/build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="early-boot.html">Early Boot</a></li>
+    <li><a href="interrupt-handling.html">Interrupts</a></li>
+    <li><a href="kernel/context-switching.html" class="active">Context Switching</a></li>
+    <li><a href="privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="panic-system.html">Panic</a></li>
+    <li><a href="logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="../memory/overview.html">Overview</a></li>
+    <li><a href="../memory/physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="../memory/buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="../memory/slab-allocator.html">SLAB</a></li>
+    <li><a href="../memory/virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="../memory/userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="../scheduling/overview.html">Overview</a></li>
+    <li><a href="../scheduling/mlfq.html">MLFQ</a></li>
+    <li><a href="../scheduling/realtime-scheduler.html">Realtime</a></li>
+    <li><a href="../scheduling/multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="../syscalls/overview.html">Overview</a></li>
+    <li><a href="../syscalls/dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="../syscalls/process-syscalls.html">Process</a></li>
+    <li><a href="../syscalls/memory-syscalls.html">Memory</a></li>
+    <li><a href="../syscalls/file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="../userspace/overview.html">Overview</a></li>
+    <li><a href="../userspace/libc.html">Fr Libc</a></li>
+    <li><a href="../userspace/process-model.html">Process Model</a></li>
+    <li><a href="../userspace/elf-loading.html">ELF Loading</a></li>
+    <li><a href="../userspace/init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="../filesystem/overview.html">Filesystem</a></li>
+    <li><a href="../networking/overview.html">Networking</a></li>
+    <li><a href="../ipc/overview.html">IPC</a></li>
+    <li><a href="../drivers/overview.html">Drivers</a></li>
+    <li><a href="../security/overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="../build/overview.html">Build Overview</a></li>
+    <li><a href="../build/toolchain.html">Toolchain</a></li>
+    <li><a href="../build/makefile-structure.html">Makefile</a></li>
+    <li><a href="../build/qemu-setup.html">QEMU</a></li>
+    <li><a href="../build/testing.html">Testing</a></li>
+    <li><a href="../debugging/overview.html">Debugging</a></li>
+    <li><a href="../debugging/serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>Context Switching</h1>
+<h2>Scope</h2>
+<p>A context switch saves the full execution state of the current thread and restores the state of the next thread. Context switches occur:</p>
+<ul>
+<li>On a scheduler tick (preemptive switch).</li>
+<li>When a thread blocks (voluntary switch via mutex, IPC wait, I/O wait).</li>
+<li>On <code>sched_yield()</code>.</li>
+<li>After interrupt return when a higher-priority thread is runnable.</li>
+</ul>
+<h2>Thread State</h2>
+<p>The complete thread state consists of:</p>
+<h3>General-Purpose Registers</h3>
+<p>Saved on the kernel stack in a <code>struct context</code> layout:</p>
+<pre><code class="language-c"><span class="hl-keyword-type">struct</span> <span class="hl-type">context</span> <span class="hl-punctuation-bracket">{</span>
+    <span class="hl-comment">// Callee-saved (ABI: must preserve across calls)</span>
+    <span class="hl-type-builtin">uint64_t</span> <span class="hl-property">rbx</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-property">rbp</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-property">r12</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-property">r13</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-property">r14</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-property">r15</span><span class="hl-punctuation-delimiter">;</span>
+    <span class="hl-comment">// Caller-saved (saved on interrupt/syscall entry)</span>
+    <span class="hl-type-builtin">uint64_t</span> <span class="hl-property">rax</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-property">rcx</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-property">rdx</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-property">rsi</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-property">rdi</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-property">r8</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-property">r9</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-property">r10</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-property">r11</span><span class="hl-punctuation-delimiter">;</span>
+    <span class="hl-comment">// Control</span>
+    <span class="hl-type-builtin">uint64_t</span> <span class="hl-property">rip</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-property">cs</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-property">rflags</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-property">rsp</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-property">ss</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-punctuation-bracket">}</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<h3>SIMD / FPU State</h3>
+<p><strong>The lazy <code>TS</code>-based scheme described in earlier versions of this page is not
+what the code does.</strong> <code>context.S</code> saves and restores the FPU state eagerly on
+every switch, with <code>fxsave</code>/<code>fxrstor</code>, into a per-task <code>fpu_state</code> buffer. <code>TS</code>
+is never set to trigger a #NM, and there is no FPU exception handler.</p>
+<p>The buffer is <code>FXSAVE</code>-shaped: 512 bytes covering x87 and XMM0-15. <code>fxsave</code> does
+<strong>not</strong> save bits 128-255 of YMM0-15, and userspace is still compiled with
+<code>-mavx2 -mfma -mf16c -mxsave</code> (<code>USER_CFLAGS</code> in <code>src/config.mk</code>). So two
+preempted userspace processes have the upper halves of their YMM registers
+silently clobbered across a switch: no fault, no diagnostic, just corrupted
+vector spills and results. The kernel itself is built GPR-only
+(<code>-mno-avx -mno-avx2 -mno-fma -mno-f16c</code>), which is why this does not bite the
+kernel.</p>
+<p>Either drop the AVX flags from <code>USER_CFLAGS</code>, or move to <code>xsave</code>/<code>xrstor</code> with an
+<code>XSAVE</code> header and a per-task XCR0. See finding #63 in
+<a href="../MEGA_AUDIT.html"><code>../../../MEGA_AUDIT.md</code></a>.</p>
+<h3>Scheduling Metadata</h3>
+<p>Saved in the thread's <code>struct task</code> (not on the stack):</p>
+<ul>
+<li>Virtual runtime (<code>vruntime</code>) for MLFQ accounting</li>
+<li>Current MLFQ queue level</li>
+<li>CPU affinity mask</li>
+<li>Preemption counter</li>
+<li>Signal pending mask</li>
+</ul>
+<h3>Kernel Stack Pointer</h3>
+<p>Each thread has its own kernel stack. On switch, the kernel stack pointer (<code>rsp</code>) of the outgoing thread is saved in its <code>struct task</code>. The incoming thread's <code>rsp</code> is loaded.</p>
+<h2>Context Switch Assembly</h2>
+<p>The core switch is a single assembly function:</p>
+<pre><code class="language-asm"><span class="hl-comment">; switch_context(struct context **old_ctx, struct context *new_ctx)</span>
+<span class="hl-label">switch_context</span><span class="hl-punctuation-delimiter">:</span>
+    <span class="hl-comment">; Save callee-saved registers of current thread</span>
+    <span class="hl-function-builtin">push</span> <span class="hl-variable-builtin">rbp</span>
+    <span class="hl-function-builtin">push</span> <span class="hl-variable-builtin">rbx</span>
+    <span class="hl-function-builtin">push</span> <span class="hl-variable-builtin">r12</span>
+    <span class="hl-function-builtin">push</span> <span class="hl-variable-builtin">r13</span>
+    <span class="hl-function-builtin">push</span> <span class="hl-variable-builtin">r14</span>
+    <span class="hl-function-builtin">push</span> <span class="hl-variable-builtin">r15</span>
+    <span class="hl-comment">; Save current RSP into *old_ctx</span>
+    <span class="hl-function-builtin">mov</span> <span class="hl-punctuation-bracket">[</span><span class="hl-variable-builtin">rdi</span><span class="hl-punctuation-bracket">]</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable-builtin">rsp</span>
+    <span class="hl-comment">; Load new RSP from new_ctx</span>
+    <span class="hl-function-builtin">mov</span> <span class="hl-variable-builtin">rsp</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable-builtin">rsi</span>
+    <span class="hl-comment">; Restore callee-saved registers of new thread</span>
+    <span class="hl-function-builtin">pop</span> <span class="hl-variable-builtin">r15</span>
+    <span class="hl-function-builtin">pop</span> <span class="hl-variable-builtin">r14</span>
+    <span class="hl-function-builtin">pop</span> <span class="hl-variable-builtin">r13</span>
+    <span class="hl-function-builtin">pop</span> <span class="hl-variable-builtin">r12</span>
+    <span class="hl-function-builtin">pop</span> <span class="hl-variable-builtin">rbx</span>
+    <span class="hl-function-builtin">pop</span> <span class="hl-variable-builtin">rbp</span>
+    <span class="hl-function-builtin">ret</span>   <span class="hl-comment">; RIP is on the new thread's stack</span>
+</code></pre>
+<p>The <code>rip</code> of the new thread is the top of its kernel stack — either a return address into the scheduler (for a thread that was previously preempted) or <code>thread_entry</code> (for a newly created thread).</p>
+<h2>User/Kernel Transition</h2>
+<p>On entry from userspace (syscall or interrupt):</p>
+<ul>
+<li><code>SYSCALL</code> instruction saves user <code>rip</code>, <code>rflags</code>, <code>rsp</code> into kernel-controlled MSRs (<code>LSTAR</code>, <code>STAR</code>, <code>SFMASK</code>).</li>
+<li>Kernel stack is loaded from the TSS <code>RSP0</code> field.</li>
+<li>User context is pushed onto the kernel stack.</li>
+</ul>
+<p>On return to userspace (<code>SYSRET</code> or <code>IRETQ</code>):</p>
+<ul>
+<li>User context is restored from the kernel stack.</li>
+<li>Control returns to user <code>rip</code> at privilege level 3.</li>
+</ul>
+<h2>Multiprocessor Considerations</h2>
+<ul>
+<li>Each CPU has its own kernel stack per thread (one kernel stack per thread, not per CPU).</li>
+<li>A thread's kernel stack is only ever used by the CPU currently running that thread.</li>
+<li>TSS <code>RSP0</code> is updated to the current thread's kernel stack top on every context switch (per-CPU TSS).</li>
+<li>CR3 (page table base) is switched only when the new thread belongs to a different address space (different process). Threads within the same process share a CR3 and do not cause a TLB flush.</li>
+</ul>
+<h2>Fast Path</h2>
+<ul>
+<li>Switch between threads in the same process: no CR3 change, no TLB flush.</li>
+<li>Lazy FPU: no FXSAVE/XRSTOR unless FPU was actually used.</li>
+<li>Callee-saved register save/restore: 6 pushes + 6 pops = 12 instructions on the critical path.</li>
+</ul>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="interrupt-handling.html">interrupt-handling.md</a></li>
+<li><a href="privilege-levels.html">privilege-levels.md</a></li>
+<li><a href="../scheduling/overview.html">scheduling/overview.md</a></li>
+<li><a href="../scheduling/per-core-runqueues.html">scheduling/per-core-runqueues.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="/fr-os/script.js" defer></script>
+</body>
+</html>

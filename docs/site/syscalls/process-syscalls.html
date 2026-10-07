@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="/fr-os/">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Syscalls/process-syscalls — Fr OS</title>
+  <meta property="og:title" content="Syscalls/process-syscalls — Fr OS">
+  <meta name="description" content="Syscalls/process-syscalls — Fr OS documentation">
+  <meta property="og:description" content="Syscalls/process-syscalls — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="/fr-os/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/fr-os/style.css">
+  <link rel="stylesheet" href="/fr-os/fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="../index.html">Overview</a></li>
+    <li><a href="../architecture/overview.html">Architecture</a></li>
+    <li><a href="../architecture/memory-layout.html">Memory Layout</a></li>
+    <li><a href="../architecture/posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="../architecture/security-model.html">Security Model</a></li>
+    <li><a href="../architecture/performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="../bootloader/overview.html">Overview</a></li>
+    <li><a href="../bootloader/stage1.html">Stage 1</a></li>
+    <li><a href="../bootloader/stage2.html">Stage 2</a></li>
+    <li><a href="../bootloader/kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="../bootloader/memory-map.html">Memory Map</a></li>
+    <li><a href="../bootloader/serial-output.html">Serial Output</a></li>
+    <li><a href="../bootloader/build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="../kernel/overview.html">Overview</a></li>
+    <li><a href="../kernel/early-boot.html">Early Boot</a></li>
+    <li><a href="../kernel/interrupt-handling.html">Interrupts</a></li>
+    <li><a href="../kernel/context-switching.html">Context Switching</a></li>
+    <li><a href="../kernel/privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="../kernel/syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="../kernel/panic-system.html">Panic</a></li>
+    <li><a href="../kernel/logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="../memory/overview.html">Overview</a></li>
+    <li><a href="../memory/physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="../memory/buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="../memory/slab-allocator.html">SLAB</a></li>
+    <li><a href="../memory/virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="../memory/userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="../scheduling/overview.html">Overview</a></li>
+    <li><a href="../scheduling/mlfq.html">MLFQ</a></li>
+    <li><a href="../scheduling/realtime-scheduler.html">Realtime</a></li>
+    <li><a href="../scheduling/multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="syscalls/process-syscalls.html" class="active">Process</a></li>
+    <li><a href="memory-syscalls.html">Memory</a></li>
+    <li><a href="file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="../userspace/overview.html">Overview</a></li>
+    <li><a href="../userspace/libc.html">Fr Libc</a></li>
+    <li><a href="../userspace/process-model.html">Process Model</a></li>
+    <li><a href="../userspace/elf-loading.html">ELF Loading</a></li>
+    <li><a href="../userspace/init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="../filesystem/overview.html">Filesystem</a></li>
+    <li><a href="../networking/overview.html">Networking</a></li>
+    <li><a href="../ipc/overview.html">IPC</a></li>
+    <li><a href="../drivers/overview.html">Drivers</a></li>
+    <li><a href="../security/overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="../build/overview.html">Build Overview</a></li>
+    <li><a href="../build/toolchain.html">Toolchain</a></li>
+    <li><a href="../build/makefile-structure.html">Makefile</a></li>
+    <li><a href="../build/qemu-setup.html">QEMU</a></li>
+    <li><a href="../build/testing.html">Testing</a></li>
+    <li><a href="../debugging/overview.html">Debugging</a></li>
+    <li><a href="../debugging/serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>Process Syscalls</h1>
+<h2>Syscall Table: Process Management (Numbers 0–17)</h2>
+<table>
+<thead>
+<tr>
+<th>Number</th>
+<th>Name</th>
+<th>Signature</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td><code>sys_fork</code></td>
+<td><code>pid_t sys_fork(void)</code></td>
+<td>Clone calling process. Child returns 0; parent returns child PID.</td>
+</tr>
+<tr>
+<td>1</td>
+<td><code>sys_exec</code></td>
+<td><code>int sys_exec(const char <em>path, char </em>const argv&#91;&#93;, char *const envp&#91;&#93;)</code></td>
+<td>Replace current process image with new program.</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>sys_exit</code></td>
+<td><code>void sys_exit(int status)</code></td>
+<td>Terminate the calling thread.</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>sys_exit_group</code></td>
+<td><code>void sys_exit_group(int status)</code></td>
+<td>Terminate all threads in the calling process.</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>sys_wait</code></td>
+<td><code>pid_t sys_wait(int *wstatus)</code></td>
+<td>Wait for any child process to exit.</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>sys_waitpid</code></td>
+<td><code>pid_t sys_waitpid(pid_t pid, int *wstatus, int options)</code></td>
+<td>Wait for a specific child (or group).</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>sys_getpid</code></td>
+<td><code>pid_t sys_getpid(void)</code></td>
+<td>Return the calling process's PID.</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>sys_getppid</code></td>
+<td><code>pid_t sys_getppid(void)</code></td>
+<td>Return the parent process's PID.</td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>sys_gettid</code></td>
+<td><code>tid_t sys_gettid(void)</code></td>
+<td>Return the calling thread's TID.</td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>sys_clone</code></td>
+<td><code>int sys_clone(uint64_t flags, void <em>stack, void </em>parent_tid, void <em>child_tid, void </em>tls)</code></td>
+<td>Create a new thread or process with fine-grained flag control.</td>
+</tr>
+<tr>
+<td>10</td>
+<td><code>sys_kill</code></td>
+<td><code>int sys_kill(pid_t pid, int sig)</code></td>
+<td>Send signal <code>sig</code> to process <code>pid</code>.</td>
+</tr>
+<tr>
+<td>11</td>
+<td><code>sys_tkill</code></td>
+<td><code>int sys_tkill(tid_t tid, int sig)</code></td>
+<td>Send signal to specific thread.</td>
+</tr>
+<tr>
+<td>12</td>
+<td><code>sys_getpgid</code></td>
+<td><code>pid_t sys_getpgid(pid_t pid)</code></td>
+<td>Return process group ID.</td>
+</tr>
+<tr>
+<td>13</td>
+<td><code>sys_setpgid</code></td>
+<td><code>int sys_setpgid(pid_t pid, pid_t pgid)</code></td>
+<td>Set process group ID.</td>
+</tr>
+<tr>
+<td>14</td>
+<td><code>sys_setsid</code></td>
+<td><code>pid_t sys_setsid(void)</code></td>
+<td>Create new session (detach from terminal).</td>
+</tr>
+<tr>
+<td>15</td>
+<td><code>sys_prctl</code></td>
+<td><code>int sys_prctl(int option, uint64_t arg2, ...)</code></td>
+<td>Process-specific control operations.</td>
+</tr>
+<tr>
+<td>16</td>
+<td><code>sys_nanosleep</code></td>
+<td><code>int sys_nanosleep(const struct timespec <em>req, struct timespec </em>rem)</code></td>
+<td>Sleep for at least <code>req</code> nanoseconds.</td>
+</tr>
+<tr>
+<td>17</td>
+<td><code>sys_clock_gettime</code></td>
+<td><code>int sys_clock_gettime(clockid_t clk, struct timespec *tp)</code></td>
+<td>Read a POSIX clock (<code>CLOCK_MONOTONIC</code>, <code>CLOCK_REALTIME</code>).</td>
+</tr>
+</tbody>
+</table>
+<h2><code>sys_fork</code> Implementation</h2>
+<ol>
+<li>Allocate a new <code>struct process</code> for the child.</li>
+<li>Copy the parent's page table (copy-on-write — mark all writable pages read-only in both).</li>
+<li>Copy the fd table (increment refcounts on all open <code>struct file</code> objects).</li>
+<li>Copy signal dispositions, credentials.</li>
+<li>Child's <code>RAX</code> = 0, parent's <code>RAX</code> = child PID.</li>
+<li>Place both child and parent on the scheduler run queues.</li>
+</ol>
+<h2><code>sys_clone</code> Flags</h2>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>CLONE_VM</code></td>
+<td>Share virtual address space (thread, not process)</td>
+</tr>
+<tr>
+<td><code>CLONE_FS</code></td>
+<td>Share filesystem root and cwd</td>
+</tr>
+<tr>
+<td><code>CLONE_FILES</code></td>
+<td>Share file descriptor table</td>
+</tr>
+<tr>
+<td><code>CLONE_SIGHAND</code></td>
+<td>Share signal handlers</td>
+</tr>
+<tr>
+<td><code>CLONE_THREAD</code></td>
+<td>Same thread group (for <code>getpid()</code> to return same value)</td>
+</tr>
+<tr>
+<td><code>CLONE_NEWPID</code></td>
+<td>New PID namespace</td>
+</tr>
+<tr>
+<td><code>CLONE_NEWNS</code></td>
+<td>New mount namespace</td>
+</tr>
+<tr>
+<td><code>CLONE_SETTLS</code></td>
+<td>Set TLS base (FSBASE) to <code>tls</code> argument</td>
+</tr>
+</tbody>
+</table>
+<p><code>CLONE_VM | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD | CLONE_SETTLS</code>: creates a POSIX thread (used by <code>pthread_create</code>).</p>
+<h2><code>sys_exec</code> Implementation</h2>
+<ol>
+<li>Path resolution and permission check (execute bit, not a directory).</li>
+<li>Parse ELF64 header and program headers.</li>
+<li>Check ELF magic (<code>0x7F &#x27;E&#x27; &#x27;L&#x27; &#x27;F&#x27;</code>), machine (<code>EM_X86_64</code>), type (<code>ET_EXEC</code> or <code>ET_DYN</code>).</li>
+<li>Discard current address space (unmap all VMAs, free page tables).</li>
+<li>Apply ASLR bases for the new address space.</li>
+<li>Map ELF segments (LOAD segments) into the new address space.</li>
+<li>Map VDSO and stack.</li>
+<li>Build argument/environment/auxiliary vector on the new stack.</li>
+<li>Set <code>RIP</code> = ELF entry point, <code>RSP</code> = new stack top. Jump (SYSRET).</li>
+</ol>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="overview.html">overview.md</a></li>
+<li><a href="dispatch-path.html">dispatch-path.md</a></li>
+<li><a href="memory-syscalls.html">memory-syscalls.md</a></li>
+<li><a href="../ipc/signals.html">ipc/signals.md</a></li>
+<li><a href="../scheduling/multicore-overview.html">scheduling/multicore-overview.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="/fr-os/script.js" defer></script>
+</body>
+</html>

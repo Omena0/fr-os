@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="/fr-os/">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Memory/physical-allocator — Fr OS</title>
+  <meta property="og:title" content="Memory/physical-allocator — Fr OS">
+  <meta name="description" content="Memory/physical-allocator — Fr OS documentation">
+  <meta property="og:description" content="Memory/physical-allocator — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="/fr-os/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/fr-os/style.css">
+  <link rel="stylesheet" href="/fr-os/fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="../index.html">Overview</a></li>
+    <li><a href="../architecture/overview.html">Architecture</a></li>
+    <li><a href="../architecture/memory-layout.html">Memory Layout</a></li>
+    <li><a href="../architecture/posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="../architecture/security-model.html">Security Model</a></li>
+    <li><a href="../architecture/performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="../bootloader/overview.html">Overview</a></li>
+    <li><a href="../bootloader/stage1.html">Stage 1</a></li>
+    <li><a href="../bootloader/stage2.html">Stage 2</a></li>
+    <li><a href="../bootloader/kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="../bootloader/memory-map.html">Memory Map</a></li>
+    <li><a href="../bootloader/serial-output.html">Serial Output</a></li>
+    <li><a href="../bootloader/build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="../kernel/overview.html">Overview</a></li>
+    <li><a href="../kernel/early-boot.html">Early Boot</a></li>
+    <li><a href="../kernel/interrupt-handling.html">Interrupts</a></li>
+    <li><a href="../kernel/context-switching.html">Context Switching</a></li>
+    <li><a href="../kernel/privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="../kernel/syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="../kernel/panic-system.html">Panic</a></li>
+    <li><a href="../kernel/logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="memory/physical-allocator.html" class="active">Physical Allocator</a></li>
+    <li><a href="buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="slab-allocator.html">SLAB</a></li>
+    <li><a href="virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="../scheduling/overview.html">Overview</a></li>
+    <li><a href="../scheduling/mlfq.html">MLFQ</a></li>
+    <li><a href="../scheduling/realtime-scheduler.html">Realtime</a></li>
+    <li><a href="../scheduling/multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="../syscalls/overview.html">Overview</a></li>
+    <li><a href="../syscalls/dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="../syscalls/process-syscalls.html">Process</a></li>
+    <li><a href="../syscalls/memory-syscalls.html">Memory</a></li>
+    <li><a href="../syscalls/file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="../userspace/overview.html">Overview</a></li>
+    <li><a href="../userspace/libc.html">Fr Libc</a></li>
+    <li><a href="../userspace/process-model.html">Process Model</a></li>
+    <li><a href="../userspace/elf-loading.html">ELF Loading</a></li>
+    <li><a href="../userspace/init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="../filesystem/overview.html">Filesystem</a></li>
+    <li><a href="../networking/overview.html">Networking</a></li>
+    <li><a href="../ipc/overview.html">IPC</a></li>
+    <li><a href="../drivers/overview.html">Drivers</a></li>
+    <li><a href="../security/overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="../build/overview.html">Build Overview</a></li>
+    <li><a href="../build/toolchain.html">Toolchain</a></li>
+    <li><a href="../build/makefile-structure.html">Makefile</a></li>
+    <li><a href="../build/qemu-setup.html">QEMU</a></li>
+    <li><a href="../build/testing.html">Testing</a></li>
+    <li><a href="../debugging/overview.html">Debugging</a></li>
+    <li><a href="../debugging/serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>Physical Memory Allocator</h1>
+<h2>Overview</h2>
+<p>The Physical Memory Manager (PMM) is the lowest-level memory allocator. It manages physical page frames (4 KB each) and provides them to the Virtual Memory Manager, DMA allocators, and kernel subsystems that need physically contiguous memory.</p>
+<h2>Initialization</h2>
+<p>The PMM is initialized during early boot from the E820 memory map:</p>
+<ol>
+<li>Parse E820 entries. Only entries of type <code>USABLE</code> (type 1) contribute free
+   frames; everything else is reserved by construction, because the presence
+   bitmap is memset to "reserved" and only the usable pass clears it.</li>
+<li>Reserve, before the free lists are built:</li>
+<li>the PMM's own metadata arena (presence bitmaps and the page array), sized
+     from the frame count;</li>
+<li>the kernel image, <code>&#91;KERNEL_LANDING_ADDR, phys(_ebss))</code>, derived from the
+     link-time <code>_ebss</code>.</li>
+<li>Align frame tracking to page boundaries.</li>
+<li>Build the buddy allocator free lists from all usable frames, skipping the
+   reserved ones.</li>
+<li>Report usable and free frames to the kernel log.</li>
+</ol>
+<p>Two more ranges are reserved by the <em>caller</em>, after <code>pmm_init()</code> returns:
+<code>&#91;0, 1 MiB)</code>, which the bootloader is still executing from, and stage 2's own
+bootstrap page tables at <code>0x2D0000</code>–<code>0x2DFFFF</code>, which sit just above the kernel
+image.</p>
+<h3>Reading the log</h3>
+<p><code>pmm_total()</code> and <code>pmm_free()</code> return <strong>frame counts</strong>, not byte counts. Use
+<code>pmm_total_bytes()</code> and <code>pmm_free_bytes()</code> when you want bytes; converting by
+shifting by 20 is the mistake this file's header once described.</p>
+<h2>Memory Zones</h2>
+<p>Physical memory is divided into zones to satisfy different allocation requirements:</p>
+<table>
+<thead>
+<tr>
+<th>Zone</th>
+<th>Physical Range</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ZONE_DMA</code></td>
+<td>0 – 16 MB</td>
+<td>Legacy ISA DMA — device buffers for old hardware</td>
+</tr>
+<tr>
+<td><code>ZONE_NORMAL</code></td>
+<td>16 MB – 4 GB</td>
+<td>Standard kernel and user page frames</td>
+</tr>
+<tr>
+<td><code>ZONE_HIGH</code></td>
+<td>&gt; 4 GB</td>
+<td>Extended memory. <strong>Not reachable through the direct map</strong>, which covers only 4 GiB — a <code>ZONE_HIGH</code> frame dereferenced through <code>phys_to_virt()</code> faults. On a 4 GiB machine the zone is empty and this is latent.</td>
+</tr>
+</tbody>
+</table>
+<p>Allocation requests specify which zone they require via <code>gfp_t</code> flags:</p>
+<ul>
+<li><code>GFP_DMA</code>: Must allocate from <code>ZONE_DMA</code>.</li>
+<li>Default: Prefer <code>ZONE_NORMAL</code>, fall back to <code>ZONE_HIGH</code> if exhausted.</li>
+</ul>
+<h2>Core API</h2>
+<pre><code class="language-c"><span class="hl-comment">// Allocate 2^order contiguous physical pages</span>
+<span class="hl-keyword-type">struct</span> <span class="hl-type">page</span> <span class="hl-operator">*</span><span class="hl-function">pmm_alloc_pages</span><span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">int</span> <span class="hl-variable-parameter">order</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type">gfp_t</span> <span class="hl-variable-parameter">flags</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+
+<span class="hl-comment">// Allocate a single page (order=0)</span>
+<span class="hl-keyword-type">struct</span> <span class="hl-type">page</span> <span class="hl-operator">*</span><span class="hl-function">pmm_alloc_page</span><span class="hl-punctuation-bracket">(</span><span class="hl-type">gfp_t</span> <span class="hl-variable-parameter">flags</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+
+<span class="hl-comment">// Free pages (must match original order)</span>
+<span class="hl-type-builtin">void</span> <span class="hl-function">pmm_free_pages</span><span class="hl-punctuation-bracket">(</span><span class="hl-keyword-type">struct</span> <span class="hl-type">page</span> <span class="hl-operator">*</span><span class="hl-variable">page</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">int</span> <span class="hl-variable-parameter">order</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+
+<span class="hl-comment">// Convert page descriptor to physical address</span>
+<span class="hl-type">phys_addr_t</span> <span class="hl-function">page_to_phys</span><span class="hl-punctuation-bracket">(</span><span class="hl-keyword-type">struct</span> <span class="hl-type">page</span> <span class="hl-operator">*</span><span class="hl-variable">page</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+
+<span class="hl-comment">// Convert physical address to page descriptor</span>
+<span class="hl-keyword-type">struct</span> <span class="hl-type">page</span> <span class="hl-operator">*</span><span class="hl-function">phys_to_page</span><span class="hl-punctuation-bracket">(</span><span class="hl-type">phys_addr_t</span> <span class="hl-variable-parameter">addr</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<h2><code>struct page</code></h2>
+<p>Each physical page has a <code>struct page</code> descriptor in the kernel's direct map:</p>
+<pre><code class="language-c"><span class="hl-keyword-type">struct</span> <span class="hl-type">page</span> <span class="hl-punctuation-bracket">{</span>
+    <span class="hl-type">atomic_t</span>      <span class="hl-property">refcount</span><span class="hl-punctuation-delimiter">;</span>      <span class="hl-comment">// reference count</span>
+    <span class="hl-type-builtin">uint32_t</span>      <span class="hl-property">flags</span><span class="hl-punctuation-delimiter">;</span>         <span class="hl-comment">// PG_dirty, PG_locked, PG_slab, etc.</span>
+    <span class="hl-type-builtin">uint8_t</span>       <span class="hl-property">order</span><span class="hl-punctuation-delimiter">;</span>         <span class="hl-comment">// current buddy order (0 if in use)</span>
+    <span class="hl-type-builtin">uint8_t</span>       <span class="hl-property">zone</span><span class="hl-punctuation-delimiter">;</span>          <span class="hl-comment">// which zone this page belongs to</span>
+    <span class="hl-type-builtin">uint16_t</span>      <span class="hl-property">numa_node</span><span class="hl-punctuation-delimiter">;</span>     <span class="hl-comment">// NUMA node ID</span>
+    <span class="hl-keyword-type">struct</span> <span class="hl-type">list_head</span> <span class="hl-property">buddy_list</span><span class="hl-punctuation-delimiter">;</span> <span class="hl-comment">// link in buddy free list (when free)</span>
+    <span class="hl-keyword-type">union</span> <span class="hl-punctuation-bracket">{</span>
+        <span class="hl-type-builtin">void</span>      <span class="hl-operator">*</span><span class="hl-property">slab_ptr</span><span class="hl-punctuation-delimiter">;</span>     <span class="hl-comment">// pointer to slab (if PG_slab)</span>
+        <span class="hl-type">pgoff_t</span>    <span class="hl-property">index</span><span class="hl-punctuation-delimiter">;</span>        <span class="hl-comment">// page cache index (if in page cache)</span>
+    <span class="hl-punctuation-bracket">}</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-punctuation-bracket">}</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<p>The <code>struct page</code> array is allocated at boot and covers all physical pages in the system. For a 4 GB system: 4 GB / 4 KB = 1,048,576 pages × 64 bytes = 64 MB of page descriptors (in the direct map).</p>
+<h2>Fast Path</h2>
+<p>Single-page allocation (<code>pmm_alloc_page</code>):</p>
+<ol>
+<li>Check per-CPU page cache (see <a href="per-cpu-caches.html">per-cpu-caches.md</a>).</li>
+<li>If cache non-empty: pop one page — O(1), no lock.</li>
+<li>If cache empty: allocate a batch from the buddy allocator (order-0 free list) under zone spinlock. Refill per-CPU cache. — O(log MAX_ORDER) worst case.</li>
+</ol>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="buddy-allocator.html">buddy-allocator.md</a></li>
+<li><a href="per-cpu-caches.html">per-cpu-caches.md</a></li>
+<li><a href="numa-policies.html">numa-policies.md</a></li>
+<li><a href="virtual-memory.html">virtual-memory.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="/fr-os/script.js" defer></script>
+</body>
+</html>

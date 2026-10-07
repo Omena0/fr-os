@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="/fr-os/">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kernel/interrupt-handling — Fr OS</title>
+  <meta property="og:title" content="Kernel/interrupt-handling — Fr OS">
+  <meta name="description" content="Kernel/interrupt-handling — Fr OS documentation">
+  <meta property="og:description" content="Kernel/interrupt-handling — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="/fr-os/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/fr-os/style.css">
+  <link rel="stylesheet" href="/fr-os/fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="../index.html">Overview</a></li>
+    <li><a href="../architecture/overview.html">Architecture</a></li>
+    <li><a href="../architecture/memory-layout.html">Memory Layout</a></li>
+    <li><a href="../architecture/posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="../architecture/security-model.html">Security Model</a></li>
+    <li><a href="../architecture/performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="../bootloader/overview.html">Overview</a></li>
+    <li><a href="../bootloader/stage1.html">Stage 1</a></li>
+    <li><a href="../bootloader/stage2.html">Stage 2</a></li>
+    <li><a href="../bootloader/kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="../bootloader/memory-map.html">Memory Map</a></li>
+    <li><a href="../bootloader/serial-output.html">Serial Output</a></li>
+    <li><a href="../bootloader/build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="early-boot.html">Early Boot</a></li>
+    <li><a href="kernel/interrupt-handling.html" class="active">Interrupts</a></li>
+    <li><a href="context-switching.html">Context Switching</a></li>
+    <li><a href="privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="panic-system.html">Panic</a></li>
+    <li><a href="logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="../memory/overview.html">Overview</a></li>
+    <li><a href="../memory/physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="../memory/buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="../memory/slab-allocator.html">SLAB</a></li>
+    <li><a href="../memory/virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="../memory/userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="../scheduling/overview.html">Overview</a></li>
+    <li><a href="../scheduling/mlfq.html">MLFQ</a></li>
+    <li><a href="../scheduling/realtime-scheduler.html">Realtime</a></li>
+    <li><a href="../scheduling/multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="../syscalls/overview.html">Overview</a></li>
+    <li><a href="../syscalls/dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="../syscalls/process-syscalls.html">Process</a></li>
+    <li><a href="../syscalls/memory-syscalls.html">Memory</a></li>
+    <li><a href="../syscalls/file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="../userspace/overview.html">Overview</a></li>
+    <li><a href="../userspace/libc.html">Fr Libc</a></li>
+    <li><a href="../userspace/process-model.html">Process Model</a></li>
+    <li><a href="../userspace/elf-loading.html">ELF Loading</a></li>
+    <li><a href="../userspace/init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="../filesystem/overview.html">Filesystem</a></li>
+    <li><a href="../networking/overview.html">Networking</a></li>
+    <li><a href="../ipc/overview.html">IPC</a></li>
+    <li><a href="../drivers/overview.html">Drivers</a></li>
+    <li><a href="../security/overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="../build/overview.html">Build Overview</a></li>
+    <li><a href="../build/toolchain.html">Toolchain</a></li>
+    <li><a href="../build/makefile-structure.html">Makefile</a></li>
+    <li><a href="../build/qemu-setup.html">QEMU</a></li>
+    <li><a href="../build/testing.html">Testing</a></li>
+    <li><a href="../debugging/overview.html">Debugging</a></li>
+    <li><a href="../debugging/serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>Interrupt Handling</h1>
+<h2>Architecture</h2>
+<p>The OS uses a fully preemptible interrupt architecture with per-CPU routing via the Advanced Programmable Interrupt Controller (APIC)[^intel-sdm-interrupts][^amd-apm-interrupts][^acpi-apic].</p>
+<h2>Interrupt Descriptor Table (IDT)</h2>
+<p>The IDT has 256 entries (vectors 0–255)[^intel-sdm-interrupts]:</p>
+<table>
+<thead>
+<tr>
+<th>Vector Range</th>
+<th>Usage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0–31</td>
+<td>CPU exceptions (fault/trap/abort types per Intel spec)</td>
+</tr>
+<tr>
+<td>32–47</td>
+<td>Legacy IRQ remapping (if using 8259A PIC in compatibility mode)</td>
+</tr>
+<tr>
+<td>48–239</td>
+<td>APIC-routed device interrupts</td>
+</tr>
+<tr>
+<td>240–254</td>
+<td>Inter-processor interrupts (IPIs) — scheduler, TLB shootdown, etc.</td>
+</tr>
+<tr>
+<td>255</td>
+<td>Spurious interrupt vector</td>
+</tr>
+</tbody>
+</table>
+<p>Each IDT entry specifies:</p>
+<ul>
+<li>Handler address (64-bit)</li>
+<li>Privilege level required (ring 0 for all except software interrupts used by legacy code)</li>
+<li>Interrupt Stack Table (IST) slot (for NMI and double-fault, which use dedicated stacks)</li>
+</ul>
+<h2>APIC Configuration</h2>
+<p>Each CPU has a Local APIC (LAPIC)[^intel-sdm-interrupts][^acpi-apic]. The I/O APIC routes external interrupt lines to LAPIC vectors on specific CPUs[^acpi-apic].</p>
+<p><strong>LAPIC initialization</strong> (per CPU, during SMP bring-up):</p>
+<ol>
+<li>Enable LAPIC (<code>SVR</code> register, bit 8).</li>
+<li>Set spurious interrupt vector (255).</li>
+<li>Configure LAPIC timer for scheduler tick (periodic mode, calibrated against HPET/TSC).</li>
+<li>Set task priority register (TPR = 0, accept all interrupt priorities).</li>
+</ol>
+<p><strong>I/O APIC routing</strong> (CPU 0 during early boot):</p>
+<ul>
+<li>Each interrupt source is assigned a fixed vector in the 48–239 range.</li>
+<li>Routing is set to the BSP (CPU 0) initially; per-CPU affinity is configured by the interrupt affinity subsystem.</li>
+</ul>
+<h2>Per-CPU Interrupt Routing</h2>
+<p>Device interrupts can be routed to specific CPUs using I/O APIC redirection table entries. The interrupt affinity subsystem distributes interrupt load across CPUs:</p>
+<ul>
+<li>Default: interrupts distributed round-robin across online CPUs.</li>
+<li>Override: device driver or admin can pin an interrupt to a specific CPU via the <code>irq_set_affinity()</code> kernel API.</li>
+</ul>
+<h2>Interrupt Entry and Exit</h2>
+<p><strong>Entry</strong> (assembly stub, one per vector):</p>
+<ol>
+<li>Push error code (synthetic zero if not present).</li>
+<li>Push vector number.</li>
+<li>Save the argument registers <code>rdi, rsi, rdx, rcx, r8, r9, r10, r11</code>.</li>
+<li>Call <code>interrupt_dispatch(regs)</code>.</li>
+<li>Restore, discard the vector and error code, <code>iretq</code>.</li>
+</ol>
+<p><strong>The stub does not switch stacks.</strong> By the time the first stub instruction runs, the CPU has already chosen the stack:</p>
+<table>
+<thead>
+<tr>
+<th>Condition</th>
+<th>Stack the CPU selected</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>IST != 0</code></td>
+<td>the dedicated IST stack for that vector</td>
+</tr>
+<tr>
+<td><code>IST == 0</code>, CPL changed</td>
+<td><code>TSS.RSP0</code> — the current task's kernel stack</td>
+</tr>
+<tr>
+<td><code>IST == 0</code>, CPL unchanged</td>
+<td>the interrupted stack, already a kernel stack</td>
+</tr>
+</tbody>
+</table>
+<p>This is worth stating because doing it anyway is a real bug rather than a harmless redundancy. A stub that loaded <code>RSP0</code> itself would overwrite the IST stack for double fault, which is the one case the IST exists for: double fault fires precisely when the previous handler's stack is already unusable. Overwriting it converts a recoverable panic into an unbounded recursion.</p>
+<p>It also means the kernel never runs C on a user stack. That guarantee comes from the CPU, not from the stub, which is why removing the switch does not weaken it.</p>
+<p>Step 1 always pushes a word, even for the 25 vectors that do not fault with an error code. The alternative — a variable-size frame — means every C handler has to know which of seven entry points it is, and the one that gets it wrong reads a garbage error code. A synthetic zero costs one word of stack and makes the frame a fixed size.</p>
+<h2>Interrupt Frame</h2>
+<p>The stub builds this layout, which <code>struct interrupt_frame</code> in <code>interrupt.h</code> mirrors field for field. Offsets are from the stack pointer at the moment <code>interrupt_dispatch</code> is entered:</p>
+<table>
+<thead>
+<tr>
+<th>Offset</th>
+<th>Field</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0x00</td>
+<td><code>rdi</code></td>
+<td>stub</td>
+</tr>
+<tr>
+<td>0x08</td>
+<td><code>rsi</code></td>
+<td>stub</td>
+</tr>
+<tr>
+<td>0x10</td>
+<td><code>rdx</code></td>
+<td>stub</td>
+</tr>
+<tr>
+<td>0x18</td>
+<td><code>rcx</code></td>
+<td>stub</td>
+</tr>
+<tr>
+<td>0x20</td>
+<td><code>r8</code></td>
+<td>stub</td>
+</tr>
+<tr>
+<td>0x28</td>
+<td><code>r9</code></td>
+<td>stub</td>
+</tr>
+<tr>
+<td>0x30</td>
+<td><code>r10</code></td>
+<td>stub</td>
+</tr>
+<tr>
+<td>0x38</td>
+<td><code>r11</code></td>
+<td>stub</td>
+</tr>
+<tr>
+<td>0x40</td>
+<td><code>vector</code></td>
+<td>stub</td>
+</tr>
+<tr>
+<td>0x48</td>
+<td><code>error_code</code></td>
+<td>CPU, or synthetic 0</td>
+</tr>
+<tr>
+<td>0x50</td>
+<td><code>rip</code></td>
+<td>CPU</td>
+</tr>
+<tr>
+<td>0x58</td>
+<td><code>cs</code></td>
+<td>CPU</td>
+</tr>
+<tr>
+<td>0x60</td>
+<td><code>rflags</code></td>
+<td>CPU</td>
+</tr>
+<tr>
+<td>0x68</td>
+<td><code>rsp</code></td>
+<td>CPU</td>
+</tr>
+<tr>
+<td>0x70</td>
+<td><code>ss</code></td>
+<td>CPU</td>
+</tr>
+</tbody>
+</table>
+<p>The last five words are the <code>IRETQ</code> frame the CPU pushed[^intel-sdm-interrupts], and they are the interrupted context. The <code>ss</code> field is only meaningful when <code>cs</code> shows ring 3; for a kernel-origin interrupt the CPU pushes a zero there, and a handler must not use it.</p>
+<p><code>interrupt_dispatch</code> must not modify the CPU-saved half of the frame (<code>rip</code> through <code>ss</code>) in place. A handler that wants to change where the interrupted code resumes — delivering a signal, for instance — records the new values in the task structure; rewriting the frame here would be invisible to the scheduler, which reloads the frame from that structure on the next switch.</p>
+<p><strong><code>interrupt_dispatch</code></strong> (C):</p>
+<ol>
+<li>Increment per-CPU preemption depth.</li>
+<li>Look up handler for vector.</li>
+<li>Call handler.</li>
+<li>Send End-Of-Interrupt (EOI) to LAPIC.</li>
+<li>Decrement preemption depth.</li>
+<li>If preemption depth == 0 and reschedule flag set: call scheduler.</li>
+<li>Return to interrupted context.</li>
+</ol>
+<p>Step 5 must happen even if the handler does not return: every exception that can panic unwinds through here, and leaving the depth incremented would make the panic path think it is nested in an interrupt and skip the final diagnostics.</p>
+<p><strong>Exit</strong>: <code>iretq</code> restores the registers and returns to the interrupted code, user or kernel. Nothing is popped in C; the whole frame is consumed by the instruction that ends the stub, which is why the stub restores the stack pointer it saved before switching rather than relying on anything the C code left behind.</p>
+<h2>Kernel Interfaces</h2>
+<pre><code class="language-c"><span class="hl-type-builtin">void</span> <span class="hl-function">idt_init</span><span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">void</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>       <span class="hl-comment">/* build the IDT, install the IST stacks, load IDTR */</span>
+<span class="hl-type-builtin">void</span> <span class="hl-function">exceptions_init</span><span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">void</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span><span class="hl-comment">/* install handlers for vectors 0-31 */</span>
+<span class="hl-type-builtin">void</span> <span class="hl-function">idt_set_handler</span><span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">uint8_t</span> <span class="hl-variable-parameter">vector</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type">irq_handler_t</span> <span class="hl-variable-parameter">handler</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">uint8_t</span> <span class="hl-variable-parameter">ist</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">uint8_t</span> <span class="hl-variable-parameter">dpl</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">void</span> <span class="hl-function">idt_request_reschedule</span><span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">void</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<p>Both init calls come from <code>main.c</code>, <code>exceptions_init()</code> first, so that the table is fully populated before the <code>IDTR</code> is loaded. An <code>IDTR</code> pointing at half-filled entries is not a hazard on its own, but there is no reason to expose one.</p>
+<p><code>idt_request_reschedule</code> is the timer driver's side of the dispatch step above: it sets a per-CPU request that the dispatch path consumes once the preemption depth is back to zero. Keeping it a function rather than a flag the driver pokes directly means the per-CPU indexing and the outermost-level check live in one place.</p>
+<p>Step 4 of <code>interrupt_dispatch</code> currently acknowledges only the 8259. The LAPIC EOI in the sequence above is a single MMIO write and is added with APIC bring-up, which does not exist yet; the 32–47 range is the only one whose acknowledgement is load-bearing today.</p>
+<h2>Handler Registration</h2>
+<pre><code class="language-c"><span class="hl-type-builtin">void</span> <span class="hl-function">idt_set_handler</span><span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">uint8_t</span> <span class="hl-variable-parameter">vector</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">void</span> <span class="hl-punctuation-bracket">(</span><span class="hl-operator">*</span><span class="hl-variable">handler</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-bracket">(</span><span class="hl-keyword-type">struct</span> <span class="hl-type">interrupt_frame</span> <span class="hl-operator">*</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">,</span>
+                     <span class="hl-type-builtin">uint8_t</span> <span class="hl-variable-parameter">ist</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">uint8_t</span> <span class="hl-variable-parameter">dpl</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<p>Vectors 0–31 are filled by <code>exceptions_init()</code>, which is separate from <code>idt_init()</code> so that the table's policy — which exception is fatal, which is deliverable — is in one place rather than spread through the installer. Hardware IRQs are registered by the driver that owns the device; a vector with no handler installed is counted and otherwise ignored, so a device driver that is not yet written does not crash the machine by unplugging its device.</p>
+<p><code>dpl</code> is 0 for everything except vector 3, which is 3 so a user process can raise <code>int3</code> for a breakpoint. Nothing else is callable from ring 3: a <code>DPL=3</code> entry for a device vector would let any process interrupt any other at will.</p>
+<h3>IST Assignment</h3>
+<p>Two vectors are <em>meant</em> to get a dedicated stack, because a fault on the current stack leaves nothing to fault onto:</p>
+<table>
+<thead>
+<tr>
+<th>Vector</th>
+<th>IST</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>8 — double fault</td>
+<td>IST1</td>
+<td>The exception that fires when the <em>handler's</em> stack faults. Without a separate stack this is infinite recursion that resets the machine.</td>
+</tr>
+<tr>
+<td>2 — NMI</td>
+<td>IST2</td>
+<td>NMI must be handled with interrupts off and is used as the last-resort halt path, so it cannot share a stack that may already be exhausted.</td>
+</tr>
+</tbody>
+</table>
+<p>All other vectors use IST 0, which means "the stack the CPU would otherwise use".</p>
+<p><strong>These two are not currently installed.</strong> The IST field is 32 bits and the kernel lives in the high half, so the stacks have to be mapped at fixed low linear addresses, which needs a kernel-PGD accessor the VMM does not expose yet. See "IST Stacks Are Not Yet Installed" in <a href="privilege-levels.html">privilege-levels.md</a>.</p>
+<p><code>idt.c</code> therefore asks <code>gdt_have_ist()</code> before writing an IST index into a gate and leaves it at zero when no stack is installed. A gate that claims an IST slot the TSS cannot honour takes a <code>#PF</code> on entry — strictly worse than running on the interrupted stack — so the gate and the TSS pointer are kept consistent by construction rather than by convention.</p>
+<h2>Exception Handling</h2>
+<p>CPU exceptions are handled according to their type[^intel-sdm-interrupts]:</p>
+<table>
+<thead>
+<tr>
+<th>Exception</th>
+<th>Type</th>
+<th>Handler</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Page fault (#PF)</td>
+<td>Fault</td>
+<td><code>page_fault_handler</code> — may allocate page or kill process</td>
+</tr>
+<tr>
+<td>General protection fault (#GP)</td>
+<td>Fault</td>
+<td>Kill faulting process (user) or kernel panic</td>
+</tr>
+<tr>
+<td>Double fault (#DF)</td>
+<td>Abort</td>
+<td>Kernel panic, always; uses IST stack</td>
+</tr>
+<tr>
+<td>Division by zero (#DE)</td>
+<td>Fault</td>
+<td>Send SIGFPE to process</td>
+</tr>
+<tr>
+<td>Breakpoint (#BP)</td>
+<td>Trap</td>
+<td>Deliver to process or kernel debugger</td>
+</tr>
+<tr>
+<td>Invalid opcode (#UD)</td>
+<td>Fault</td>
+<td>Send SIGILL to process</td>
+</tr>
+</tbody>
+</table>
+<p>The #PF case delegates to <code>vmm_handle_page_fault(addr, error_code)</code>, which is where the VMM distinguishes a genuine bug from demand paging and from a stack growth. The exception layer classifies and reports; it does not decide what is recoverable, because that decision needs the page tables.</p>
+<p>The "deliver to process" actions for #DE, #UD and #BP need the signal subsystem, which is specified in <a href="../ipc/signals.html">ipc/signals.md</a> but not yet implemented. Until it lands, the exception layer routes them through a single weak hook, <code>process_deliver_signal()</code>, and the process is terminated if the hook is absent. The hook is weak so that the kernel links without the IPC subsystem; when it is implemented, the same call site picks it up with no change here. This is the one place where the exception layer depends on a component that does not exist, and it is the reason the interim behaviour is "kill" rather than "deliver".</p>
+<h2>Inter-Processor Interrupts (IPIs)</h2>
+<p>IPIs are sent via LAPIC ICR (Interrupt Command Register)[^intel-sdm-interrupts][^acpi-apic]. Used for:</p>
+<table>
+<thead>
+<tr>
+<th>Vector</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>240</td>
+<td>TLB shootdown (page table update propagation)</td>
+</tr>
+<tr>
+<td>241</td>
+<td>Scheduler reschedule request</td>
+</tr>
+<tr>
+<td>242</td>
+<td>CPU halt (system shutdown or panic broadcast)</td>
+</tr>
+<tr>
+<td>243–254</td>
+<td>Reserved for future IPI types</td>
+</tr>
+</tbody>
+</table>
+<h2>Fast Path</h2>
+<ul>
+<li>IDT lookup: array access by vector number — O(1).</li>
+<li>LAPIC EOI: single MMIO write — no bus contention on fast path.</li>
+<li>Interrupt handler dispatch: direct function pointer call, no dynamic dispatch overhead.</li>
+</ul>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="context-switching.html">context-switching.md</a></li>
+<li><a href="../scheduling/overview.html">scheduling/overview.md</a></li>
+<li><a href="early-boot.html">kernel/early-boot.md</a></li>
+</ul>
+<h2>References</h2>
+<ul>
+<li><a href="https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html#vol3a" title="Intel SDM Volume 3A: Interrupts and Exceptions">Intel 64 and IA-32 Architectures Software Developer's Manual, Volume 3A — Interrupts and Exceptions</a></li>
+<li><a href="https://www.amd.com/en/developer/architecture-programmer-manuals.html" title="AMD64 Architecture Programmer's Manual Volume 2: Interrupts and Exceptions">AMD64 Architecture Programmer's Manual, Volume 2 — Interrupts and Exceptions</a></li>
+<li><a href="https://uefi.org/specs/ACPI/6.5/05_ACPI_Software_Programming_Model/ACPI_Software_Programming_Model.html#advanced-programmable-interrupt-controller-apic" title="ACPI 6.5 - Advanced Programmable Interrupt Controller (APIC)">Advanced Configuration and Power Interface (ACPI) Specification — APIC</a></li>
+<li><a href="https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/multiprocessor-specification.pdf" title="Intel MultiProcessor Specification 1.4">Intel MultiProcessor Specification (MPS)</a></li>
+<li><a href="../https:/gitlab.com/x86-psABIs/x86-64-ABI/-/blob/master/abi.html" title="System V AMD64 ABI - Interrupt Handling">System V Application Binary Interface AMD64 Architecture Processor Supplement — Interrupt Handling</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="/fr-os/script.js" defer></script>
+</body>
+</html>

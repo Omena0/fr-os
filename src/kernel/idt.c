@@ -229,7 +229,19 @@ void idt_set_handler(uint8_t vector, irq_handler_t handler, uint8_t ist,
 
 	claimed[vector] = true;
 	handlers[vector] = handler;
-	idt_set_gate(vector, (void (*)(void))handler, ist, dpl);
+
+	/*
+	 * Vectors in the IRQ range (32..63) already have assembly stubs
+	 * installed by exceptions_init(). Those stubs call interrupt_dispatch,
+	 * which looks up the handler in the handlers[] array. Do not overwrite
+	 * the IDT gate for these vectors, or the C handler will be called
+	 * directly without going through interrupt_dispatch (and thus no EOI).
+	 * For vectors outside the IRQ range, install the gate pointing to the
+	 * handler directly (used for syscalls, etc.).
+	 */
+	if (vector < VECTOR_IRQ_BASE || vector >= VECTOR_STUB_MAX) {
+		idt_set_gate(vector, (void (*)(void))handler, ist, dpl);
+	}
 }
 
 /*
@@ -717,6 +729,9 @@ static volatile u64 pit_ticks;
  */
 static void pit_announce(u64 n)
 {
+	/* DEBUG: first tick only; subsequent ticks are silent */
+	if (n != 1)
+		return;
 	char line[64];
 
 	(void)ksnprintf(line, sizeof(line), "\r\npit: tick %llu, IRQ0 is live\r\n",
@@ -922,8 +937,9 @@ void interrupt_dispatch(struct interrupt_frame *f)
 	 * dispatch sequence in the docs also calls for is a single MMIO write
 	 * and is added with APIC bring-up, which does not exist yet.
 	 */
-	if (vector >= VECTOR_IRQ_BASE && vector < VECTOR_IRQ_MAX)
+	if (vector >= VECTOR_IRQ_BASE && vector < VECTOR_IRQ_MAX) {
 		pic_eoi(vector);
+	}
 
 	per_cpu(preempt_count)--;
 

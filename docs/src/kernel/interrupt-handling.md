@@ -2,11 +2,11 @@
 
 ## Architecture
 
-The OS uses a fully preemptible interrupt architecture with per-CPU routing via the Advanced Programmable Interrupt Controller (APIC).
+The OS uses a fully preemptible interrupt architecture with per-CPU routing via the Advanced Programmable Interrupt Controller (APIC)[^intel-sdm-interrupts][^amd-apm-interrupts][^acpi-apic].
 
 ## Interrupt Descriptor Table (IDT)
 
-The IDT has 256 entries (vectors 0–255):
+The IDT has 256 entries (vectors 0–255)[^intel-sdm-interrupts]:
 
 | Vector Range | Usage |
 |---|---|
@@ -24,7 +24,7 @@ Each IDT entry specifies:
 
 ## APIC Configuration
 
-Each CPU has a Local APIC (LAPIC). The I/O APIC routes external interrupt lines to LAPIC vectors on specific CPUs.
+Each CPU has a Local APIC (LAPIC)[^intel-sdm-interrupts][^acpi-apic]. The I/O APIC routes external interrupt lines to LAPIC vectors on specific CPUs[^acpi-apic].
 
 **LAPIC initialization** (per CPU, during SMP bring-up):
 
@@ -91,7 +91,7 @@ The stub builds this layout, which `struct interrupt_frame` in `interrupt.h` mir
 | 0x68 | `rsp` | CPU |
 | 0x70 | `ss` | CPU |
 
-The last five words are the `IRETQ` frame the CPU pushed, and they are the interrupted context. The `ss` field is only meaningful when `cs` shows ring 3; for a kernel-origin interrupt the CPU pushes a zero there, and a handler must not use it.
+The last five words are the `IRETQ` frame the CPU pushed[^intel-sdm-interrupts], and they are the interrupted context. The `ss` field is only meaningful when `cs` shows ring 3; for a kernel-origin interrupt the CPU pushes a zero there, and a handler must not use it.
 
 `interrupt_dispatch` must not modify the CPU-saved half of the frame (`rip` through `ss`) in place. A handler that wants to change where the interrupted code resumes — delivering a signal, for instance — records the new values in the task structure; rewriting the frame here would be invisible to the scheduler, which reloads the frame from that structure on the next switch.
 
@@ -152,7 +152,7 @@ All other vectors use IST 0, which means "the stack the CPU would otherwise use"
 
 ## Exception Handling
 
-CPU exceptions are handled according to their type:
+CPU exceptions are handled according to their type[^intel-sdm-interrupts]:
 
 | Exception | Type | Handler |
 |---|---|---|
@@ -169,7 +169,7 @@ The "deliver to process" actions for #DE, #UD and #BP need the signal subsystem,
 
 ## Inter-Processor Interrupts (IPIs)
 
-IPIs are sent via LAPIC ICR (Interrupt Command Register). Used for:
+IPIs are sent via LAPIC ICR (Interrupt Command Register)[^intel-sdm-interrupts][^acpi-apic]. Used for:
 
 | Vector | Purpose |
 |---|---|
@@ -189,3 +189,17 @@ IPIs are sent via LAPIC ICR (Interrupt Command Register). Used for:
 - [context-switching.md](context-switching.md)
 - [scheduling/overview.md](../scheduling/overview.md)
 - [kernel/early-boot.md](early-boot.md)
+
+## References
+
+- [Intel 64 and IA-32 Architectures Software Developer's Manual, Volume 3A — Interrupts and Exceptions][intel-sdm-interrupts]
+- [AMD64 Architecture Programmer's Manual, Volume 2 — Interrupts and Exceptions][amd-apm-interrupts]
+- [Advanced Configuration and Power Interface (ACPI) Specification — APIC][acpi-apic]
+- [Intel MultiProcessor Specification (MPS)][intel-mps]
+- [System V Application Binary Interface AMD64 Architecture Processor Supplement — Interrupt Handling][sysv-abi-interrupts]
+
+[intel-sdm-interrupts]: https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html#vol3a "Intel SDM Volume 3A: Interrupts and Exceptions"
+[amd-apm-interrupts]: https://www.amd.com/en/developer/architecture-programmer-manuals.html "AMD64 Architecture Programmer's Manual Volume 2: Interrupts and Exceptions"
+[acpi-apic]: https://uefi.org/specs/ACPI/6.5/05_ACPI_Software_Programming_Model/ACPI_Software_Programming_Model.html#advanced-programmable-interrupt-controller-apic "ACPI 6.5 - Advanced Programmable Interrupt Controller (APIC)"
+[intel-mps]: https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/multiprocessor-specification.pdf "Intel MultiProcessor Specification 1.4"
+[sysv-abi-interrupts]: https://gitlab.com/x86-psABIs/x86-64-ABI/-/blob/master/abi.md#interrupt-handling "System V AMD64 ABI - Interrupt Handling"

@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="/fr-os/">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Architecture/boot-sequence — Fr OS</title>
+  <meta property="og:title" content="Architecture/boot-sequence — Fr OS">
+  <meta name="description" content="Architecture/boot-sequence — Fr OS documentation">
+  <meta property="og:description" content="Architecture/boot-sequence — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="/fr-os/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/fr-os/style.css">
+  <link rel="stylesheet" href="/fr-os/fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="../index.html">Overview</a></li>
+    <li><a href="overview.html">Architecture</a></li>
+    <li><a href="memory-layout.html">Memory Layout</a></li>
+    <li><a href="posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="security-model.html">Security Model</a></li>
+    <li><a href="performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="../bootloader/overview.html">Overview</a></li>
+    <li><a href="../bootloader/stage1.html">Stage 1</a></li>
+    <li><a href="../bootloader/stage2.html">Stage 2</a></li>
+    <li><a href="../bootloader/kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="../bootloader/memory-map.html">Memory Map</a></li>
+    <li><a href="../bootloader/serial-output.html">Serial Output</a></li>
+    <li><a href="../bootloader/build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="../kernel/overview.html">Overview</a></li>
+    <li><a href="../kernel/early-boot.html">Early Boot</a></li>
+    <li><a href="../kernel/interrupt-handling.html">Interrupts</a></li>
+    <li><a href="../kernel/context-switching.html">Context Switching</a></li>
+    <li><a href="../kernel/privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="../kernel/syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="../kernel/panic-system.html">Panic</a></li>
+    <li><a href="../kernel/logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="../memory/overview.html">Overview</a></li>
+    <li><a href="../memory/physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="../memory/buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="../memory/slab-allocator.html">SLAB</a></li>
+    <li><a href="../memory/virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="../memory/userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="../scheduling/overview.html">Overview</a></li>
+    <li><a href="../scheduling/mlfq.html">MLFQ</a></li>
+    <li><a href="../scheduling/realtime-scheduler.html">Realtime</a></li>
+    <li><a href="../scheduling/multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="../syscalls/overview.html">Overview</a></li>
+    <li><a href="../syscalls/dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="../syscalls/process-syscalls.html">Process</a></li>
+    <li><a href="../syscalls/memory-syscalls.html">Memory</a></li>
+    <li><a href="../syscalls/file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="../userspace/overview.html">Overview</a></li>
+    <li><a href="../userspace/libc.html">Fr Libc</a></li>
+    <li><a href="../userspace/process-model.html">Process Model</a></li>
+    <li><a href="../userspace/elf-loading.html">ELF Loading</a></li>
+    <li><a href="../userspace/init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="../filesystem/overview.html">Filesystem</a></li>
+    <li><a href="../networking/overview.html">Networking</a></li>
+    <li><a href="../ipc/overview.html">IPC</a></li>
+    <li><a href="../drivers/overview.html">Drivers</a></li>
+    <li><a href="../security/overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="../build/overview.html">Build Overview</a></li>
+    <li><a href="../build/toolchain.html">Toolchain</a></li>
+    <li><a href="../build/makefile-structure.html">Makefile</a></li>
+    <li><a href="../build/qemu-setup.html">QEMU</a></li>
+    <li><a href="../build/testing.html">Testing</a></li>
+    <li><a href="../debugging/overview.html">Debugging</a></li>
+    <li><a href="../debugging/serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>Boot Sequence</h1>
+<h2>Overview</h2>
+<p>The full boot sequence from BIOS power-on to the first userspace process (<code>init</code>) proceeds through five distinct phases.</p>
+<h2>Phase 1 — BIOS and Stage 1 Bootloader</h2>
+<p><strong>Entry point</strong>: BIOS loads the first 512 bytes of the boot disk (MBR) to physical address <code>0x7C00</code> and transfers control.</p>
+<p><strong>Actions</strong>:
+1. Stage 1 code runs in real mode (16-bit).
+2. Reads the partition table and locates the active partition.
+3. Loads stage 2 bootloader from the filesystem start sectors into memory at <code>0x8000</code>.
+4. Transfers control to stage 2.</p>
+<p><strong>Memory state</strong>: Real mode. Only the first 640 KB is usable. No interrupts reconfigured yet.</p>
+<p>See <a href="../bootloader/stage1.html">bootloader/stage1.md</a>.</p>
+<h2>Phase 2 — Stage 2 Bootloader</h2>
+<p><strong>Entry point</strong>: <code>0x8000</code>, 16-bit real mode.</p>
+<p><strong>Actions</strong>:
+1. Queries BIOS for the full physical memory map (INT 15h, E820).
+2. Enables the A20 line.
+3. Loads the Global Descriptor Table (GDT) and switches to 32-bit protected mode.
+4. Sets up initial page tables and switches to 64-bit long mode.
+5. Locates the kernel ELF binary on disk (fixed offset or simple filesystem scan).
+6. Loads kernel ELF segments into the higher-half virtual address space (<code>0xFFFFFFFF80000000+</code>).
+7. Passes a boot information structure to the kernel (memory map, VESA/framebuffer info, ACPI RSDP pointer).
+8. Transfers control to the kernel entry point.</p>
+<p>See <a href="../bootloader/stage2.html">bootloader/stage2.md</a> and <a href="../bootloader/kernel-handoff.html">bootloader/kernel-handoff.md</a>.</p>
+<h2>Phase 3 — Early Kernel Initialization</h2>
+<p><strong>Entry point</strong>: <code>kernel_main()</code>, 64-bit long mode, running at higher-half address.</p>
+<p><strong>Actions</strong> (strict order):
+1. Initialize kernel serial output for early diagnostics.
+2. Parse the boot information structure (memory map, framebuffer).
+3. Initialize the physical memory manager from the memory map.
+4. Initialize the virtual memory manager and switch to the kernel page table.
+5. Initialize the SLAB allocator.
+6. Initialize the interrupt descriptor table (IDT) and configure the APIC.
+7. Bring up the CPU scheduler.
+8. Initialize the kernel module system.
+9. Run compiled-in driver probes.
+10. Mount the root filesystem.</p>
+<p>All actions in this phase run on CPU 0, single-threaded, with interrupts disabled until the IDT is ready.</p>
+<p>See <a href="../kernel/early-boot.html">kernel/early-boot.md</a>.</p>
+<h2>Phase 4 — Secondary CPU Bring-Up (SMP)</h2>
+<p><strong>Trigger</strong>: After phase 3, CPU 0 sends INIT/SIPI to all other CPUs via the APIC.</p>
+<p><strong>Actions per secondary CPU</strong>:
+1. Each AP (Application Processor) starts in 16-bit real mode at a trampoline page.
+2. Switches to 64-bit mode using the already-established page tables.
+3. Initializes its own per-CPU data structures (run queue, interrupt stack, SLAB magazine).
+4. Registers with the scheduler.
+5. Enters the idle loop and becomes available for scheduling.</p>
+<h2>Phase 5 — Init and Userspace</h2>
+<p><strong>Trigger</strong>: After all CPUs are online and the root filesystem is mounted.</p>
+<ol>
+<li>Kernel spawns the first userspace process: <code>/sbin/init</code> (PID 1) via <code>kernel_exec</code>.</li>
+<li><code>init</code> reads its service definition files, brings up required services in dependency order.</li>
+<li>Services start: device drivers (userspace), networking, display server.</li>
+<li>The GUI program starts when the display stack is ready.</li>
+</ol>
+<p>See <a href="../userspace/init-system.html">userspace/init-system.md</a>.</p>
+<h2>Timing Summary</h2>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Expected duration (QEMU KVM)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Stage 1</td>
+<td>&lt; 1 ms</td>
+</tr>
+<tr>
+<td>Stage 2</td>
+<td>&lt; 50 ms</td>
+</tr>
+<tr>
+<td>Early kernel init</td>
+<td>&lt; 200 ms</td>
+</tr>
+<tr>
+<td>SMP bring-up</td>
+<td>&lt; 100 ms</td>
+</tr>
+<tr>
+<td>Init and services</td>
+<td>&lt; 2 s</td>
+</tr>
+<tr>
+<td>GUI ready</td>
+<td>&lt; 3 s</td>
+</tr>
+</tbody>
+</table>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="/fr-os/script.js" defer></script>
+</body>
+</html>

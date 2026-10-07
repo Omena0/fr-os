@@ -10,7 +10,7 @@ This section documents the facilities available for debugging and observing syst
 |---|---|---|
 | Kernel tracing | Lightweight tracepoints with ring-buffer output | [kernel-tracing.md](kernel-tracing.md) |
 | Event logging | Structured subsystem events with priority levels | [event-logging.md](event-logging.md) |
-| Hardware counters | PMU (Performance Monitoring Unit) via RDPMC | [performance-counters.md](performance-counters.md) |
+| Hardware counters | PMU (Performance Monitoring Unit) via RDPMC[^intel-sdm-pmu] | [performance-counters.md](performance-counters.md) |
 | Profiling | Sampling-based CPU profiler | [profiling.md](profiling.md) |
 | Debug filesystem | /proc and /debug pseudo-filesystems | [debug-filesystem.md](debug-filesystem.md) |
 | Serial diagnostics | Structured output to serial port for early-boot debugging | [serial-diagnostics.md](serial-diagnostics.md) |
@@ -32,3 +32,11 @@ This section documents the facilities available for debugging and observing syst
 - [debug-filesystem.md](debug-filesystem.md)
 - [serial-diagnostics.md](serial-diagnostics.md)
 - [observability-api.md](observability-api.md)
+
+## References
+
+- [Intel 64 and IA-32 Architectures Software Developer's Manual, Volume 3B — Performance Monitoring][intel-sdm-pmu]
+- [Linux Kernel Documentation — Perf][linux-perf]
+
+[intel-sdm-pmu]: https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html#vol3b "Intel SDM Volume 3B: Performance Monitoring"
+[linux-perf]: https://www.kernel.org/doc/html/latest/core-api/perf.html "Linux Kernel Perf API"

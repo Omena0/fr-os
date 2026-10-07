@@ -21,7 +21,7 @@ kernel_main(struct BootInfo *boot_info) {
     if (boot_info->version != BOOT_VERSION) early_panic("bad boot version");
 ```
 
-`early_panic` writes to COM1 and halts. It does not use the normal panic system (not yet initialized).
+`early_panic` writes to COM1 and halts. It does not use the normal panic system (not yet initialized). The `BootInfo` structure follows the Multiboot specification[^multiboot-bootinfo].
 
 ### Step 2 — Early Serial Output
 
@@ -40,7 +40,7 @@ kernel_main(struct BootInfo *boot_info) {
 There is no `memory_map` array inside `struct bootinfo`. The struct carries the
 E820 map's *physical address* and entry count and nothing else about memory —
 `boot.h` defines it, and the kernel copies it out of the loader's memory before
-touching anything.
+touching anything. The E820 memory map is defined in the ACPI specification[^acpi-e820].
 
 `pmm_init()` parses the map, reserves its own metadata arena and the kernel image
 (`KERNEL_LANDING_ADDR .. phys(_ebss)`), builds the buddy free lists, and makes
@@ -148,3 +148,15 @@ If any step fails before `klog_init`, `early_panic()` is used (serial + halt). A
 - [kernel/panic-system.md](panic-system.md)
 - [memory/physical-allocator.md](../memory/physical-allocator.md)
 - [architecture/boot-sequence.md](../architecture/boot-sequence.md)
+
+## References
+
+- [Intel 64 and IA-32 Architectures Software Developer's Manual, Volume 3A — System Programming][intel-sdm-vol3a]
+- [AMD64 Architecture Programmer's Manual, Volume 2 — System Initialization][amd-apm-init]
+- [Multiboot Specification — Boot Information][multiboot-bootinfo]
+- [ACPI Specification — RSDP and RSDT][acpi-rsdp]
+
+[intel-sdm-vol3a]: https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html#vol3a "Intel SDM Volume 3A: System Programming Guide, Part 1"
+[amd-apm-init]: https://www.amd.com/en/developer/architecture-programmer-manuals.html "AMD64 Architecture Programmer's Manual Volume 2"
+[multiboot-bootinfo]: https://www.gnu.org/software/grub/manual/multiboot/multiboot.html#Boot-information "Multiboot Specification - Boot Information"
+[acpi-rsdp]: https://uefi.org/specs/ACPI/6.5/05_ACPI_Software_Programming_Model/ACPI_Software_Programming_Model.html#root-system-description-pointer-rsdp "ACPI 6.5 - Root System Description Pointer (RSDP)"

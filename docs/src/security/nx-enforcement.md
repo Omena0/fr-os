@@ -6,9 +6,9 @@ NX (No-eXecute) enforcement prevents data pages from being executed as code. Thi
 
 ## Hardware Mechanism
 
-On x86-64, the NX bit is bit 63 of a page table entry (PTE). When set, the CPU raises a `#PF` (page fault) with error code bit 4 set (indicating an instruction fetch violation) if code attempts to execute from that page.
+On x86-64, the NX bit is bit 63 of a page table entry (PTE)[^intel-sdm-vol3a]. When set, the CPU raises a `#PF` (page fault) with error code bit 4 set (indicating an instruction fetch violation) if code attempts to execute from that page.
 
-The NX bit requires the `NXE` bit to be set in the `EFER` MSR:
+The NX bit requires the `NXE` bit to be set in the `EFER` MSR[^amd-apm-vol2]:
 
 ```c
 void enable_nx(void) {
@@ -46,7 +46,7 @@ Note: Simultaneous `PROT_WRITE | PROT_EXEC` (W^X violation) is allowed for JIT c
 
 ## SMEP (Supervisor Mode Execution Prevention)
 
-SMEP prevents the kernel from executing code from user pages. This is enabled via `CR4.SMEP`:
+SMEP prevents the kernel from executing code from user pages[^intel-sdm-vol3a]. This is enabled via `CR4.SMEP`:
 
 ```c
 void enable_smep(void) {
@@ -74,3 +74,11 @@ When an NX violation occurs (instruction fetch from a non-executable page):
 - [hardened-allocator.md](hardened-allocator.md)
 - [memory/virtual-memory.md](../memory/virtual-memory.md)
 - [kernel/privilege-levels.md](../kernel/privilege-levels.md)
+
+## References
+
+- [Intel 64 and IA-32 Architectures Software Developer's Manual, Volume 3A — Paging and NX][intel-sdm-vol3a]
+- [AMD64 Architecture Programmer's Manual, Volume 2 — System Programming][amd-apm-vol2]
+
+[intel-sdm-vol3a]: https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html#vol3a "Intel SDM Volume 3A: System Programming Guide, Part 1"
+[amd-apm-vol2]: https://www.amd.com/en/developer/architecture-programmer-manuals.html "AMD64 Architecture Programmer's Manual Volume 2"

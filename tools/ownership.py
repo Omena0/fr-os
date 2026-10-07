@@ -10,6 +10,7 @@ say something useful when it says no.
     ./tools/ownership.py view
     ./tools/ownership.py check src/kernel/pmm.c --agent alice
     ./tools/ownership.py release src/kernel/pmm.c --agent alice
+    ./tools/ownership.py clear --force
     ./tools/ownership.py import-legacy ownership.txt
 
 Design notes
@@ -221,6 +222,21 @@ def cmd_release(a) -> int:
     return 0
 
 
+def cmd_clear(a) -> int:
+    if not a.force:
+        print("ownership: clear removes every claim in the store, "
+              "yours and everyone else's.", file=sys.stderr)
+        print("       Are you sure? If so, run it again with --force.",
+              file=sys.stderr)
+        return 1
+    with locked() as data:
+        n = len(data["claims"])
+        data["claims"] = {}
+        save(data)
+    print(f"ownership: cleared {n} claim(s).")
+    return 0
+
+
 def cmd_view(a) -> int:
     data = load()
     claims = data["claims"]
@@ -352,6 +368,11 @@ def main(argv=None) -> int:
     c.add_argument("path")
     c.add_argument("--agent", default="")
     c.set_defaults(fn=cmd_check)
+
+    c = sub.add_parser("clear", help="remove all claims")
+    c.add_argument("--force", action="store_true",
+                   help="actually clear; without it this only warns")
+    c.set_defaults(fn=cmd_clear)
 
     c = sub.add_parser("prune", help="delete expired claims")
     c.set_defaults(fn=cmd_prune)

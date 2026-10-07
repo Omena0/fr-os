@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="/fr-os/">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Networking/raw-sockets — Fr OS</title>
+  <meta property="og:title" content="Networking/raw-sockets — Fr OS">
+  <meta name="description" content="Networking/raw-sockets — Fr OS documentation">
+  <meta property="og:description" content="Networking/raw-sockets — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="/fr-os/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/fr-os/style.css">
+  <link rel="stylesheet" href="/fr-os/fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="../index.html">Overview</a></li>
+    <li><a href="../architecture/overview.html">Architecture</a></li>
+    <li><a href="../architecture/memory-layout.html">Memory Layout</a></li>
+    <li><a href="../architecture/posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="../architecture/security-model.html">Security Model</a></li>
+    <li><a href="../architecture/performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="../bootloader/overview.html">Overview</a></li>
+    <li><a href="../bootloader/stage1.html">Stage 1</a></li>
+    <li><a href="../bootloader/stage2.html">Stage 2</a></li>
+    <li><a href="../bootloader/kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="../bootloader/memory-map.html">Memory Map</a></li>
+    <li><a href="../bootloader/serial-output.html">Serial Output</a></li>
+    <li><a href="../bootloader/build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="../kernel/overview.html">Overview</a></li>
+    <li><a href="../kernel/early-boot.html">Early Boot</a></li>
+    <li><a href="../kernel/interrupt-handling.html">Interrupts</a></li>
+    <li><a href="../kernel/context-switching.html">Context Switching</a></li>
+    <li><a href="../kernel/privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="../kernel/syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="../kernel/panic-system.html">Panic</a></li>
+    <li><a href="../kernel/logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="../memory/overview.html">Overview</a></li>
+    <li><a href="../memory/physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="../memory/buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="../memory/slab-allocator.html">SLAB</a></li>
+    <li><a href="../memory/virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="../memory/userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="../scheduling/overview.html">Overview</a></li>
+    <li><a href="../scheduling/mlfq.html">MLFQ</a></li>
+    <li><a href="../scheduling/realtime-scheduler.html">Realtime</a></li>
+    <li><a href="../scheduling/multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="../syscalls/overview.html">Overview</a></li>
+    <li><a href="../syscalls/dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="../syscalls/process-syscalls.html">Process</a></li>
+    <li><a href="../syscalls/memory-syscalls.html">Memory</a></li>
+    <li><a href="../syscalls/file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="../userspace/overview.html">Overview</a></li>
+    <li><a href="../userspace/libc.html">Fr Libc</a></li>
+    <li><a href="../userspace/process-model.html">Process Model</a></li>
+    <li><a href="../userspace/elf-loading.html">ELF Loading</a></li>
+    <li><a href="../userspace/init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="../filesystem/overview.html">Filesystem</a></li>
+    <li><a href="overview.html">Networking</a></li>
+    <li><a href="../ipc/overview.html">IPC</a></li>
+    <li><a href="../drivers/overview.html">Drivers</a></li>
+    <li><a href="../security/overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="../build/overview.html">Build Overview</a></li>
+    <li><a href="../build/toolchain.html">Toolchain</a></li>
+    <li><a href="../build/makefile-structure.html">Makefile</a></li>
+    <li><a href="../build/qemu-setup.html">QEMU</a></li>
+    <li><a href="../build/testing.html">Testing</a></li>
+    <li><a href="../debugging/overview.html">Debugging</a></li>
+    <li><a href="../debugging/serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>Raw Sockets</h1>
+<h2>Overview</h2>
+<p>Raw sockets (<code>SOCK_RAW</code>) allow a process to send and receive IP packets directly, bypassing the transport layer (TCP/UDP). They are used for:</p>
+<ul>
+<li>Custom protocols not implemented by the kernel.</li>
+<li>Packet injection and capture (network testing, monitoring).</li>
+<li>ICMP implementations (<code>ping</code>).</li>
+<li>Custom routing protocols.</li>
+</ul>
+<p>Raw sockets require <code>CAP_NET_RAW</code>.</p>
+<h2>Creating a Raw Socket</h2>
+<pre><code class="language-c"><span class="hl-comment">// Raw ICMP socket:</span>
+<span class="hl-type-builtin">int</span> <span class="hl-variable">fd</span> <span class="hl-operator">=</span> <span class="hl-function-call">socket</span><span class="hl-punctuation-bracket">(</span><span class="hl-constant">AF_INET</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-constant">SOCK_RAW</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-constant">IPPROTO_ICMP</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+
+<span class="hl-comment">// Raw socket for all IP protocols:</span>
+<span class="hl-type-builtin">int</span> <span class="hl-variable">fd</span> <span class="hl-operator">=</span> <span class="hl-function-call">socket</span><span class="hl-punctuation-bracket">(</span><span class="hl-constant">AF_INET</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-constant">SOCK_RAW</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-constant">IPPROTO_RAW</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>  <span class="hl-comment">// requires IP_HDRINCL</span>
+
+<span class="hl-comment">// Raw Ethernet socket (Layer 2):</span>
+<span class="hl-type-builtin">int</span> <span class="hl-variable">fd</span> <span class="hl-operator">=</span> <span class="hl-function-call">socket</span><span class="hl-punctuation-bracket">(</span><span class="hl-constant">AF_PACKET</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-constant">SOCK_RAW</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-function-call">htons</span><span class="hl-punctuation-bracket">(</span><span class="hl-constant">ETH_P_ALL</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<h2>Receiving Packets</h2>
+<p>On <code>recv(fd, buf, len, 0)</code>:</p>
+<ul>
+<li>The kernel delivers a copy of every matching IP packet to the raw socket's receive buffer.</li>
+<li>Matching: if <code>protocol == IPPROTO_ICMP</code>, only ICMP packets are delivered; if <code>IPPROTO_RAW</code>, all IP packets.</li>
+<li>The received buffer contains the full IP header followed by the payload.</li>
+<li>No transport layer processing is done (the TCP/UDP state machine does not see these packets).</li>
+</ul>
+<p><code>AF_PACKET</code> sockets receive the full Ethernet frame (including the Ethernet header).</p>
+<h2>Sending Packets</h2>
+<p>On <code>sendto(fd, buf, len, 0, dest_addr, addrlen)</code>:</p>
+<ul>
+<li>If <code>IP_HDRINCL</code> is not set: the kernel prepends an IP header (filling <code>src</code>, <code>ttl</code>, and <code>protocol</code> from socket options; the caller provides the payload).</li>
+<li>If <code>IP_HDRINCL</code> is set: the caller provides the full IP header (including checksum — the kernel may recalculate it).</li>
+</ul>
+<h2>Packet Capture (AF_PACKET)</h2>
+<p><code>AF_PACKET</code> with <code>SOCK_RAW</code> captures all Ethernet frames on a given interface:</p>
+<pre><code class="language-c"><span class="hl-type-builtin">int</span> <span class="hl-variable">fd</span> <span class="hl-operator">=</span> <span class="hl-function-call">socket</span><span class="hl-punctuation-bracket">(</span><span class="hl-constant">AF_PACKET</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-constant">SOCK_RAW</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-function-call">htons</span><span class="hl-punctuation-bracket">(</span><span class="hl-constant">ETH_P_ALL</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-keyword-type">struct</span> <span class="hl-type">sockaddr_ll</span> <span class="hl-variable">addr</span> <span class="hl-operator">=</span> <span class="hl-punctuation-bracket">{</span> <span class="hl-punctuation-delimiter">.</span><span class="hl-property">sll_family</span> <span class="hl-operator">=</span> <span class="hl-constant">AF_PACKET</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-punctuation-delimiter">.</span><span class="hl-property">sll_ifindex</span> <span class="hl-operator">=</span> <span class="hl-variable">ifindex</span> <span class="hl-punctuation-bracket">}</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-function-call">bind</span><span class="hl-punctuation-bracket">(</span><span class="hl-variable">fd</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-punctuation-bracket">(</span><span class="hl-type">struct </span><span class="hl-type">sockaddr</span><span class="hl-type"> </span><span class="hl-operator">*</span><span class="hl-punctuation-bracket">)</span><span class="hl-operator">&amp;</span><span class="hl-variable">addr</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-keyword-operator">sizeof</span><span class="hl-punctuation-bracket">(</span><span class="hl-variable">addr</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+
+<span class="hl-type-builtin">uint8_t</span> <span class="hl-variable">buf</span><span class="hl-punctuation-bracket">[</span><span class="hl-number">65536</span><span class="hl-punctuation-bracket">]</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-type-builtin">ssize_t</span> <span class="hl-variable">n</span> <span class="hl-operator">=</span> <span class="hl-function-call">recv</span><span class="hl-punctuation-bracket">(</span><span class="hl-variable">fd</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">buf</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-keyword-operator">sizeof</span><span class="hl-punctuation-bracket">(</span><span class="hl-variable">buf</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-number">0</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-comment">// buf contains: Ethernet header + IP header + payload</span>
+</code></pre>
+<h2>Socket Options for Raw Sockets</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>IP_HDRINCL</code></td>
+<td>Caller provides the full IP header (required for IP options)</td>
+</tr>
+<tr>
+<td><code>IP_TTL</code></td>
+<td>Set the TTL field in outgoing packets</td>
+</tr>
+<tr>
+<td><code>IP_TOS</code></td>
+<td>Set the ToS/DSCP byte</td>
+</tr>
+<tr>
+<td><code>SO_BINDTODEVICE</code></td>
+<td>Restrict to a specific network interface</td>
+</tr>
+</tbody>
+</table>
+<h2>Security</h2>
+<p>Raw sockets require <code>CAP_NET_RAW</code>. This capability is not granted to unprivileged processes by default. The following operations are gated:</p>
+<ul>
+<li><code>socket(AF_INET, SOCK_RAW, ...)</code>: <code>CAP_NET_RAW</code>.</li>
+<li><code>socket(AF_PACKET, SOCK_RAW, ...)</code>: <code>CAP_NET_RAW</code>.</li>
+<li>Sending spoofed source IP addresses: possible with <code>IP_HDRINCL</code> + <code>CAP_NET_RAW</code>.</li>
+</ul>
+<p>Processes in a network namespace are limited to the interfaces in their namespace — they cannot capture traffic from the host's interfaces.</p>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="ipv4-stack.html">ipv4-stack.md</a></li>
+<li><a href="socket-api.html">socket-api.md</a></li>
+<li><a href="socket-subsystem.html">socket-subsystem.md</a></li>
+<li><a href="../security/capabilities.html">security/capabilities.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="/fr-os/script.js" defer></script>
+</body>
+</html>

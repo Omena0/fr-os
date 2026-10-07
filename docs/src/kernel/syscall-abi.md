@@ -2,7 +2,7 @@
 
 ## Overview
 
-The syscall ABI is the stable contract between userspace and the kernel. See [architecture/abi-stability.md](../architecture/abi-stability.md) for versioning policy.
+The syscall ABI is the stable contract between userspace and the kernel[^sysv-abi]. See [architecture/abi-stability.md](../architecture/abi-stability.md) for versioning policy.
 
 ## Syscall Table
 
@@ -119,3 +119,11 @@ See [syscalls/dispatch-path.md](../syscalls/dispatch-path.md) for the detailed f
 - [architecture/abi-stability.md](../architecture/abi-stability.md)
 - [syscalls/overview.md](../syscalls/overview.md)
 - [privilege-levels.md](privilege-levels.md)
+
+## References
+
+- [System V Application Binary Interface AMD64 Architecture Processor Supplement][sysv-abi]
+- [Intel 64 and IA-32 Architectures Software Developer's Manual, Volume 3A — System Call and SYSENTER/SYSEXIT][intel-sdm-syscall]
+
+[sysv-abi]: https://gitlab.com/x86-psABIs/x86-64-ABI/-/blob/master/abi.md "System V AMD64 ABI"
+[intel-sdm-syscall]: https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html#vol3a "Intel SDM Volume 3A: System Call and SYSENTER/SYSEXIT"

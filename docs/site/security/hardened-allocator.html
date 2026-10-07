@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="/fr-os/">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Security/hardened-allocator — Fr OS</title>
+  <meta property="og:title" content="Security/hardened-allocator — Fr OS">
+  <meta name="description" content="Security/hardened-allocator — Fr OS documentation">
+  <meta property="og:description" content="Security/hardened-allocator — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="/fr-os/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/fr-os/style.css">
+  <link rel="stylesheet" href="/fr-os/fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="../index.html">Overview</a></li>
+    <li><a href="../architecture/overview.html">Architecture</a></li>
+    <li><a href="../architecture/memory-layout.html">Memory Layout</a></li>
+    <li><a href="../architecture/posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="../architecture/security-model.html">Security Model</a></li>
+    <li><a href="../architecture/performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="../bootloader/overview.html">Overview</a></li>
+    <li><a href="../bootloader/stage1.html">Stage 1</a></li>
+    <li><a href="../bootloader/stage2.html">Stage 2</a></li>
+    <li><a href="../bootloader/kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="../bootloader/memory-map.html">Memory Map</a></li>
+    <li><a href="../bootloader/serial-output.html">Serial Output</a></li>
+    <li><a href="../bootloader/build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="../kernel/overview.html">Overview</a></li>
+    <li><a href="../kernel/early-boot.html">Early Boot</a></li>
+    <li><a href="../kernel/interrupt-handling.html">Interrupts</a></li>
+    <li><a href="../kernel/context-switching.html">Context Switching</a></li>
+    <li><a href="../kernel/privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="../kernel/syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="../kernel/panic-system.html">Panic</a></li>
+    <li><a href="../kernel/logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="../memory/overview.html">Overview</a></li>
+    <li><a href="../memory/physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="../memory/buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="../memory/slab-allocator.html">SLAB</a></li>
+    <li><a href="../memory/virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="../memory/userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="../scheduling/overview.html">Overview</a></li>
+    <li><a href="../scheduling/mlfq.html">MLFQ</a></li>
+    <li><a href="../scheduling/realtime-scheduler.html">Realtime</a></li>
+    <li><a href="../scheduling/multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="../syscalls/overview.html">Overview</a></li>
+    <li><a href="../syscalls/dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="../syscalls/process-syscalls.html">Process</a></li>
+    <li><a href="../syscalls/memory-syscalls.html">Memory</a></li>
+    <li><a href="../syscalls/file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="../userspace/overview.html">Overview</a></li>
+    <li><a href="../userspace/libc.html">Fr Libc</a></li>
+    <li><a href="../userspace/process-model.html">Process Model</a></li>
+    <li><a href="../userspace/elf-loading.html">ELF Loading</a></li>
+    <li><a href="../userspace/init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="../filesystem/overview.html">Filesystem</a></li>
+    <li><a href="../networking/overview.html">Networking</a></li>
+    <li><a href="../ipc/overview.html">IPC</a></li>
+    <li><a href="../drivers/overview.html">Drivers</a></li>
+    <li><a href="overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="../build/overview.html">Build Overview</a></li>
+    <li><a href="../build/toolchain.html">Toolchain</a></li>
+    <li><a href="../build/makefile-structure.html">Makefile</a></li>
+    <li><a href="../build/qemu-setup.html">QEMU</a></li>
+    <li><a href="../build/testing.html">Testing</a></li>
+    <li><a href="../debugging/overview.html">Debugging</a></li>
+    <li><a href="../debugging/serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>Hardened Memory Allocator</h1>
+<h2>Overview</h2>
+<p>The hardened allocator adds security properties to the standard memory allocator (both kernel <code>kmalloc</code> and userspace <code>malloc</code>) to increase resistance to heap exploitation techniques.</p>
+<h2>Security Properties</h2>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Guard pages</td>
+<td>Non-accessible pages adjacent to allocations (catch out-of-bounds access)</td>
+</tr>
+<tr>
+<td>Freelist randomization</td>
+<td>Free objects are returned in random order (prevents reliable heap shaping)</td>
+</tr>
+<tr>
+<td>Use-after-free detection</td>
+<td>Freed memory is poisoned; access detected via guard or poison values</td>
+</tr>
+<tr>
+<td>Double-free detection</td>
+<td>Second free of same pointer is detected and aborted</td>
+</tr>
+<tr>
+<td>Canary values</td>
+<td>Random canary words stored at the end of each heap object</td>
+</tr>
+<tr>
+<td>Zero-on-free</td>
+<td>Freed memory is zeroed to prevent information leakage through freed memory reuse</td>
+</tr>
+<tr>
+<td>Allocation size jitter</td>
+<td>Object size is rounded up to a random alignment within the size class</td>
+</tr>
+</tbody>
+</table>
+<h2>Guard Pages (Large Allocations)</h2>
+<p>For allocations ≥ 16 KB (direct mmap path in userspace malloc):</p>
+<ol>
+<li>Allocate <code>size + 2 * PAGE_SIZE</code> from the VMM.</li>
+<li>Mark the first and last pages <code>PROT_NONE</code> (guard pages).</li>
+<li>Return a pointer to the start of the usable region (between the guards).</li>
+</ol>
+<p>Any buffer overflow or underflow that reaches the guard page triggers a page fault → <code>SIGSEGV</code>.</p>
+<h2>Canary Words (Small Allocations)</h2>
+<p>For SLAB/magazine allocations in the kernel, and for tcache/arena allocations in userspace:</p>
+<ul>
+<li>A random 8-byte canary is stored immediately after each allocated object (in the padding bytes of the size class).</li>
+<li>On free: the canary is verified before the object is returned to the free list.</li>
+<li>If the canary is corrupted: abort with a detailed error message.</li>
+</ul>
+<pre><code class="language-c"><span class="hl-keyword-type">struct</span> <span class="hl-type">slab_obj_header</span> <span class="hl-punctuation-bracket">{</span>
+    <span class="hl-type-builtin">uint64_t</span> <span class="hl-property">canary</span><span class="hl-punctuation-delimiter">;</span>    <span class="hl-comment">// random value set at allocation</span>
+    <span class="hl-comment">// ... object data follows ...</span>
+    <span class="hl-type-builtin">uint64_t</span> <span class="hl-property">canary_end</span><span class="hl-punctuation-delimiter">;</span> <span class="hl-comment">// same random value at the end</span>
+<span class="hl-punctuation-bracket">}</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<h2>Freelist Randomization</h2>
+<p>Instead of always returning the most recently freed object (LIFO — predictable for an attacker), the allocator selects a random free object within the magazine/tcache:</p>
+<pre><code class="language-c"><span class="hl-type-builtin">void</span> <span class="hl-operator">*</span><span class="hl-function">alloc_from_cache</span><span class="hl-punctuation-bracket">(</span><span class="hl-keyword-type">struct</span> <span class="hl-type">per_cpu_cache</span> <span class="hl-operator">*</span><span class="hl-variable">cache</span><span class="hl-punctuation-bracket">)</span> <span class="hl-punctuation-bracket">{</span>
+    <span class="hl-type-builtin">int</span> <span class="hl-variable">idx</span> <span class="hl-operator">=</span> <span class="hl-function-call">csprng_next</span><span class="hl-punctuation-bracket">(</span><span class="hl-punctuation-bracket">)</span> <span class="hl-operator">%</span> <span class="hl-variable">cache</span><span class="hl-operator">-&gt;</span><span class="hl-property">count</span><span class="hl-punctuation-delimiter">;</span>
+    <span class="hl-type-builtin">void</span> <span class="hl-operator">*</span><span class="hl-variable">obj</span> <span class="hl-operator">=</span> <span class="hl-variable">cache</span><span class="hl-operator">-&gt;</span><span class="hl-property">objects</span><span class="hl-punctuation-bracket">[</span><span class="hl-variable">idx</span><span class="hl-punctuation-bracket">]</span><span class="hl-punctuation-delimiter">;</span>
+    <span class="hl-variable">cache</span><span class="hl-operator">-&gt;</span><span class="hl-property">objects</span><span class="hl-punctuation-bracket">[</span><span class="hl-variable">idx</span><span class="hl-punctuation-bracket">]</span> <span class="hl-operator">=</span> <span class="hl-variable">cache</span><span class="hl-operator">-&gt;</span><span class="hl-property">objects</span><span class="hl-punctuation-bracket">[</span><span class="hl-operator">--</span><span class="hl-variable">cache</span><span class="hl-operator">-&gt;</span><span class="hl-property">count</span><span class="hl-punctuation-bracket">]</span><span class="hl-punctuation-delimiter">;</span>
+    <span class="hl-keyword-return">return</span> <span class="hl-variable">obj</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-punctuation-bracket">}</span>
+</code></pre>
+<p>This prevents an attacker from reliably controlling which specific address they receive.</p>
+<h2>Poison Values</h2>
+<p>On free, every byte of the freed object is written with a poison value (<code>0xDE</code>). An access to a freed object will read the poison value, likely causing a crash before arbitrary behavior occurs. A read-triggered crash is easier to detect than silent memory corruption.</p>
+<h2>Double-Free Detection</h2>
+<p>Before adding a freed object back to the free list, a hash set of recently freed addresses is consulted:</p>
+<pre><code class="language-c"><span class="hl-type-builtin">bool</span> <span class="hl-function">double_free_check</span><span class="hl-punctuation-bracket">(</span><span class="hl-type-builtin">void</span> <span class="hl-operator">*</span><span class="hl-variable">ptr</span><span class="hl-punctuation-bracket">)</span> <span class="hl-punctuation-bracket">{</span>
+    <span class="hl-keyword-return">return</span> <span class="hl-function-call">hashset_contains</span><span class="hl-punctuation-bracket">(</span><span class="hl-operator">&amp;</span><span class="hl-variable">recently_freed</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-variable">ptr</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-punctuation-bracket">}</span>
+</code></pre>
+<p>If <code>ptr</code> is already in the set: abort with "double free detected at 0x...".</p>
+<h2>Kernel vs Userspace</h2>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Kernel (kmalloc/SLAB)</th>
+<th>Userspace (malloc)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Guard pages</td>
+<td>Only for kmalloc ≥ 4 pages</td>
+<td>Yes, for mmap-backed allocs</td>
+</tr>
+<tr>
+<td>Canaries</td>
+<td>Per-slab</td>
+<td>Per-tcache-entry</td>
+</tr>
+<tr>
+<td>Freelist randomization</td>
+<td>Per-CPU magazine</td>
+<td>Per-tcache</td>
+</tr>
+<tr>
+<td>Zero-on-free</td>
+<td>Always</td>
+<td>Always</td>
+</tr>
+<tr>
+<td>Poison</td>
+<td>Debug builds</td>
+<td>Release builds</td>
+</tr>
+</tbody>
+</table>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="stack-canaries.html">stack-canaries.md</a></li>
+<li><a href="aslr.html">aslr.md</a></li>
+<li><a href="nx-enforcement.html">nx-enforcement.md</a></li>
+<li><a href="../memory/slab-allocator.html">memory/slab-allocator.md</a></li>
+<li><a href="../memory/userspace-malloc.html">memory/userspace-malloc.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="/fr-os/script.js" defer></script>
+</body>
+</html>

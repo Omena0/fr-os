@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="/fr-os/">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Architecture/overview — Fr OS</title>
+  <meta property="og:title" content="Architecture/overview — Fr OS">
+  <meta name="description" content="Architecture/overview — Fr OS documentation">
+  <meta property="og:description" content="Architecture/overview — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="/fr-os/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/fr-os/style.css">
+  <link rel="stylesheet" href="/fr-os/fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="../index.html">Overview</a></li>
+    <li><a href="architecture/overview.html" class="active">Architecture</a></li>
+    <li><a href="memory-layout.html">Memory Layout</a></li>
+    <li><a href="posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="security-model.html">Security Model</a></li>
+    <li><a href="performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="../bootloader/overview.html">Overview</a></li>
+    <li><a href="../bootloader/stage1.html">Stage 1</a></li>
+    <li><a href="../bootloader/stage2.html">Stage 2</a></li>
+    <li><a href="../bootloader/kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="../bootloader/memory-map.html">Memory Map</a></li>
+    <li><a href="../bootloader/serial-output.html">Serial Output</a></li>
+    <li><a href="../bootloader/build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="../kernel/overview.html">Overview</a></li>
+    <li><a href="../kernel/early-boot.html">Early Boot</a></li>
+    <li><a href="../kernel/interrupt-handling.html">Interrupts</a></li>
+    <li><a href="../kernel/context-switching.html">Context Switching</a></li>
+    <li><a href="../kernel/privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="../kernel/syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="../kernel/panic-system.html">Panic</a></li>
+    <li><a href="../kernel/logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="../memory/overview.html">Overview</a></li>
+    <li><a href="../memory/physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="../memory/buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="../memory/slab-allocator.html">SLAB</a></li>
+    <li><a href="../memory/virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="../memory/userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="../scheduling/overview.html">Overview</a></li>
+    <li><a href="../scheduling/mlfq.html">MLFQ</a></li>
+    <li><a href="../scheduling/realtime-scheduler.html">Realtime</a></li>
+    <li><a href="../scheduling/multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="../syscalls/overview.html">Overview</a></li>
+    <li><a href="../syscalls/dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="../syscalls/process-syscalls.html">Process</a></li>
+    <li><a href="../syscalls/memory-syscalls.html">Memory</a></li>
+    <li><a href="../syscalls/file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="../userspace/overview.html">Overview</a></li>
+    <li><a href="../userspace/libc.html">Fr Libc</a></li>
+    <li><a href="../userspace/process-model.html">Process Model</a></li>
+    <li><a href="../userspace/elf-loading.html">ELF Loading</a></li>
+    <li><a href="../userspace/init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="../filesystem/overview.html">Filesystem</a></li>
+    <li><a href="../networking/overview.html">Networking</a></li>
+    <li><a href="../ipc/overview.html">IPC</a></li>
+    <li><a href="../drivers/overview.html">Drivers</a></li>
+    <li><a href="../security/overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="../build/overview.html">Build Overview</a></li>
+    <li><a href="../build/toolchain.html">Toolchain</a></li>
+    <li><a href="../build/makefile-structure.html">Makefile</a></li>
+    <li><a href="../build/qemu-setup.html">QEMU</a></li>
+    <li><a href="../build/testing.html">Testing</a></li>
+    <li><a href="../debugging/overview.html">Debugging</a></li>
+    <li><a href="../debugging/serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>Architecture Overview</h1>
+<div class="callout callout-info">  <span class="callout-icon" aria-hidden="true">    <svg viewBox="0 0 24 24">      <circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8h.01"/>    </svg>  </span>  <div class="callout-content">    <p><strong>Fr OS</strong> is the project. <strong>Fr Core</strong> is the kernel. Everything on this page is
+about the whole system unless it says otherwise. Where a page describes a
+component, it names that component: <code>Fr Boot</code> (bootloader), <code>Fr Init</code> (first
+userspace process), <code>Fr <a href="../userspace/libc.html" class="filename-reference">Libc</a></code> (C runtime), <code>Fr Userland</code> (programs). The names
+are macros in <code>src/include/version.h</code>.</p>  </div></div>
+<h2>System Philosophy</h2>
+<p>This OS is a POSIX-compatible[^posix-2017], Linux-like operating system targeting x86-64 hardware[^intel-sdm][^amd-apm], running under QEMU with KVM acceleration. It is designed with three primary constraints:</p>
+<ol>
+<li><strong>Correctness</strong>: Full POSIX semantics[^posix-2017] — process model, file descriptor abstraction, signal handling, IPC, and socket API must behave identically to specification.</li>
+<li><strong>Performance</strong>: Every subsystem defines an explicit fast path optimized for the common case. Slow paths are explicitly documented and bounded.</li>
+<li><strong>Isolation</strong>: Subsystem boundaries are strict. A failure in one subsystem (especially userspace drivers) must not cascade into kernel corruption or system panic.</li>
+</ol>
+<h2>Structural Layers</h2>
+<pre><code>┌─────────────────────────────────────────────────┐
+│  Userspace Applications (GUI, shell, services)  │
+├─────────────────────────────────────────────────┤
+│  POSIX libc (syscall wrappers, stdlib, pthreads)│
+├─────────────────────────────────────────────────┤
+│  Syscall Boundary (versioned ABI)               │
+├──────────────┬───────────────┬──────────────────┤
+│  Scheduler   │ Memory Manager│  VFS / Filesystem│
+│  (MLFQ + RT) │ (buddy→malloc)│  (ext4 + cache)  │
+├──────────────┼───────────────┼──────────────────┤
+│  IPC         │  Networking   │  Device Drivers  │
+│  (pipe, shm) │  (IPv4/TCP)   │  (hybrid model)  │
+├──────────────┴───────────────┴──────────────────┤
+│  Core Kernel (IRQ, context switch, modules)     │
+├─────────────────────────────────────────────────┤
+│  Bootloader (stage1 + stage2)                   │
+├─────────────────────────────────────────────────┤
+│  Hardware / QEMU                                │
+└─────────────────────────────────────────────────┘
+</code></pre>
+<h2>Core Components</h2>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Bootloader</td>
+<td>BIOS/MBR stage1, protected-mode stage2, kernel ELF loader</td>
+</tr>
+<tr>
+<td>Kernel</td>
+<td>Monolithic core: IRQ, scheduling, memory, VFS, IPC, networking, security</td>
+</tr>
+<tr>
+<td>Module System</td>
+<td>Loadable kernel modules with versioned symbols and runtime lifecycle</td>
+</tr>
+<tr>
+<td>Init System</td>
+<td>PID 1; service lifecycle, dependency ordering, restart policy</td>
+</tr>
+<tr>
+<td>libc</td>
+<td>POSIX-compatible C library backed entirely by kernel syscalls</td>
+</tr>
+<tr>
+<td>Userspace drivers</td>
+<td>Per-device userspace processes communicating via shared memory + event queues</td>
+</tr>
+<tr>
+<td>GUI program</td>
+<td>Minimal windowing application running on the framebuffer</td>
+</tr>
+</tbody>
+</table>
+<h2>Design Principles</h2>
+<ul>
+<li><strong>Monolithic kernel with hybrid drivers</strong>: The kernel is monolithic for performance, but device drivers beyond minimal core functionality run in userspace with isolated fault domains.</li>
+<li><strong>Strict ABI versioning</strong>: The syscall ABI is versioned. Userspace binaries compiled against version N continue to work after kernel updates within the same major version.</li>
+<li><strong>Zero-copy where possible</strong>: Pipes use ring-buffer based channels. Networking uses low-copy buffer strategies. Shared memory IPC avoids copies entirely.</li>
+<li><strong>Preemptible kernel</strong>: The kernel is fully preemptible outside of critical sections. Interrupt latency is bounded.</li>
+<li><strong>Default-deny security</strong>: Processes start with a minimal capability set. No ambient authority.</li>
+</ul>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="subsystem-map.html">subsystem-map.md</a> — dependency graph of all subsystems</li>
+<li><a href="abi-stability.html">abi-stability.md</a> — syscall ABI versioning and stability guarantees</li>
+<li><a href="posix-compliance.html">posix-compliance.md</a> — POSIX conformance scope</li>
+<li><a href="performance-mandate.html">performance-mandate.md</a> — system-wide performance requirements</li>
+<li><a href="boot-sequence.html">boot-sequence.md</a> — full boot flow from BIOS to init</li>
+<li><a href="memory-layout.html">memory-layout.md</a> — physical and virtual address space layout</li>
+<li><a href="security-model.html">security-model.md</a> — threat model and security architecture</li>
+</ul>
+<h2>References</h2>
+<ul>
+<li><a href="https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html" title="Intel 64 and IA-32 Architectures Software Developer's Manual">Intel 64 and IA-32 Architectures Software Developer's Manual</a></li>
+<li><a href="https://www.amd.com/en/developer/architecture-programmer-manuals.html" title="AMD64 Architecture Programmer's Manual">AMD64 Architecture Programmer's Manual</a></li>
+<li><a href="https://pubs.opengroup.org/onlinepubs/9699919799/" title="The Open Group Base Specifications Issue 7, 2018 edition (POSIX.1-2017)">POSIX.1-2017 (IEEE Std 1003.1-2017)</a></li>
+<li><a href="../https:/gitlab.com/x86-psABIs/x86-64-ABI/-/blob/master/abi.html" title="System V AMD64 ABI">System V Application Binary Interface AMD64 Architecture Processor Supplement</a></li>
+<li><a href="https://www.kernel.org/doc/html/latest/core-api/memory-allocation.html" title="Linux Kernel Memory Management API">Linux Kernel Documentation — Memory Management</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="/fr-os/script.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="/fr-os/">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kernel/panic-system — Fr OS</title>
+  <meta property="og:title" content="Kernel/panic-system — Fr OS">
+  <meta name="description" content="Kernel/panic-system — Fr OS documentation">
+  <meta property="og:description" content="Kernel/panic-system — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="/fr-os/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/fr-os/style.css">
+  <link rel="stylesheet" href="/fr-os/fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="../index.html">Overview</a></li>
+    <li><a href="../architecture/overview.html">Architecture</a></li>
+    <li><a href="../architecture/memory-layout.html">Memory Layout</a></li>
+    <li><a href="../architecture/posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="../architecture/security-model.html">Security Model</a></li>
+    <li><a href="../architecture/performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="../bootloader/overview.html">Overview</a></li>
+    <li><a href="../bootloader/stage1.html">Stage 1</a></li>
+    <li><a href="../bootloader/stage2.html">Stage 2</a></li>
+    <li><a href="../bootloader/kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="../bootloader/memory-map.html">Memory Map</a></li>
+    <li><a href="../bootloader/serial-output.html">Serial Output</a></li>
+    <li><a href="../bootloader/build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="early-boot.html">Early Boot</a></li>
+    <li><a href="interrupt-handling.html">Interrupts</a></li>
+    <li><a href="context-switching.html">Context Switching</a></li>
+    <li><a href="privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="kernel/panic-system.html" class="active">Panic</a></li>
+    <li><a href="logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="../memory/overview.html">Overview</a></li>
+    <li><a href="../memory/physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="../memory/buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="../memory/slab-allocator.html">SLAB</a></li>
+    <li><a href="../memory/virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="../memory/userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="../scheduling/overview.html">Overview</a></li>
+    <li><a href="../scheduling/mlfq.html">MLFQ</a></li>
+    <li><a href="../scheduling/realtime-scheduler.html">Realtime</a></li>
+    <li><a href="../scheduling/multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="../syscalls/overview.html">Overview</a></li>
+    <li><a href="../syscalls/dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="../syscalls/process-syscalls.html">Process</a></li>
+    <li><a href="../syscalls/memory-syscalls.html">Memory</a></li>
+    <li><a href="../syscalls/file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="../userspace/overview.html">Overview</a></li>
+    <li><a href="../userspace/libc.html">Fr Libc</a></li>
+    <li><a href="../userspace/process-model.html">Process Model</a></li>
+    <li><a href="../userspace/elf-loading.html">ELF Loading</a></li>
+    <li><a href="../userspace/init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="../filesystem/overview.html">Filesystem</a></li>
+    <li><a href="../networking/overview.html">Networking</a></li>
+    <li><a href="../ipc/overview.html">IPC</a></li>
+    <li><a href="../drivers/overview.html">Drivers</a></li>
+    <li><a href="../security/overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="../build/overview.html">Build Overview</a></li>
+    <li><a href="../build/toolchain.html">Toolchain</a></li>
+    <li><a href="../build/makefile-structure.html">Makefile</a></li>
+    <li><a href="../build/qemu-setup.html">QEMU</a></li>
+    <li><a href="../build/testing.html">Testing</a></li>
+    <li><a href="../debugging/overview.html">Debugging</a></li>
+    <li><a href="../debugging/serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>Kernel Panic System</h1>
+<h2>Purpose</h2>
+<p>A kernel panic is a non-recoverable error condition where the kernel determines that it cannot safely continue execution. The panic system:</p>
+<ol>
+<li>Emits a diagnostic message with the error description, location, and register state.</li>
+<li>Dumps the call stack (backtrace).</li>
+<li>Optionally dumps additional diagnostic data (memory map, scheduler state).</li>
+<li>Halts all CPUs.</li>
+</ol>
+<h2>Panic Entry Points</h2>
+<pre><code class="language-c"><span class="hl-comment">// Primary panic entry — format string + args</span>
+<span class="hl-type-builtin">void</span> <span class="hl-function">kpanic</span><span class="hl-punctuation-bracket">(</span><span class="hl-keyword-modifier">const</span> <span class="hl-type-builtin">char</span> <span class="hl-operator">*</span><span class="hl-variable">fmt</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-punctuation-special">...</span><span class="hl-punctuation-bracket">)</span> <span class="hl-attribute">__attribute__</span><span class="hl-punctuation-bracket">(</span><span class="hl-punctuation-bracket">(</span><span class="hl-variable-builtin">noreturn</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+
+<span class="hl-comment">// Assert-style macro — panics if condition is false</span>
+<span class="hl-keyword-directive-define">#define</span> <span class="hl-function-macro">KASSERT</span><span class="hl-punctuation-bracket">(</span><span class="hl-variable-parameter">cond</span><span class="hl-punctuation-bracket">)</span> \
+    <span class="hl-keyword-repeat">do</span> <span class="hl-punctuation-bracket">{</span> <span class="hl-keyword-conditional">if</span> <span class="hl-punctuation-bracket">(</span><span class="hl-operator">!</span><span class="hl-punctuation-bracket">(</span><span class="hl-variable">cond</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-bracket">)</span> <span class="hl-function-call">kpanic</span><span class="hl-punctuation-bracket">(</span><span class="hl-string">&quot;Assertion failed: %s at %s:%d&quot;</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-keyword-directive">#cond</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-constant-builtin">__FILE__</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-constant-builtin">__LINE__</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span> <span class="hl-punctuation-bracket">}</span> <span class="hl-keyword-repeat">while</span><span class="hl-punctuation-bracket">(</span><span class="hl-number">0</span><span class="hl-punctuation-bracket">)</span>
+
+<span class="hl-comment">// Explicit BUG marker — used when reaching unreachable code</span>
+<span class="hl-keyword-directive-define">#define</span> <span class="hl-function-macro">BUG</span><span class="hl-punctuation-bracket">(</span><span class="hl-punctuation-bracket">)</span> <span class="hl-function-call">kpanic</span><span class="hl-punctuation-bracket">(</span><span class="hl-string">&quot;BUG at %s:%d&quot;</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-constant-builtin">__FILE__</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-constant-builtin">__LINE__</span><span class="hl-punctuation-bracket">)</span>
+</code></pre>
+<h2>Panic Sequence</h2>
+<ol>
+<li><strong>Disable interrupts</strong> on the current CPU (<code>cli</code>).</li>
+<li><strong>Broadcast IPI</strong> to all other CPUs (vector 242, CPU halt IPI). Each CPU halts on receipt.</li>
+<li><strong>Emit panic header</strong> to all active log sinks (serial, framebuffer):</li>
+</ol>
+<p><code>*** KERNEL PANIC ***
+   &lt;message&gt;
+   CPU: &lt;n&gt;  RIP: &lt;addr&gt; (&lt;symbol+offset&gt;)
+   RAX: &lt;val&gt;  RBX: &lt;val&gt;  RCX: &lt;val&gt;  RDX: &lt;val&gt;
+   RSI: &lt;val&gt;  RDI: &lt;val&gt;  RBP: &lt;val&gt;  RSP: &lt;val&gt;
+   R8:  &lt;val&gt;  R9:  &lt;val&gt;  R10: &lt;val&gt;  R11: &lt;val&gt;
+   R12: &lt;val&gt;  R13: &lt;val&gt;  R14: &lt;val&gt;  R15: &lt;val&gt;
+   RFLAGS: &lt;val&gt;  CR2: &lt;val&gt;  CR3: &lt;val&gt;</code></p>
+<ol>
+<li><strong>Print backtrace</strong>: Walk the stack using RBP frame pointer chain, resolve addresses to symbol names using the kernel symbol table embedded at build time.</li>
+<li><strong>Print memory zone summary</strong>: Used/free pages per zone.</li>
+<li><strong>Halt</strong>: Execute <code>hlt</code> in an infinite loop.</li>
+</ol>
+<h2>Symbol Resolution</h2>
+<p>The kernel binary is linked with a symbol table embedded in <code>.ksymtab_strings</code> and <code>.ksymtab</code>. During panic, <code>ksym_lookup(addr)</code> performs a binary search on the symbol table to find the nearest symbol name and offset from the panic address.</p>
+<p>This requires the kernel to be linked with at least function-level symbols (no <code>-s</code> strip flag).</p>
+<h2>Serial Output Priority</h2>
+<p>Panic output is written directly to COM1 using the raw port I/O path, bypassing the normal logging system (which may require memory allocation or scheduler access — both unsafe during panic).</p>
+<h2>Framebuffer Output</h2>
+<p>If a framebuffer was configured at boot, the panic message is also rendered to the screen in a distinctive format (white text on red background) using the kernel's emergency framebuffer write path (no driver dependency).</p>
+<h2>Multi-CPU Considerations</h2>
+<ul>
+<li>The panic CPU holds the panic lock (an atomic flag) to prevent multiple CPUs from entering the panic handler simultaneously.</li>
+<li>Secondary CPUs that receive the halt IPI save their register state to a per-CPU panic dump buffer before halting.</li>
+<li>The panic output includes a summary of each CPU's state.</li>
+</ul>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="logging.html">logging.md</a></li>
+<li><a href="interrupt-handling.html">kernel/interrupt-handling.md</a></li>
+<li><a href="../debugging/serial-diagnostics.html">debugging/serial-diagnostics.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="/fr-os/script.js" defer></script>
+</body>
+</html>

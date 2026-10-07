@@ -267,7 +267,7 @@
     ]
   ],
   "build": {
-    "workers": 6,
+    "workers": 8,
     "minify_html": true,
     "optimize_html": true,
     "zstd_level": 22,
@@ -280,13 +280,8 @@
   },
   "source_files": {
     "patterns": [
-      "docs/src/*.md",
-      "src/*.c",
-      "src/*.h",
-      "src/*.S",
-      "src/*.mk",
-      "src/*.ld",
-      "src/*.d"
+      "docs/src/**/*",
+      "src/**/*"
     ],
     "ignore_dirs": []
   },

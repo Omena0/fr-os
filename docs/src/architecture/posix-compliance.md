@@ -2,7 +2,19 @@
 
 ## Compliance Goal
 
-The OS targets broad POSIX.1-2017 (IEEE Std 1003.1-2017) compatibility for the process model, file system semantics, IPC primitives, and socket API. The intent is practical compatibility: programs written for Linux using standard POSIX APIs should compile and run without modification.
+The OS targets broad POSIX.1-2017 (IEEE Std 1003.1-2017)[^posix-2017][^ieee-posix] compatibility for the process model, file system semantics, IPC primitives, and socket API. The intent is practical compatibility: programs written for Linux using standard POSIX APIs should compile and run without modification.
+
+## References
+
+- [The Open Group Base Specifications Issue 7 (POSIX.1-2017)][posix-2017]
+- [IEEE Std 1003.1-2017][ieee-posix]
+- [Linux man-pages — POSIX Conformance][linux-man-pages]
+- [musl libc — POSIX Conformance][musl-posix]
+
+[posix-2017]: https://pubs.opengroup.org/onlinepubs/9699919799/ "The Open Group Base Specifications Issue 7, 2018 edition"
+[ieee-posix]: https://ieeexplore.ieee.org/document/7894736 "IEEE Std 1003.1-2017"
+[linux-man-pages]: https://www.kernel.org/doc/man-pages/ "Linux man-pages project"
+[musl-posix]: https://musl.libc.org/ "musl libc - POSIX conformance"
 
 ## Conformance Table
 

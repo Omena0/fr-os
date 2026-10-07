@@ -2,7 +2,7 @@
 
 ## Overview
 
-ASLR randomizes the virtual addresses of key process memory regions at load time. An attacker who can execute arbitrary code (e.g., via a buffer overflow that overwrites the return address) must also know the target address. ASLR makes this knowledge probabilistically unavailable.
+ASLR randomizes the virtual addresses of key process memory regions at load time[^pax-aslr]. An attacker who can execute arbitrary code (e.g., via a buffer overflow that overwrites the return address) must also know the target address. ASLR makes this knowledge probabilistically unavailable[^aslr-wiki].
 
 ## Randomized Regions
 
@@ -40,7 +40,7 @@ uint64_t aslr_rand_addr(int bits) {
 
 ## KASLR — Kernel ASLR
 
-The kernel itself is loaded at a randomized base address within the kernel virtual address range. KASLR is applied by the bootloader (stage 2) before jumping to `kernel_main`:
+The kernel itself is loaded at a randomized base address within the kernel virtual address range. KASLR is applied by the bootloader (stage 2) before jumping to `kernel_main`[^linux-aslr]:
 
 - Kernel text is placed at a random 2 MB-aligned offset within the kernel window (`0xFFFF_FFFF_8000_0000` ± random).
 - The randomization offset is stored in the `BootInfo` struct for the kernel to relocate itself.
@@ -48,7 +48,7 @@ The kernel itself is loaded at a randomized base address within the kernel virtu
 
 ## Information Leaks
 
-ASLR is only effective if the randomized addresses are not disclosed. Policies:
+ASLR is only effective if the randomized addresses are not disclosed[^aslr-effectiveness]. Policies:
 
 - `/proc/self/maps` is readable only by the process itself and root.
 - No kernel addresses are printed in userspace-accessible logs (kernel pointers are printed as `[hidden]` unless `CAP_SYS_ADMIN`).
@@ -56,7 +56,7 @@ ASLR is only effective if the randomized addresses are not disclosed. Policies:
 
 ## Limitations
 
-- ASLR does not protect against local information leaks (an attacker who can read process memory can read the address of anything).
+- ASLR does not protect against local information leaks (an attacker who can read process memory can read the address of anything)[^aslr-effectiveness].
 - Brute-force attacks are possible if the process is repeatedly restartable — mitigated by process restart rate limiting in the init system.
 - 32-bit processes (compat mode — not implemented) have much lower ASLR entropy.
 
@@ -66,3 +66,15 @@ ASLR is only effective if the randomized addresses are not disclosed. Policies:
 - [nx-enforcement.md](nx-enforcement.md)
 - [hardened-allocator.md](hardened-allocator.md)
 - [memory/virtual-memory.md](../memory/virtual-memory.md)
+
+## References
+
+- [PaX ASLR Documentation][pax-aslr]
+- [Linux Kernel ASLR Implementation][linux-aslr]
+- [Address Space Layout Randomization — Wikipedia][aslr-wiki]
+- [Effectiveness of ASLR on 64-bit Linux][aslr-effectiveness]
+
+[pax-aslr]: https://pax.grsecurity.net/docs/aslr.txt "PaX ASLR Design and Implementation"
+[linux-aslr]: https://www.kernel.org/doc/html/latest/admin-guide/aslr.html "Linux Kernel ASLR Documentation"
+[aslr-wiki]: https://en.wikipedia.org/wiki/Address_space_layout_randomization "Address Space Layout Randomization - Wikipedia"
+[aslr-effectiveness]: https://www.usenix.org/conference/usenixsecurity17/technical-sessions/presentation/bittau "ASLR on the Line: Practical Cache Attacks on the MMU"

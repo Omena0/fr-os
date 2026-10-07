@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="/fr-os/">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Filesystem/dentry-cache — Fr OS</title>
+  <meta property="og:title" content="Filesystem/dentry-cache — Fr OS">
+  <meta name="description" content="Filesystem/dentry-cache — Fr OS documentation">
+  <meta property="og:description" content="Filesystem/dentry-cache — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="/fr-os/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/fr-os/style.css">
+  <link rel="stylesheet" href="/fr-os/fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="../index.html">Overview</a></li>
+    <li><a href="../architecture/overview.html">Architecture</a></li>
+    <li><a href="../architecture/memory-layout.html">Memory Layout</a></li>
+    <li><a href="../architecture/posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="../architecture/security-model.html">Security Model</a></li>
+    <li><a href="../architecture/performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="../bootloader/overview.html">Overview</a></li>
+    <li><a href="../bootloader/stage1.html">Stage 1</a></li>
+    <li><a href="../bootloader/stage2.html">Stage 2</a></li>
+    <li><a href="../bootloader/kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="../bootloader/memory-map.html">Memory Map</a></li>
+    <li><a href="../bootloader/serial-output.html">Serial Output</a></li>
+    <li><a href="../bootloader/build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="../kernel/overview.html">Overview</a></li>
+    <li><a href="../kernel/early-boot.html">Early Boot</a></li>
+    <li><a href="../kernel/interrupt-handling.html">Interrupts</a></li>
+    <li><a href="../kernel/context-switching.html">Context Switching</a></li>
+    <li><a href="../kernel/privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="../kernel/syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="../kernel/panic-system.html">Panic</a></li>
+    <li><a href="../kernel/logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="../memory/overview.html">Overview</a></li>
+    <li><a href="../memory/physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="../memory/buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="../memory/slab-allocator.html">SLAB</a></li>
+    <li><a href="../memory/virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="../memory/userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="../scheduling/overview.html">Overview</a></li>
+    <li><a href="../scheduling/mlfq.html">MLFQ</a></li>
+    <li><a href="../scheduling/realtime-scheduler.html">Realtime</a></li>
+    <li><a href="../scheduling/multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="../syscalls/overview.html">Overview</a></li>
+    <li><a href="../syscalls/dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="../syscalls/process-syscalls.html">Process</a></li>
+    <li><a href="../syscalls/memory-syscalls.html">Memory</a></li>
+    <li><a href="../syscalls/file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="../userspace/overview.html">Overview</a></li>
+    <li><a href="../userspace/libc.html">Fr Libc</a></li>
+    <li><a href="../userspace/process-model.html">Process Model</a></li>
+    <li><a href="../userspace/elf-loading.html">ELF Loading</a></li>
+    <li><a href="../userspace/init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Filesystem</a></li>
+    <li><a href="../networking/overview.html">Networking</a></li>
+    <li><a href="../ipc/overview.html">IPC</a></li>
+    <li><a href="../drivers/overview.html">Drivers</a></li>
+    <li><a href="../security/overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="../build/overview.html">Build Overview</a></li>
+    <li><a href="../build/toolchain.html">Toolchain</a></li>
+    <li><a href="../build/makefile-structure.html">Makefile</a></li>
+    <li><a href="../build/qemu-setup.html">QEMU</a></li>
+    <li><a href="../build/testing.html">Testing</a></li>
+    <li><a href="../debugging/overview.html">Debugging</a></li>
+    <li><a href="../debugging/serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>Dentry Cache</h1>
+<h2>Overview</h2>
+<p>The dentry cache (dcache) caches directory entries — the associations between filenames and inodes — to avoid repeated directory traversals and disk reads for path resolution.</p>
+<p>Every path lookup (<code>open</code>, <code>stat</code>, <code>mkdir</code>, <code>rename</code>, etc.) traverses the dentry tree. Without caching, each component of a path would require a disk read. The dcache makes path resolution O(1) for cached paths.</p>
+<h2>Structure</h2>
+<p>The dcache is a hash table indexed by <code>(parent_dentry *, filename_hash)</code>:</p>
+<pre><code class="language-c"><span class="hl-keyword-directive-define">#define</span> <span class="hl-constant-macro">DCACHE_HASH_BITS</span> <span class="hl-number">14</span>
+<span class="hl-keyword-directive-define">#define</span> <span class="hl-constant-macro">DCACHE_HASH_SIZE</span> <span class="hl-variable">(</span><span class="hl-number">1</span><span class="hl-punctuation-bracket"> </span><span class="hl-operator">&lt;&lt;</span><span class="hl-punctuation-bracket"> </span><span class="hl-constant">DCACHE_HASH_BITS</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-bracket">  </span><span class="hl-comment">// 16384 buckets</span>
+
+<span class="hl-keyword-type">struct</span> <span class="hl-type">hlist_head</span> <span class="hl-variable">dcache_table</span><span class="hl-punctuation-bracket">[</span><span class="hl-constant">DCACHE_HASH_SIZE</span><span class="hl-punctuation-bracket">]</span><span class="hl-punctuation-delimiter">;</span>
+<span class="hl-comment">// Per-bucket RCU-protected (reads lock-free, writes use dcache_lock)</span>
+</code></pre>
+<p>All unused dentries are also maintained on a global LRU list for reclamation.</p>
+<h2>Dentry States</h2>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th><code>d_inode</code></th>
+<th><code>d_refcount</code></th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Used</td>
+<td>Non-NULL</td>
+<td>&gt; 0</td>
+<td>Referenced by an open file or path in use</td>
+</tr>
+<tr>
+<td>Unused (positive)</td>
+<td>Non-NULL</td>
+<td>0</td>
+<td>Cached but no current users; reclaimable</td>
+</tr>
+<tr>
+<td>Negative</td>
+<td>NULL</td>
+<td>0</td>
+<td>Cached non-existence; lookup returned ENOENT</td>
+</tr>
+<tr>
+<td>In-use root</td>
+<td>Non-NULL</td>
+<td>&gt; 0</td>
+<td>Root dentry of a mounted filesystem</td>
+</tr>
+</tbody>
+</table>
+<p>Negative dentries cache the fact that a filename does not exist. This avoids repeated disk lookups for names like <code>/usr/lib/nonexistent.so</code> that are probed repeatedly.</p>
+<h2>Lookup</h2>
+<pre><code class="language-c"><span class="hl-keyword-type">struct</span> <span class="hl-type">dentry</span> <span class="hl-operator">*</span><span class="hl-function">dcache_lookup</span><span class="hl-punctuation-bracket">(</span><span class="hl-keyword-type">struct</span> <span class="hl-type">dentry</span> <span class="hl-operator">*</span><span class="hl-variable">parent</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-keyword-modifier">const</span> <span class="hl-type-builtin">char</span> <span class="hl-operator">*</span><span class="hl-variable">name</span><span class="hl-punctuation-delimiter">,</span> <span class="hl-type-builtin">uint32_t</span> <span class="hl-variable-parameter">len</span><span class="hl-punctuation-bracket">)</span><span class="hl-punctuation-delimiter">;</span>
+</code></pre>
+<ol>
+<li>Compute hash of <code>(parent, name, len)</code>.</li>
+<li>RCU read lock.</li>
+<li>Search the hash bucket for a matching dentry (same parent pointer and name).</li>
+<li>If found: increment refcount, RCU unlock, return.</li>
+<li>If not found: RCU unlock. Call <code>parent-&gt;d_inode-&gt;i_ops-&gt;lookup(parent-&gt;d_inode, name)</code>. Allocate and insert a new dentry (positive or negative). Return.</li>
+</ol>
+<h2>Insertion and Invalidation</h2>
+<p>When a file is created: a positive dentry is inserted.
+When a file is deleted: the dentry is <strong>invalidated</strong> (set to negative). Any cached positive dentry pointing to the deleted inode is also invalidated.
+When a file is renamed: the old dentry is invalidated; a new dentry is inserted for the new name.</p>
+<p>Invalidation is propagated to all CPUs via the dcache lock and (for RCU readers) a grace period before the dentry memory is freed.</p>
+<h2>RCU-Based Read Path</h2>
+<p>Dentry cache reads use the RCU (Read-Copy-Update) mechanism:</p>
+<ul>
+<li>Readers: acquire an RCU read lock (just a memory barrier + preemption disable). No spinning, no blocking.</li>
+<li>Writers: hold <code>dcache_lock</code> (a global spinlock; future: per-bucket). After modifying, wait for an RCU grace period before freeing old dentries.</li>
+</ul>
+<p>This allows concurrent path resolution on all CPUs without lock contention, even on 18+ CPUs.</p>
+<h2>Reclamation</h2>
+<p>The dcache LRU is shrunk under memory pressure. The reclamation path:</p>
+<ol>
+<li>Remove the dentry from the LRU (oldest unused dentries first).</li>
+<li>If the dentry has children (it is a directory with cached children): recurse, evicting children first.</li>
+<li>Decrement the inode's refcount via <code>iput</code>.</li>
+<li>Free the <code>struct dentry</code> via the dentry slab cache.</li>
+</ol>
+<h2>Mount Point Handling</h2>
+<p>When a filesystem is mounted on a directory:</p>
+<ul>
+<li>The directory's dentry is marked <code>DCACHE_MOUNTED</code>.</li>
+<li>Path traversal through a <code>DCACHE_MOUNTED</code> dentry switches to the mounted filesystem's root dentry.</li>
+<li>On unmount: the <code>DCACHE_MOUNTED</code> flag is cleared; the original directory's dentry is restored.</li>
+</ul>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="inode-cache.html">inode-cache.md</a></li>
+<li><a href="page-cache.html">page-cache.md</a></li>
+<li><a href="vfs-layer.html">vfs-layer.md</a></li>
+<li><a href="mount-system.html">mount-system.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="/fr-os/script.js" defer></script>
+</body>
+</html>

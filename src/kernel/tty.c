@@ -264,6 +264,8 @@ static void tty_in_push(char c)
 
 	if (wake)
 		sched_wake(wake);
+
+	console_putc(c);
 }
 
 /*
@@ -492,7 +494,22 @@ size_t tty_read(char *buf, size_t count, bool block)
 		if (n == 0 && me) {
 			tty_waiter = me;
 			n = ring_pop(&in_ring, (u8 *)buf, count);
+			if (n != 0) {
+				tty_waiter = NULL;
+				spinlock_unlock_irqrestore(&in_lock, flags);
+				return n;
+			}
+			/*
+			 * Still empty. Keep tty_waiter set across the unlock and
+			 * the block so an interrupt that delivers a byte after
+			 * the second ring_pop sees a valid waiter and wakes us.
+			 * Clearing it before sched_block_current() is the race
+			 * that leaves a task blocked forever on the first byte.
+			 */
+			spinlock_unlock_irqrestore(&in_lock, flags);
+			sched_block_current();
 			tty_waiter = NULL;
+			continue;
 		}
 		spinlock_unlock_irqrestore(&in_lock, flags);
 
@@ -939,7 +956,8 @@ void tty_init(void)
 	 */	ps2_flush();
 
 	if (ps2_write_port(PS2_CMD, PS2_CMD_ENABLE_KBD))
-		ps2_expect_ack(PS2_CMD_ENABLE_KBD, 0xFA);
+		/* 0xAE (enable keyboard interface) does not generate a response. */
+		;
 
 	ps2_flush();
 

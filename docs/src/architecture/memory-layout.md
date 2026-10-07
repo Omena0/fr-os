@@ -11,7 +11,7 @@ and `src/kernel/process.c`.
 
 ## Physical Address Space
 
-The physical address space layout is established by the BIOS E820 memory map and
+The physical address space layout is established by the BIOS E820 memory map[^acpi-e820] and
 passed to the kernel by stage 2 in `struct bootinfo`.
 
 ```
@@ -88,7 +88,7 @@ vmm: direct map 0-4 GiB, 2 MiB pages      <- bit 26 clear
 
 `map_direct_map()` picks between them at `src/kernel/vmm.c:221`: 1 GiB pages as
 PDPT entries with `PS=1` when `cpu_features.has_1gb_pages` is set, and 2 MiB
-pages through a PD otherwise. The 2 MiB path is the fallback and the 4 KiB path
+pages through a PD otherwise[^intel-sdm-vol3a][^amd-apm-vol2]. The 2 MiB path is the fallback and the 4 KiB path
 is deliberately not used at all — a 4 GiB machine mapped with 4 KiB pages needs
 2048 page-table pages and 2048 TLB entries, so almost every access to ordinary
 memory would be a page walk; with 2 MiB pages it needs four and four, and with
@@ -130,7 +130,8 @@ translates as:
 
 The window is 16 MiB, 4 KiB pages, reached through **PML4 511 / PDPT 510**. The
 4 KiB granularity is forced by geometry, not preference: `0x100000` is not 2 MiB
-aligned, so the first 2 MiB cannot be a 2 MiB page.
+aligned, so the first 2 MiB cannot be a 2 MiB page. This layout follows the
+System V AMD64 ABI[^sysv-abi-memory] for kernel virtual address space.
 
 ## Kernel Heap
 
@@ -171,3 +172,15 @@ are listed so nobody writes code against them.
 - [memory/virtual-memory.md](../memory/virtual-memory.md)
 - [memory/physical-allocator.md](../memory/physical-allocator.md)
 - [security/aslr.md](../security/aslr.md)
+
+## References
+
+- [Intel 64 and IA-32 Architectures Software Developer's Manual, Volume 3A — Paging][intel-sdm-vol3a]
+- [AMD64 Architecture Programmer's Manual, Volume 2 — System Programming][amd-apm-vol2]
+- [System V Application Binary Interface AMD64 Architecture Processor Supplement — Memory Layout][sysv-abi-memory]
+- [Linux Kernel Documentation — Memory Management][linux-mm]
+
+[intel-sdm-vol3a]: https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html#vol3a "Intel SDM Volume 3A: System Programming Guide, Part 1"
+[amd-apm-vol2]: https://www.amd.com/en/developer/architecture-programmer-manuals.html "AMD64 Architecture Programmer's Manual Volume 2"
+[sysv-abi-memory]: https://gitlab.com/x86-psABIs/x86-64-ABI/-/blob/master/abi.md#memory-layout "System V AMD64 ABI - Memory Layout"
+[linux-mm]: https://www.kernel.org/doc/html/latest/core-api/memory-allocation.html "Linux Kernel Memory Management API"

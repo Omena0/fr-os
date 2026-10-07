@@ -24,6 +24,18 @@ the bootloader and the firmware are still fine. The kernel's banner and its pani
 path therefore print **Fr Core**, not Fr OS. `KERNEL_VERSION_STRING` is
 `FR_CORE_NAME " " KERNEL_VERSION`.
 
+## References
+
+- [Intel 64 and IA-32 Architectures Software Developer's Manual][intel-sdm]
+- [AMD64 Architecture Programmer's Manual][amd-apm]
+- [POSIX.1-2017 (IEEE Std 1003.1-2017)][posix-2017]
+- [System V Application Binary Interface AMD64 Architecture Processor Supplement][sysv-abi]
+
+[intel-sdm]: https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html "Intel 64 and IA-32 Architectures Software Developer's Manual"
+[amd-apm]: https://www.amd.com/en/developer/architecture-programmer-manuals.html "AMD64 Architecture Programmer's Manual"
+[posix-2017]: https://pubs.opengroup.org/onlinepubs/9699919799/ "The Open Group Base Specifications Issue 7, 2018 edition (POSIX.1-2017)"
+[sysv-abi]: https://gitlab.com/x86-psABIs/x86-64-ABI/-/blob/master/abi.md "System V AMD64 ABI"
+
 ## Build and run
 
 ```sh

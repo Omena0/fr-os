@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="/fr-os/">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Syscalls/memory-syscalls — Fr OS</title>
+  <meta property="og:title" content="Syscalls/memory-syscalls — Fr OS">
+  <meta name="description" content="Syscalls/memory-syscalls — Fr OS documentation">
+  <meta property="og:description" content="Syscalls/memory-syscalls — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="/fr-os/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/fr-os/style.css">
+  <link rel="stylesheet" href="/fr-os/fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="../index.html">Overview</a></li>
+    <li><a href="../architecture/overview.html">Architecture</a></li>
+    <li><a href="../architecture/memory-layout.html">Memory Layout</a></li>
+    <li><a href="../architecture/posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="../architecture/security-model.html">Security Model</a></li>
+    <li><a href="../architecture/performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="../bootloader/overview.html">Overview</a></li>
+    <li><a href="../bootloader/stage1.html">Stage 1</a></li>
+    <li><a href="../bootloader/stage2.html">Stage 2</a></li>
+    <li><a href="../bootloader/kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="../bootloader/memory-map.html">Memory Map</a></li>
+    <li><a href="../bootloader/serial-output.html">Serial Output</a></li>
+    <li><a href="../bootloader/build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="../kernel/overview.html">Overview</a></li>
+    <li><a href="../kernel/early-boot.html">Early Boot</a></li>
+    <li><a href="../kernel/interrupt-handling.html">Interrupts</a></li>
+    <li><a href="../kernel/context-switching.html">Context Switching</a></li>
+    <li><a href="../kernel/privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="../kernel/syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="../kernel/panic-system.html">Panic</a></li>
+    <li><a href="../kernel/logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="../memory/overview.html">Overview</a></li>
+    <li><a href="../memory/physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="../memory/buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="../memory/slab-allocator.html">SLAB</a></li>
+    <li><a href="../memory/virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="../memory/userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="../scheduling/overview.html">Overview</a></li>
+    <li><a href="../scheduling/mlfq.html">MLFQ</a></li>
+    <li><a href="../scheduling/realtime-scheduler.html">Realtime</a></li>
+    <li><a href="../scheduling/multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="process-syscalls.html">Process</a></li>
+    <li><a href="syscalls/memory-syscalls.html" class="active">Memory</a></li>
+    <li><a href="file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="../userspace/overview.html">Overview</a></li>
+    <li><a href="../userspace/libc.html">Fr Libc</a></li>
+    <li><a href="../userspace/process-model.html">Process Model</a></li>
+    <li><a href="../userspace/elf-loading.html">ELF Loading</a></li>
+    <li><a href="../userspace/init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="../filesystem/overview.html">Filesystem</a></li>
+    <li><a href="../networking/overview.html">Networking</a></li>
+    <li><a href="../ipc/overview.html">IPC</a></li>
+    <li><a href="../drivers/overview.html">Drivers</a></li>
+    <li><a href="../security/overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="../build/overview.html">Build Overview</a></li>
+    <li><a href="../build/toolchain.html">Toolchain</a></li>
+    <li><a href="../build/makefile-structure.html">Makefile</a></li>
+    <li><a href="../build/qemu-setup.html">QEMU</a></li>
+    <li><a href="../build/testing.html">Testing</a></li>
+    <li><a href="../debugging/overview.html">Debugging</a></li>
+    <li><a href="../debugging/serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>Memory Syscalls</h1>
+<h2>Syscall Table: Memory Management (Numbers 32–38)</h2>
+<table>
+<thead>
+<tr>
+<th>Number</th>
+<th>Name</th>
+<th>Signature</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>32</td>
+<td><code>sys_mmap</code></td>
+<td><code>void <em>sys_mmap(void </em>addr, size_t len, int prot, int flags, int fd, off_t offset)</code></td>
+<td>Map memory or file into address space</td>
+</tr>
+<tr>
+<td>33</td>
+<td><code>sys_munmap</code></td>
+<td><code>int sys_munmap(void *addr, size_t len)</code></td>
+<td>Remove mapping</td>
+</tr>
+<tr>
+<td>34</td>
+<td><code>sys_mprotect</code></td>
+<td><code>int sys_mprotect(void *addr, size_t len, int prot)</code></td>
+<td>Change protection flags on a mapping</td>
+</tr>
+<tr>
+<td>35</td>
+<td><code>sys_mremap</code></td>
+<td><code>void <em>sys_mremap(void </em>old_addr, size_t old_size, size_t new_size, int flags)</code></td>
+<td>Resize or move a mapping</td>
+</tr>
+<tr>
+<td>36</td>
+<td><code>sys_madvise</code></td>
+<td><code>int sys_madvise(void *addr, size_t len, int advice)</code></td>
+<td>Hint to the kernel about intended memory use</td>
+</tr>
+<tr>
+<td>37</td>
+<td><code>sys_brk</code></td>
+<td><code>void <em>sys_brk(void </em>new_brk)</code></td>
+<td>Extend or shrink the heap (data segment)</td>
+</tr>
+<tr>
+<td>38</td>
+<td><code>sys_mlock</code></td>
+<td><code>int sys_mlock(void *addr, size_t len)</code></td>
+<td>Lock pages in memory (prevent swap)</td>
+</tr>
+</tbody>
+</table>
+<h2><code>sys_mmap</code> Flags</h2>
+<table>
+<thead>
+<tr>
+<th><code>flags</code></th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>MAP_PRIVATE</code></td>
+<td>Copy-on-write; changes not visible to other mappings</td>
+</tr>
+<tr>
+<td><code>MAP_SHARED</code></td>
+<td>Changes visible to other processes mapping the same object</td>
+</tr>
+<tr>
+<td><code>MAP_ANONYMOUS</code></td>
+<td>Not backed by a file (ignore <code>fd</code>)</td>
+</tr>
+<tr>
+<td><code>MAP_FIXED</code></td>
+<td>Map at exactly <code>addr</code> (fail if cannot)</td>
+</tr>
+<tr>
+<td><code>MAP_HUGETLB</code></td>
+<td>Use 2 MB huge pages</td>
+</tr>
+<tr>
+<td><code>MAP_GROWSDOWN</code></td>
+<td>For stack mappings (auto-expand downward)</td>
+</tr>
+<tr>
+<td><code>MAP_POPULATE</code></td>
+<td>Pre-fault pages (load immediately)</td>
+</tr>
+</tbody>
+</table>
+<h2><code>sys_mmap</code> Protection Flags (<code>prot</code>)</h2>
+<table>
+<thead>
+<tr>
+<th><code>prot</code></th>
+<th>Page table bits</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PROT_NONE</code></td>
+<td>No access (P=0)</td>
+</tr>
+<tr>
+<td><code>PROT_READ</code></td>
+<td>Read only (U/S=user, W=0)</td>
+</tr>
+<tr>
+<td><code>PROT_WRITE</code></td>
+<td>Read+write (U/S=user, W=1)</td>
+</tr>
+<tr>
+<td><code>PROT_EXEC</code></td>
+<td>Read+execute (NX=0)</td>
+</tr>
+</tbody>
+</table>
+<h2><code>sys_madvise</code> Advice Values</h2>
+<table>
+<thead>
+<tr>
+<th>Advice</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>MADV_NORMAL</code></td>
+<td>Default behavior</td>
+</tr>
+<tr>
+<td><code>MADV_SEQUENTIAL</code></td>
+<td>Enable aggressive read-ahead</td>
+</tr>
+<tr>
+<td><code>MADV_RANDOM</code></td>
+<td>Disable read-ahead</td>
+</tr>
+<tr>
+<td><code>MADV_WILLNEED</code></td>
+<td>Pre-fault the region now</td>
+</tr>
+<tr>
+<td><code>MADV_DONTNEED</code></td>
+<td>Kernel may evict these pages</td>
+</tr>
+<tr>
+<td><code>MADV_FREE</code></td>
+<td>Pages can be reclaimed but will be zeroed on next access</td>
+</tr>
+<tr>
+<td><code>MADV_HUGEPAGE</code></td>
+<td>Enable transparent huge pages for this region</td>
+</tr>
+<tr>
+<td><code>MADV_NOHUGEPAGE</code></td>
+<td>Disable THP for this region</td>
+</tr>
+</tbody>
+</table>
+<h2><code>sys_brk</code> Implementation</h2>
+<ol>
+<li>If <code>new_brk == 0</code>: return current <code>brk</code> (heap end).</li>
+<li>If <code>new_brk &gt; current_brk</code> (expand): round up to page boundary. Check against <code>RLIMIT_DATA</code> and overcommit policy. Map anonymous pages from current <code>brk</code> to <code>new_brk</code> (<code>PROT_READ | PROT_WRITE | MAP_ANONYMOUS | MAP_PRIVATE</code>).</li>
+<li>If <code>new_brk &lt; current_brk</code> (shrink): unmap pages from <code>new_brk</code> to old <code>brk</code>.</li>
+<li>Update <code>current-&gt;mm-&gt;brk</code>. Return new <code>brk</code>.</li>
+</ol>
+<h2><code>sys_mlock</code> Requirements</h2>
+<p>Locking pages in memory (<code>mlock</code>) prevents them from being swapped out:
+- Required by real-time processes, cryptographic key storage, and DMA buffers.
+- Requires <code>CAP_IPC_LOCK</code> or a non-zero <code>RLIMIT_MEMLOCK</code> allowance.
+- System-wide locked page limit: enforced to prevent DoS (one process locking all physical memory).</p>
+<h2>Argument Validation</h2>
+<p>All memory syscall arguments are validated:
+- <code>addr</code>: must be page-aligned (or rounded down for mmap).
+- <code>len</code>: must be &gt; 0 and &lt; a reasonable maximum (e.g., <code>SIZE_MAX / 2</code>).
+- <code>prot</code>: only known bits may be set.
+- <code>flags</code>: only known bits may be set; incompatible combinations rejected (<code>MAP_SHARED | MAP_PRIVATE</code>).
+- <code>fd + offset</code>: for file-backed mappings, <code>fd</code> must be a valid open file with appropriate permissions.</p>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="process-syscalls.html">process-syscalls.md</a></li>
+<li><a href="file-syscalls.html">file-syscalls.md</a></li>
+<li><a href="../memory/virtual-memory.html">memory/virtual-memory.md</a></li>
+<li><a href="../memory/userspace-malloc.html">memory/userspace-malloc.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="/fr-os/script.js" defer></script>
+</body>
+</html>

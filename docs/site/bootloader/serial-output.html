@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en" data-site-prefix="/fr-os/">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bootloader/serial-output — Fr OS</title>
+  <meta property="og:title" content="Bootloader/serial-output — Fr OS">
+  <meta name="description" content="Bootloader/serial-output — Fr OS documentation">
+  <meta property="og:description" content="Bootloader/serial-output — Fr OS documentation">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Fr OS Docs">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="/fr-os/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/fr-os/style.css">
+  <link rel="stylesheet" href="/fr-os/fonts.css" media="print" onload="this.media='all'">
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <button class="menu-toggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">
+        <path d="M3 12h18M3 6h18M3 18h18"/>
+      </svg>
+    </button>
+    <div class="header-brand-row">
+      <a href="index.html" class="header-brand">
+          <span class="logo">F</span>
+          Fr OS
+      </a>
+      <div class="version-selector-wrap">  <select id="version-selector" class="version-selector" aria-label="Select version">    {config.get("_version_options", "")}  </select></div>
+    </div>
+    <div class="header-search">
+      <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24" aria-hidden="true">  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="header-search" placeholder="Search docs… (Ctrl+K)" autocomplete="off"><div id="search-results" class="search-results"></div>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html">Docs</a>
+    </nav>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+<div class="search-box">
+  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" aria-hidden="true">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+  <input type="text" id="sidebar-search" placeholder="Search docs…">
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-os">Fr OS</div>
+  <ul class="sidebar-links">
+    <li><a href="../index.html">Overview</a></li>
+    <li><a href="../architecture/overview.html">Architecture</a></li>
+    <li><a href="../architecture/memory-layout.html">Memory Layout</a></li>
+    <li><a href="../architecture/posix-compliance.html">POSIX Compliance</a></li>
+    <li><a href="../architecture/security-model.html">Security Model</a></li>
+    <li><a href="../architecture/performance-mandate.html">Performance Mandate</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading" data-section="fr-boot">Fr Boot</div>
+  <ul class="sidebar-links">
+    <li><a href="overview.html">Overview</a></li>
+    <li><a href="stage1.html">Stage 1</a></li>
+    <li><a href="stage2.html">Stage 2</a></li>
+    <li><a href="kernel-handoff.html">Kernel Handoff</a></li>
+    <li><a href="memory-map.html">Memory Map</a></li>
+    <li><a href="bootloader/serial-output.html" class="active">Serial Output</a></li>
+    <li><a href="build.html">Build</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-core">Fr Core</div>
+  <ul class="sidebar-links">
+    <li><a href="../kernel/overview.html">Overview</a></li>
+    <li><a href="../kernel/early-boot.html">Early Boot</a></li>
+    <li><a href="../kernel/interrupt-handling.html">Interrupts</a></li>
+    <li><a href="../kernel/context-switching.html">Context Switching</a></li>
+    <li><a href="../kernel/privilege-levels.html">Privilege Levels</a></li>
+    <li><a href="../kernel/syscall-abi.html">Syscall ABI</a></li>
+    <li><a href="../kernel/panic-system.html">Panic</a></li>
+    <li><a href="../kernel/logging.html">Logging</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="memory">Memory</div>
+  <ul class="sidebar-links">
+    <li><a href="../memory/overview.html">Overview</a></li>
+    <li><a href="../memory/physical-allocator.html">Physical Allocator</a></li>
+    <li><a href="../memory/buddy-allocator.html">Buddy Allocator</a></li>
+    <li><a href="../memory/slab-allocator.html">SLAB</a></li>
+    <li><a href="../memory/virtual-memory.html">Virtual Memory</a></li>
+    <li><a href="../memory/userspace-malloc.html">Userspace malloc</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="scheduling">Scheduling</div>
+  <ul class="sidebar-links">
+    <li><a href="../scheduling/overview.html">Overview</a></li>
+    <li><a href="../scheduling/mlfq.html">MLFQ</a></li>
+    <li><a href="../scheduling/realtime-scheduler.html">Realtime</a></li>
+    <li><a href="../scheduling/multicore-overview.html">Multicore</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="syscalls">Syscalls</div>
+  <ul class="sidebar-links">
+    <li><a href="../syscalls/overview.html">Overview</a></li>
+    <li><a href="../syscalls/dispatch-path.html">Dispatch Path</a></li>
+    <li><a href="../syscalls/process-syscalls.html">Process</a></li>
+    <li><a href="../syscalls/memory-syscalls.html">Memory</a></li>
+    <li><a href="../syscalls/file-syscalls.html">File</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="fr-libc-and-fr-userland">Fr Libc and Fr Userland</div>
+  <ul class="sidebar-links">
+    <li><a href="../userspace/overview.html">Overview</a></li>
+    <li><a href="../userspace/libc.html">Fr Libc</a></li>
+    <li><a href="../userspace/process-model.html">Process Model</a></li>
+    <li><a href="../userspace/elf-loading.html">ELF Loading</a></li>
+    <li><a href="../userspace/init-system.html">Fr Init</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="designed-not-built">Designed, Not Built</div>
+  <ul class="sidebar-links">
+    <li><a href="../filesystem/overview.html">Filesystem</a></li>
+    <li><a href="../networking/overview.html">Networking</a></li>
+    <li><a href="../ipc/overview.html">IPC</a></li>
+    <li><a href="../drivers/overview.html">Drivers</a></li>
+    <li><a href="../security/overview.html">Security</a></li>
+  </ul>
+</div>
+<div class="sidebar-section">
+  <div class="sidebar-heading collapsed" data-section="building-and-debugging">Building and Debugging</div>
+  <ul class="sidebar-links">
+    <li><a href="../build/overview.html">Build Overview</a></li>
+    <li><a href="../build/toolchain.html">Toolchain</a></li>
+    <li><a href="../build/makefile-structure.html">Makefile</a></li>
+    <li><a href="../build/qemu-setup.html">QEMU</a></li>
+    <li><a href="../build/testing.html">Testing</a></li>
+    <li><a href="../debugging/overview.html">Debugging</a></li>
+    <li><a href="../debugging/serial-diagnostics.html">Serial Diagnostics</a></li>
+  </ul>
+</div>
+  </aside>
+  <div class="sidebar-overlay"></div>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content">
+      
+      <h1>Bootloader Serial Output</h1>
+<h2>Purpose</h2>
+<p>The bootloader emits diagnostic messages to the serial port (COM1, <code>0x3F8</code>) during the boot process. This output is visible in QEMU via <code>-serial stdio</code> or <code>-serial file:boot.log</code> and is essential for debugging boot failures before the kernel's own logging is active.</p>
+<h2>Serial Port Initialization</h2>
+<p>Stage 2 initializes COM1 before emitting any output:</p>
+<pre><code>Baud rate: see below — it is not the same on every stage
+Data bits: 8
+Stop bits: 1
+Parity:    None
+FIFO:      Enabled (trigger level 14 bytes)
+
+| Component | Divisor | Baud |
+|---|---|---|
+| Fr Boot stage 1 | 1 | 115200 |
+| Fr Boot stage 2 | 3 | 38400 |
+| Fr Core serial driver | 1 | 115200 |
+
+All three drive COM1 on the same wire at three different speeds, so a real serial
+capture is a mixture of two baud rates. QEMU's `-chardev file` ignores the rate
+entirely, which is why nobody has noticed. Fixing it means picking one rate and
+using it everywhere; the kernel should keep 115200 because that is what stage 1
+already established.
+</code></pre>
+<p>Initialization sequence (direct port I/O):
+1. Disable interrupts on UART (<code>IER = 0x00</code>).
+2. Set baud rate divisor (<code>DLAB=1</code>, DLL=1, DLH=0` for 115200 at 1.8432 MHz clock).
+3. Set 8N1 line control (<code>LCR = 0x03</code>).
+4. Enable FIFO (<code>FCR = 0xC7</code>).
+5. Set modem control (<code>MCR = 0x0B</code>).
+6. Clear DLAB.</p>
+<h2>Output Format</h2>
+<p>Each message is prefixed with a stage identifier:</p>
+<pre><code>[BOOT1] Stage 1 loaded, jumping to stage 2
+[BOOT2] A20 enabled
+[BOOT2] E820 map: 6 entries
+[BOOT2] Entering protected mode
+[BOOT2] Entering long mode
+[BOOT2] Kernel ELF loaded at phys 0x0010_0000, entry 0xFFFF_FFFF_8000_0000
+[BOOT2] Handing off to kernel
+</code></pre>
+<h2>Error Output</h2>
+<p>Boot errors emit a descriptive message and halt:</p>
+<pre><code>[BOOT1] ERROR: disk read failed (status=0x01)
+[BOOT2] ERROR: A20 enable failed
+[BOOT2] ERROR: ELF magic mismatch
+[BOOT2] ERROR: kernel segment load out of bounds
+</code></pre>
+<h2>Relationship to Kernel Logging</h2>
+<p>Once <code>kernel_main</code> is entered, the bootloader serial output path is no longer used. The kernel initializes its own serial logging subsystem (<code>klog_serial_init</code>) independently. There is no shared state between the two serial output implementations.</p>
+<p>The kernel serial logger supports log levels (DEBUG, INFO, WARN, ERROR, PANIC) and timestamps. See <a href="../kernel/logging.html">kernel/logging.md</a>.</p>
+<h2>QEMU Configuration</h2>
+<pre><code class="language-bash"><span class="hl-comment"># View serial output on stdout:</span>
+<span class="hl-function-call">qemu-system-x86_64</span> <span class="hl-variable-parameter">-serial</span> <span class="hl-variable-parameter">stdio</span> <span class="hl-variable-parameter">...</span>
+
+<span class="hl-comment"># Save serial output to a file:</span>
+<span class="hl-function-call">qemu-system-x86_64</span> <span class="hl-variable-parameter">-serial</span> <span class="hl-variable-parameter">file:serial.log</span> <span class="hl-variable-parameter">...</span>
+
+<span class="hl-comment"># Use virtual serial port accessible via telnet:</span>
+<span class="hl-function-call">qemu-system-x86_64</span> <span class="hl-variable-parameter">-serial</span> <span class="hl-variable-parameter">tcp::4444,server,nowait</span> <span class="hl-variable-parameter">...</span>
+</code></pre>
+<h2>Related Documents</h2>
+<ul>
+<li><a href="overview.html">overview.md</a></li>
+<li><a href="stage2.html">stage2.md</a></li>
+<li><a href="../kernel/logging.html">kernel/logging.md</a></li>
+<li><a href="../build/qemu-setup.html">build/qemu-setup.md</a></li>
+</ul>
+    </div>
+    <footer class="site-footer">
+      &copy; 2026 Omena0 &middot; Fr OS Documentation
+    </footer>
+  </main>
+
+  <!-- Back to top -->
+  <button class="back-to-top" aria-label="Back to top">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path d="M18 15l-6-6-6 6"/>
+      </svg>
+    </button>
+
+    
+    <script id="code-refs-data" type="application/json">[]</script>
+    <script id="search-config" type="application/json">{"pages": true, "titles": true, "headings": true, "content": true, "symbols": true, "files": true}</script>
+    <script id="features-config" type="application/json">{"backlinks": true, "related": true, "auto_link": true, "versioning": true, "search": true, "code_references": true, "link_preview": true, "code_highlighting": true, "blockquotes": true, "ext_tags": true, "inline_copy": true}</script>
+    <script id="custom-tags-config" type="application/json">{"ext": {"label": "Extensions", "display": "ext", "class": "ext-tag"}}</script>
+    <script src="/fr-os/script.js" defer></script>
+</body>
+</html>

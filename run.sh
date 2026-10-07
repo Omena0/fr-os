@@ -2,6 +2,17 @@
 #
 # run.sh — boot the OS image under QEMU.
 #
+# Interactive use (default): QEMU runs in the foreground and takes over the
+# terminal. Characters you type are echoed by the kernel, and the REPL at
+# Fr Init> accepts commands like `help` and `run hello`. To return to the
+# shell, close the QEMU terminal or send SIGTERM from another window.
+# Ctrl+C is forwarded to the guest as a byte; the OS treats it as an
+# aborted command rather than an exit request.
+#
+# Automated / background use: set RUN_TIMEOUT=N (seconds). QEMU is then
+# backgrounded, the serial log is written to $LOG, and the script exits
+# after the timeout. Input is not accepted in background mode.
+#
 # The defaults are tuned for the reference machine (Intel Core Ultra 5 135H,
 # Lunar Lake) but degrade gracefully: without KVM the same command runs under
 # TCG, just slowly, and without an X display the display is dropped entirely
@@ -85,7 +96,7 @@ mkdir -p "$(dirname "$LOG")"
 # LOG= change what is booted and where the serial log lands, FORCE_TCG=1 pins
 # emulation, SMP=N is honoured for experimentation only, and HEADLESS=1 keeps
 # QEMU off the display.
-RUN_TIMEOUT="${RUN_TIMEOUT:-30}"
+RUN_TIMEOUT="${RUN_TIMEOUT:-}"
 
 # acpi=off: the kernel has no ACPI or power-management support yet, so the
 # machine's default ACPI tables would only produce interrupt storms the kernel
@@ -148,14 +159,23 @@ fi
 # logfile= is the documented way to get both, and it is a copy rather than a
 # second consumer, so neither sink can starve the other.
 #
-# signal=off stops QEMU installing its own Ctrl-C handler, so ^C reaches this
-# script and takes the drain path below instead of killing QEMU mid-write and
-# truncating the log. chardev stdio is used rather than `-serial mon:stdio`
-# because mon: multiplexes the monitor onto the same stream, which corrupts the
-# log with escape sequences whenever a key is pressed.
+# signal=off stops QEMU installing its own Ctrl-C handler. For interactive
+# use, leave it off so the kernel sees Ctrl+C as byte 0x03 (the OS handles
+# it as an aborted command). To exit QEMU, close the terminal window or
+# send SIGTERM from another shell. For automated runs, signal handling is
+# irrelevant because QEMU is backgrounded.
+#
+# mux=on makes the stdio chardev bidirectional so input from the terminal
+# reaches the guest's COM1 receive interrupt.
 QEMU_ARGS+=(
-	-chardev stdio,id=ser0,signal=off,logfile="$LOG"
+	-chardev stdio,id=ser0,signal=off
 	-serial chardev:ser0
+)
+
+# Debug console for port 0xE9 output (kernel markers)
+DEBUG_LOG="${LOG%.log}.debug"
+QEMU_ARGS+=(
+	-debugcon "file:$DEBUG_LOG"
 )
 
 # A graphical display only when there is somewhere to put it. The kernel drives
@@ -186,6 +206,7 @@ if [ "${1:-}" = "--gdb" ]; then
 	note "GDB stub listening on 127.0.0.1:1234"
 	note "in another shell, run: gdb build/kernel.elf"
 	QEMU_ARGS+=(-s -S)
+	shift
 fi
 
 mkdir -p build
@@ -235,6 +256,13 @@ cleanup() {
 trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM
 trap cleanup EXIT
+
+# Interactive by default: QEMU runs in the foreground so the stdio chardev
+# receives terminal input. Agents and CI can opt into background mode with
+# RUN_TIMEOUT=N, which still logs to $LOG but does not accept interactive input.
+if [ -z "$RUN_TIMEOUT" ] || [ "$RUN_TIMEOUT" = "0" ]; then
+	exec qemu-system-x86_64 "${QEMU_ARGS[@]}" "$@"
+fi
 
 qemu-system-x86_64 "${QEMU_ARGS[@]}" "$@" &
 qemu_pid=$!
