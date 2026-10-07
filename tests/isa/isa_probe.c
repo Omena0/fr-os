@@ -85,7 +85,14 @@ u64 mix(u64 x)
 #ifdef __SSE__
 long convert(u64 a, long b, int c, long *out)
 {
-	*out = (long)b + c;
-	return (long)b + c + (long)(double)a;
+	/*
+	 * The cast through double is lossy for values above 2^53, but this is an
+	 * ISA probe: the result is only used to exercise the SSE path, not to
+	 * carry real data. Compute the integer part once rather than twice.
+	 */
+	long base = b + c;
+
+	*out = base;
+	return base + (long)(double)a;
 }
 #endif /* __SSE__ */

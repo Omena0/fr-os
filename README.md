@@ -63,39 +63,6 @@ and produces a truncated log that looks exactly like a hang.
 
 The serial port is the primary observation channel. It is not a convenience.
 
-## Current state
-
-The kernel boots. This is a real, verified statement, not an aspiration — see
-[`MEGA_AUDIT.md`](MEGA_AUDIT.md) for the boot log that establishes it and for the
-status of every one of the findings in a full source-tree audit.
-
-A boot gets as far as this:
-
-```
-[boot2] running at 0x0000000000008000, boot drive 0x0000000000000080
-[boot2] A20 enabled via port 0x92 fast gate
-[boot2] E820 memory map: ... 7 entries ...
-[boot2]   kernel loaded, 273483 bytes
-[boot2] entering long mode, jumping to kernel at ffffffff80000180
-abcdefg[    0.000 cpu0 percpu/F] percpu: ...
-[    0.000 cpu0 vmm/I] vmm: direct map 0-4 GiB, 2 MiB pages
-[    0.000 cpu0 vmm/I] vmm: kernel window ffffffff80000000-ffffffff81000000 -> phys 100000-1100000, 4 KiB pages
-[    0.000 cpu0 pmm/I] pmm: 1039018 usable frames (4058 MiB) of 1310720 tracked (5120 MiB)
-Fr Core 0.1.0 (Oct  1 2026 23:32:17, rev unknown)
-boot: entry 0xffffffff80000180, image 0x0000000000100000, drive 0x80, cmdline '(none)'
-memory: 4058 MiB total, 4057 MiB free, 7 E820 entries
-```
-
-The `abcdefg` and the `0.000` timestamps are both real, both known, and both
-listed in the audit. **The system reaches userspace.** Fr Init runs in ring 3
-and prints its prompt; the boot-smoke test in `tests/boot_smoke.py` asserts the
-full chain from stage1 through to "Fr Init: type 'help' for the command list,
-EOF to stop", and `make check` runs it on every CI build. The audit's "what
-actually blocks the system now" section lists, in order: the initrd container
-being handed to the ELF loader instead of an ELF; the syscall entry path; the
-absence of a timer; `build_missing_tables()` being unable to create a PDPT;
-and the absence of any TLS setup.
-
 ## Documentation
 
 `docs/src/` holds the design documentation. Unless a page explicitly states that

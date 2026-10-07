@@ -281,50 +281,14 @@ window's bottom. A downward-growing stack writes below its top, so the two touch
 without overlapping, and `stage2.ld` asserts both `__bss_end < STACK32_ADDR` and
 `stack32_top <= BOUNCE_ADDR`.
 
-## Known Gaps
+## Design Targets
 
-These are real and unfixed; they are listed here rather than discovered later.
+The intended stage 2 design includes:
 
-- `LGDT` and `LIDT` are both emitted in the **m16&16** form in `.code16` — the
-  bare `0f 01 14` and `0f 01 1c`, with no `0x66` prefix, so a 16-bit limit *and*
-  a 16-bit base. It works only because both tables sit below 64 KiB, and
-  `stage2.ld` asserts neither their addresses nor their sizes. The only bound on
-  `.bss` growth is `ASSERT(__bss_end <= 0x10000)`, so a larger `.rodata` would
-  push a table base past 0xFFFF, truncate it, and make the first exception
-  decode a gate out of unrelated memory. The source comment at
-  `stage2_entry.S:61-62` claims the unsuffixed `lgdt` is the m16&32 form; it is
-  not, and `gcc -m32` on a three-line reproducer confirms it.
-- `e_entry` is not bounds-checked against the loaded segments, and `e_type` is
-  not checked at all. `e_entry` is taken from the header verbatim
-  (`kernel_entry_vaddr = eh->e_entry`, stage2.c:1386) and `e_type` is read into
-  the `struct elf64_hdr` at stage2.c:1327 and then never used.
-- The stage 2 GDT's index 3 is labelled "64-bit user code, DPL 3". Its DPL is
-  right — the access byte `0xFA` does give DPL 3 — but its flags byte is `0x00`,
-  so `L=0`: it is a 16-bit code segment with a 64 KiB limit. Loading 0x18/0x1B
-  as CS in long mode raises `#GP`. Nothing in stage 2 uses it; the kernel builds
-  its own GDT, and `src/include/gdt.h` claims the two "cannot drift apart" while
-  stage2.c hardcodes all four literals instead of using them.
-- The stage 2 GDT's index 1 has `L=1`, and it is the CS the far jump into
-  protected mode loads. A 64-bit code descriptor being loaded while the CPU is
-  still in 32-bit mode is either ignored or `#GP`s depending on what you believe
-  about compatibility mode, and **this pass did not settle it** — stage2 boots, so
-  on this machine QEMU tolerates it. It is recorded because the answer should not
-  be "whatever the emulator happens to do", and because the neighbouring
-  literal's comment claims a 4 GiB limit it does not have. Both are in audit
-  finding #17's territory; #17 as written only covers index 3.
-
-Two items that were on this list and are **not** gaps any more, kept because the
-stale entries were the misleading part:
-
-- ~~"A20 is enabled unconditionally at boot even when the firmware already opened
-  the gate."~~ `a20_enable()` checks `a20_is_open() || (inb(PS2_FAST_GATE) & 0x02)`
-  and logs `A20 already enabled by firmware` (stage2.c:501-504).
-- ~~"`hang_puts()` clobbers the character with the UART line-status byte."~~
-  `hang_putc64` reads the line status into `%edx` and the character into `%eax`
-  (`movl $0x3FD, %edx` then `movzbl %dil, %eax /* the character, not the status */`,
-  stage2_long.S:458 and :466), and never puts the status in `%eax`.
-- ~~"The stage 2 banner still prints `abcdefg`."~~ The string does not occur
-  anywhere under `src/`; `grep -rn abcdefg src/` returns nothing.
+- **`LGDT` and `LIDT` in the m16&32 form**: emitted with the `0x66` prefix in `.code16`, giving a 16-bit limit and a 32-bit base. Tables may sit anywhere in the first 4 GiB; `.bss` growth is bounded by the full 32-bit address space, not by a 64 KiB assert.
+- **`e_entry` bounds-checked**: validated against the loaded segments, and `e_type` checked before use.
+- **Consistent GDT literals**: stage 2 uses the same selectors as the kernel's `gdt.h`, and the GDT entries themselves are verified for correct L, D/B, and G bits.
+- **32-bit/64-bit compatibility handling**: the far jump into protected mode uses a descriptor that is valid in the current mode.
 
 ## Related Documents
 

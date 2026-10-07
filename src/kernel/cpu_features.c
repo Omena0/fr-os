@@ -75,14 +75,24 @@ static inline void feat_set(uint64_t *f, uint32_t reg, uint32_t bit, uint64_t id
 #define PIT_CH2_MODE0   0xB0
 /* ~50 ms at the standard input frequency. */
 #define PIT_CAL_COUNT   59659
-/* Well past 50 ms of spinning; the bit is expected within a few reads. */
+/*
+ * Bound the wait by a wall-clock deadline rather than an iteration count of
+ * chance: emulated port I/O can make a spin-count loop arbitrarily slow, so a
+ * fixed iteration count is not a timeout. The deadline is expressed in TSC
+ * ticks using a conservative floor on the TSC rate (100 MHz); real and
+ * emulated hardware runs the TSC far faster, so this bound is always loose
+ * enough to let a real PIT edge through while still bounding a wedged loop.
+ */
 #define PIT_CAL_MAX_SPIN 2000000UL
+#define PIT_CAL_DEADLINE_TICKS 200000000ULL
 
 static uint64_t calibrate_tsc_against_pit(void)
 {
 	uint8_t gate;
 	uint64_t tsc_before, tsc_after, elapsed_us, delta;
+	uint64_t deadline;
 	unsigned long spin;
+	bool timed_out = false;
 
 	/*
 	 * Port 0x61 bit 0 is GATE2 and must be low for the channel to count, and
@@ -98,6 +108,7 @@ static uint64_t calibrate_tsc_against_pit(void)
 	outb(PIT_CH2_PORT, (uint8_t)((PIT_CAL_COUNT >> 8) & 0xFF));
 
 	tsc_before = rdtsc();
+	deadline = tsc_before + PIT_CAL_DEADLINE_TICKS;
 
 	/* The channel is already running, so the only wait is for the edge. */
 	for (spin = 0; spin < PIT_CAL_MAX_SPIN; spin++) {
@@ -105,13 +116,19 @@ static uint64_t calibrate_tsc_against_pit(void)
 		 * carries OUT2. */
 		if (inb(PIT_GATE_PORT) & 0x20)
 			break;
+		/* Emulated port I/O can make a spin-count loop arbitrarily
+		 * slow, so also bound the wait by wall-clock time. */
+		if (rdtsc() >= deadline) {
+			timed_out = true;
+			break;
+		}
 		__asm__ volatile("pause");
 	}
 	tsc_after = rdtsc();
 
 	outb(PIT_GATE_PORT, gate);
 
-	if (spin == PIT_CAL_MAX_SPIN)
+	if (spin == PIT_CAL_MAX_SPIN || timed_out)
 		return 0;	/* no edge: say "unknown" rather than guess */
 
 	delta = tsc_after - tsc_before;

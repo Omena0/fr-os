@@ -235,40 +235,42 @@ static int test_strncat_basic(void) {
 /* ===== File operations ===== */
 
 static int test_fread_basic(void) {
-    /* read() - cannot easily test without actual file descriptor */
-    return TEST_PASS;
+	/* read() cannot be exercised without a real file descriptor in
+	 * this test context; skip rather than claim it passed. */
+	return TEST_SKIP;
 }
 
 static int test_fwrite_basic(void) {
-    /* write() - can test with stdout */
-    const char *msg = "test\n";
-    ssize_t ret = write(STDOUT_FILENO, msg, 5);
-    TEST_ASSERT_EQ(ret, 5, "write to stdout should succeed");
-    return TEST_PASS;
+	/* write() - can test with stdout */
+	const char *msg = "test\n";
+	ssize_t ret = write(STDOUT_FILENO, msg, 5);
+	TEST_ASSERT_EQ(ret, 5, "write to stdout should succeed");
+	return TEST_PASS;
 }
 
 static int test_fread_line_basic(void) {
-    /* readline() - cannot easily test without actual file descriptor */
-    return TEST_PASS;
+	/* readline() cannot be exercised without a real file descriptor;
+	 * skip rather than claim it passed. */
+	return TEST_SKIP;
 }
 
 static int test_fputs_basic(void) {
-    const char *msg = "test\n";
-    int ret = puts(msg);
-    TEST_ASSERT(ret == 4, "puts should return length without newline");
-    return TEST_PASS;
+	const char *msg = "test\n";
+	int ret = puts(msg);
+	TEST_ASSERT(ret == 4, "puts should return length without newline");
+	return TEST_PASS;
 }
 
 static int test_getchar_basic(void) {
-    /* getchar() - returns EOF when no input */
-    /* Skip in test context */
-    return TEST_PASS;
+	/* getchar() returns EOF when there is no input; that is not a
+	 * meaningful test of the function, so skip it. */
+	return TEST_SKIP;
 }
 
 static int test_getline_basic(void) {
-    /* getline() - returns -1 on EOF when no input */
-    /* Skip in test context */
-    return TEST_PASS;
+	/* getline() returns -1 on EOF when there is no input; that is not
+	 * a meaningful test of the function, so skip it. */
+	return TEST_SKIP;
 }
 
 /* ===== Time functions ===== */
@@ -305,13 +307,17 @@ static int test_getppid_basic(void) {
 }
 
 static int test_exit_basic(void) {
-    /* exit() cannot be tested directly - it would terminate the process */
-    return TEST_PASS;
+	/* exit() cannot be tested directly - it would terminate the
+	 * process and the test harness with it. Skip rather than claim
+	 * it passed. */
+	return TEST_SKIP;
 }
 
 static int test_abort_basic(void) {
-    /* abort() cannot be tested directly - it would terminate the process */
-    return TEST_PASS;
+	/* abort() cannot be tested directly - it would terminate the
+	 * process and the test harness with it. Skip rather than claim
+	 * it passed. */
+	return TEST_SKIP;
 }
 
 /* ===== Test Suite Registration ===== */
@@ -338,18 +344,18 @@ struct test_suite test_init_system = {
         { "calloc_basic", test_calloc_basic, false },
         { "strcat_basic", test_strcat_basic, false },
         { "strncat_basic", test_strncat_basic, false },
-        { "fread_basic", test_fread_basic, false },
+        { "fread_basic", test_fread_basic, true },
         { "fwrite_basic", test_fwrite_basic, false },
-        { "fread_line_basic", test_fread_line_basic, false },
+        { "fread_line_basic", test_fread_line_basic, true },
         { "fputs_basic", test_fputs_basic, false },
-        { "getchar_basic", test_getchar_basic, false },
-        { "getline_basic", test_getline_basic, false },
+        { "getchar_basic", test_getchar_basic, true },
+        { "getline_basic", test_getline_basic, true },
         { "clock_basic", test_clock_basic, false },
         { "clock_realtime", test_clock_realtime, false },
         { "getpid_basic", test_getpid_basic, false },
         { "getppid_basic", test_getppid_basic, false },
-        { "exit_basic", test_exit_basic, false },
-        { "abort_basic", test_abort_basic, false },
+        { "exit_basic", test_exit_basic, true },
+        { "abort_basic", test_abort_basic, true },
     },
     .num_cases = 32,
 };

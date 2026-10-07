@@ -79,21 +79,24 @@ static int test_pipe_read_write(void) {
 /* ===== futex ===== */
 
 static int test_futex_basic(void) {
-    /* futex needs memory address and synchronization - skip basic test */
-    /* Just test that the syscall doesn't crash */
-    int val = 0;
-    long ret = syscall3(SYS_futex, (long)&val, FUTEX_WAIT, 0);
-    /* Will timeout or return EAGAIN/EINVAL/etc */
-    TEST_ASSERT(ret <= 0, "futex should return error or timeout");
-    return TEST_PASS;
+	/* FUTEX_WAKE on a futex whose value is not the expected one is a
+	 * non-blocking operation: it wakes waiters (here, none) and returns
+	 * the number woken. This exercises the syscall without the risk of
+	 * blocking the test harness forever, which a FUTEX_WAIT with no
+	 * timeout would carry. */
+	int val = 0;
+	long ret = syscall3(SYS_futex, (long)&val, FUTEX_WAKE, 1);
+	TEST_ASSERT(ret == 0, "futex wake on uncontended word should return 0");
+	return TEST_PASS;
 }
 
 static int test_futex_invalid_addr(void) {
-    /* Test futex with invalid address */
-    long ret = syscall3(SYS_futex, 0x1000, FUTEX_WAIT, 0);
-    TEST_ASSERT(ret == -EFAULT || ret == -EINVAL,
-                "futex with invalid address should return EFAULT/EINVAL");
-    return TEST_PASS;
+	/* Test futex with an unmapped address. FUTEX_WAKE is non-blocking, so
+	 * the kernel must reject the bad pointer without the test hanging. */
+	long ret = syscall3(SYS_futex, 0x1000, FUTEX_WAKE, 1);
+	TEST_ASSERT(ret == -EFAULT || ret == -EINVAL,
+		    "futex with invalid address should return EFAULT/EINVAL");
+	return TEST_PASS;
 }
 
 /* ===== Test Suite Registration ===== */

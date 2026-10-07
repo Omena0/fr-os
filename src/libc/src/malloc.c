@@ -779,6 +779,19 @@ int malloc_trim(size_t pad)
  * Returning the cached chunks to the arenas is enough to make the child's heap
  * self-consistent, and it costs one pass over the class counts.
  */
+/*
+ * The tcache is per-thread, so a fork must hand its cached chunks back to the
+ * shared arena before the child inherits the arena. This walks every class,
+ * pushes each cached chunk onto the arena free list, and resets the cache.
+ *
+ * `count[i]` is trusted to be the length of `freelist[i]`. If the two ever
+ * disagree — a corruption that would otherwise hand a stale pointer out of
+ * the cache on the next refill — the surplus is silently dropped here, which
+ * is worse than loud: it leaves the arena free list shorter than the cache
+ * believed and the next allocator to walk it finds a hole. Validate the two
+ * against each other before trusting either, and only drop the surplus if the
+ * cache itself is self-consistent.
+ */
 void __malloc_fork_child(void)
 {
 	unsigned long i;
@@ -786,11 +799,36 @@ void __malloc_fork_child(void)
 	for (i = 0; i < NCLASS && tcache; i++) {
 		struct chunk *ch = tcache->freelist[i];
 		unsigned long n = tcache->count[i];
+		unsigned long actual = 0;
 
-		tcache->freelist[i] = NULL;
-		tcache->count[i] = 0;
-		if (!arena_list)
+		while (ch) {
+			actual++;
+			ch = ch->next;
+		}
+
+		/* The cache is authoritative: if the count does not match the
+		 * list, the cache is corrupt and cannot be safely returned to
+		 * the arena. Drop the whole class rather than push a
+		 * partially-trusted list and leave the arena inconsistent. */
+		if (actual != n) {
+			/*
+			 * The cache is corrupt: count and freelist disagree.
+			 * Returning a partially-trusted list to the arena would
+			 * leave the arena inconsistent, so drop the whole class
+			 * rather than push it. This is a fork-time consistency
+			 * check, not a user-visible error, so it is silent.
+			 */
+			tcache->freelist[i] = NULL;
+			tcache->count[i] = 0;
 			continue;
+		}
+
+		if (!arena_list) {
+			tcache->freelist[i] = NULL;
+			tcache->count[i] = 0;
+			continue;
+		}
+		ch = tcache->freelist[i];
 		while (ch && n--) {
 			struct chunk *next = ch->next;
 
@@ -798,5 +836,7 @@ void __malloc_fork_child(void)
 			arena_list->free_list[i] = ch;
 			ch = next;
 		}
+		tcache->freelist[i] = NULL;
+		tcache->count[i] = 0;
 	}
 }

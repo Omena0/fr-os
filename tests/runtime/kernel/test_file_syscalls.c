@@ -148,15 +148,20 @@ static int test_write_zero_length(void) {
 }
 
 static int test_write_null_buffer(void) {
-    /* Writing with NULL buffer should fail - probing undefined behavior */
-    long ret = syscall3(SYS_write, 1, (long)NULL, 10);
-    TEST_ASSERT(ret < 0, "write with NULL buffer should fail");
-    return TEST_PASS;
+	/* The kernel must reject an unmapped user pointer without crashing.
+	 * Address 1 is never mapped, so the kernel's user_range_ok() check
+	 * must catch it before any copy is attempted. (Passing literal NULL
+	 * to a syscall is undefined behaviour in C, so use an invalid
+	 * pointer that exercises the same kernel path.) */
+	long ret = syscall3(SYS_write, 1, (long)1, 10);
+	TEST_ASSERT(ret == -EFAULT || ret == -EBADF,
+		    "write with unmapped buffer should fail");
+	return TEST_PASS;
 }
 
 static int test_read_stdin(void) {
     /* read from stdin is blocking - skip in test context */
-    return TEST_PASS;
+    return TEST_SKIP;
 }
 
 static int test_read_invalid_fd(void) {
@@ -174,10 +179,15 @@ static int test_read_zero_length(void) {
 }
 
 static int test_read_null_buffer(void) {
-    /* Reading into NULL buffer should fail - probing undefined behavior */
-    long ret = syscall3(SYS_read, 0, (long)NULL, 10);
-    TEST_ASSERT(ret < 0, "read with NULL buffer should fail");
-    return TEST_PASS;
+	/* The kernel must reject an unmapped user pointer without crashing.
+	 * Address 1 is never mapped, so the kernel's user_range_ok() check
+	 * must catch it before any copy is attempted. (Passing literal NULL
+	 * to a syscall is undefined behaviour in C, so use an invalid
+	 * pointer that exercises the same kernel path.) */
+	long ret = syscall3(SYS_read, 0, (long)1, 10);
+	TEST_ASSERT(ret == -EFAULT || ret == -EBADF,
+		    "read with unmapped buffer should fail");
+	return TEST_PASS;
 }
 
 /* ===== lseek ===== */
@@ -276,7 +286,7 @@ struct test_suite test_file_syscalls = {
         { "open_nonexistent", test_open_nonexistent, false },
         { "open_invalid_flags", test_open_invalid_flags, false },
         { "close_invalid_fd", test_close_invalid_fd, false },
-        { "close_stdin_stdout_stderr", test_close_stdin_stdout_stderr, false },
+        { "close_stdin_stdout_stderr", test_close_stdin_stdout_stderr, true },
         { "write_stdout", test_write_stdout, false },
         { "write_stderr", test_write_stderr, false },
         { "write_invalid_fd", test_write_invalid_fd, false },

@@ -31,7 +31,8 @@ int main(int argc, char **argv)
 	printf("%s %s, pid %ld\n", FR_INIT_NAME, "brought up this process",
 	       (long)getpid());
 	printf("stdout is a real fd: write() returned %d\n",
-	       write(STDOUT_FILENO, "direct-write-stdout\n", 20));
+	       write(STDOUT_FILENO, "direct-write-stdout\n",
+		      (ssize_t)sizeof("direct-write-stdout") - 1));
 	printf("args:");
 	for (int i = 1; i < argc; i++)
 		printf(" %s", argv[i]);

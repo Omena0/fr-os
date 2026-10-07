@@ -248,10 +248,63 @@ static long sc_close(struct syscall_regs *r)
  */
 #define IO_CHUNK PAGE_SIZE
 
+/*
+ * Common bounce-buffer IO loop for file_read and file_write.
+ *
+ * The two paths are mirror images -- read copies file->bounce->user,
+ * write copies user->bounce->file -- and shared the same loop,
+ * bounds checks and short-count handling. is_write selects the
+ * direction; the per-op validation (mode bits, f_ops presence) is
+ * the caller's responsibility.
+ *
+ * Returns the number of bytes transferred, or a negative errno.
+ */
+static long file_io(struct task *t, struct file *f, u64 buf,
+		    size_t count, bool is_write)
+{
+	ssize_t total = 0;
+	u8 bounce[IO_CHUNK];
+
+	(void)t;
+	while (count) {
+		size_t chunk = count > IO_CHUNK ? IO_CHUNK : count;
+		long rc;
+		ssize_t n;
+
+		if (is_write) {
+			rc = copy_from_user(bounce, buf + (u64)total, chunk);
+			if (rc < 0)
+				return rc;
+			n = f->ops->write(f, bounce, chunk);
+			if (n < 0)
+				return (long)n;
+		} else {
+			n = f->ops->read(f, bounce, chunk);
+			if (n < 0)
+				return (long)n;
+			/* Read into the bounce buffer first and only
+			 * then into the user page, so a short tty read
+			 * cannot leave a partial, unvalidated copy behind.
+			 */
+			rc = copy_to_user(buf + (u64)total, bounce,
+					  (size_t)n);
+			if (rc < 0)
+				return rc;
+		}
+
+		if (n == 0)
+			break;
+		total += n;
+		count -= (size_t)n;
+		if ((size_t)n < chunk)
+			break;
+	}
+	return total;
+}
+
 static long file_read(struct task *t, int fd, u64 buf, size_t count)
 {
 	struct file *f = fd_lookup(t, fd);
-	ssize_t total = 0;
 
 	if (!f)
 		return -EBADF;
@@ -264,35 +317,12 @@ static long file_read(struct task *t, int fd, u64 buf, size_t count)
 	if (!user_range_ok(t->mm, buf, count))
 		return -EFAULT;
 
-	u8 bounce[IO_CHUNK];
-
-	while (count) {
-		size_t chunk = count > IO_CHUNK ? IO_CHUNK : count;
-		ssize_t n = f->ops->read(f, bounce, chunk);
-
-		if (n < 0)
-			return (long)n;
-		if (n == 0)
-			break;
-		/* Read into the bounce buffer first and only then into the
-		 * user page, so a short tty read cannot leave a partial,
-		 * unvalidated copy behind. */
-		long rc = copy_to_user(buf + (u64)total, bounce, (size_t)n);
-
-		if (rc < 0)
-			return rc;
-		total += n;
-		count -= (size_t)n;
-		if ((size_t)n < chunk)
-			break;
-	}
-	return total;
+	return file_io(t, f, buf, count, false);
 }
 
 static long file_write(struct task *t, int fd, u64 buf, size_t count)
 {
 	struct file *f = fd_lookup(t, fd);
-	ssize_t total = 0;
 
 	if (!f)
 		return -EBADF;
@@ -305,26 +335,7 @@ static long file_write(struct task *t, int fd, u64 buf, size_t count)
 	if (!user_range_ok(t->mm, buf, count))
 		return -EFAULT;
 
-	u8 bounce[IO_CHUNK];
-
-	while (count) {
-		size_t chunk = count > IO_CHUNK ? IO_CHUNK : count;
-		long rc = copy_from_user(bounce, buf + (u64)total, chunk);
-
-		if (rc < 0)
-			return rc;
-		ssize_t n = f->ops->write(f, bounce, chunk);
-
-		if (n < 0)
-			return (long)n;
-		if (n == 0)
-			break;
-		total += n;
-		count -= (size_t)n;
-		if ((size_t)n < chunk)
-			break;
-	}
-	return total;
+	return file_io(t, f, buf, count, true);
 }
 
 static long sc_read(struct syscall_regs *r)

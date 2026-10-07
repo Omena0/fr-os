@@ -19,56 +19,70 @@
 
 #define TEST_ASSERT_EQ(a, b, msg) \
     do { \
-        if ((a) != (b)) { \
-            test_fail_eq(__FILE__, __LINE__, #a, #b, a, b, msg); \
+        long long __ta = (a); \
+        long long __tb = (b); \
+        if (__ta != __tb) { \
+            test_fail_eq(__FILE__, __LINE__, #a, #b, __ta, __tb, msg); \
             return TEST_FAIL; \
         } \
     } while (0)
 
 #define TEST_ASSERT_NE(a, b, msg) \
     do { \
-        if ((a) == (b)) { \
-            test_fail_ne(__FILE__, __LINE__, #a, #b, a, b, msg); \
+        long long __ta = (a); \
+        long long __tb = (b); \
+        if (__ta == __tb) { \
+            test_fail_ne(__FILE__, __LINE__, #a, #b, __ta, __tb, msg); \
             return TEST_FAIL; \
         } \
     } while (0)
 
 #define TEST_ASSERT_LT(a, b, msg) \
     do { \
-        if (!((a) < (b))) { \
-            test_fail_rel(__FILE__, __LINE__, #a, #b, a, b, "<", msg); \
+        long long __ta = (a); \
+        long long __tb = (b); \
+        if (!(__ta < __tb)) { \
+            test_fail_rel(__FILE__, __LINE__, #a, #b, __ta, __tb, "<", msg); \
             return TEST_FAIL; \
         } \
     } while (0)
 
 #define TEST_ASSERT_LE(a, b, msg) \
     do { \
-        if (!((a) <= (b))) { \
-            test_fail_rel(__FILE__, __LINE__, #a, #b, a, b, "<=", msg); \
+        long long __ta = (a); \
+        long long __tb = (b); \
+        if (!(__ta <= __tb)) { \
+            test_fail_rel(__FILE__, __LINE__, #a, #b, __ta, __tb, "<=", msg); \
             return TEST_FAIL; \
         } \
     } while (0)
 
 #define TEST_ASSERT_GT(a, b, msg) \
     do { \
-        if (!((a) > (b))) { \
-            test_fail_rel(__FILE__, __LINE__, #a, #b, a, b, ">", msg); \
+        long long __ta = (a); \
+        long long __tb = (b); \
+        if (!(__ta > __tb)) { \
+            test_fail_rel(__FILE__, __LINE__, #a, #b, __ta, __tb, ">", msg); \
             return TEST_FAIL; \
         } \
     } while (0)
 
 #define TEST_ASSERT_GE(a, b, msg) \
     do { \
-        if (!((a) >= (b))) { \
-            test_fail_rel(__FILE__, __LINE__, #a, #b, a, b, ">=", msg); \
+        long long __ta = (a); \
+        long long __tb = (b); \
+        if (!(__ta >= __tb)) { \
+            test_fail_rel(__FILE__, __LINE__, #a, #b, __ta, __tb, ">=", msg); \
             return TEST_FAIL; \
         } \
     } while (0)
 
 #define TEST_ASSERT_STR_EQ(a, b, msg) \
     do { \
-        if (strcmp((a), (b)) != 0) { \
-            test_fail_str(__FILE__, __LINE__, #a, #b, a, b, msg); \
+        const char *__ta = (a); \
+        const char *__tb = (b); \
+        if (!__ta || !__tb || strcmp(__ta, __tb) != 0) { \
+            test_fail_str(__FILE__, __LINE__, #a, #b, __ta, __tb, msg); \
             return TEST_FAIL; \
         } \
     } while (0)

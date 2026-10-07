@@ -826,7 +826,7 @@ static void e820_query(void)
 		e820_map[e820_count].acpi_extended =
 			*(const uint32_t *)(const void *)(entry + 20);
 
-		serial_puts("  0x");
+serial_puts("  0x");
 		serial_puthex(base);
 		serial_puts(" + 0x");
 		serial_puthex(length);
@@ -834,8 +834,8 @@ static void e820_query(void)
 		serial_putdec(type);
 		serial_puts("\r\n");
 
-	if (have_last && base == last_base && length == 0)
-		break;
+		if (have_last && base == last_base && length == 0)
+			break;
 
 		last_base = base;
 		have_last = true;
@@ -1349,21 +1349,21 @@ static void load_kernel(void)
 		if (in_sector + sizeof(phdr) > 512) {
 			if (!bios_read_bounce((uint64_t)KERNEL_LBA + sector, 1))
 				fail("cannot read kernel program headers");
-			for (uint32_t i = 0; i < 512 - in_sector; i++)
-				dst_ph[i] = *(const volatile uint8_t *)
-					(uintptr_t)(BOUNCE_ADDR + in_sector + i);
+			for (uint32_t j = 0; j < 512 - in_sector; j++)
+				dst_ph[j] = *(const volatile uint8_t *)
+					(uintptr_t)(BOUNCE_ADDR + in_sector + j);
 			if (!bios_read_bounce((uint64_t)KERNEL_LBA + sector + 1, 1))
 				fail("cannot read kernel program headers");
-			for (uint32_t i = 0; i < sizeof(phdr) - (512 - in_sector); i++)
-				dst_ph[512 - in_sector + i] =
+			for (uint32_t j = 0; j < sizeof(phdr) - (512 - in_sector); j++)
+				dst_ph[512 - in_sector + j] =
 					*(const volatile uint8_t *)
-						(uintptr_t)(BOUNCE_ADDR + i);
+						(uintptr_t)(BOUNCE_ADDR + j);
 		} else {
 			if (!bios_read_bounce((uint64_t)KERNEL_LBA + sector, 1))
 				fail("cannot read kernel program headers");
-			for (uint32_t i = 0; i < sizeof(phdr); i++)
-				dst_ph[i] = *(const volatile uint8_t *)
-					(uintptr_t)(BOUNCE_ADDR + in_sector + i);
+			for (uint32_t j = 0; j < sizeof(phdr); j++)
+				dst_ph[j] = *(const volatile uint8_t *)
+					(uintptr_t)(BOUNCE_ADDR + in_sector + j);
 		}
 
 		phdr_off += eh->e_phentsize;

@@ -17,7 +17,6 @@
 #define UART_LSR_TX_EMPTY    0x20
 
 void serial_init(void);
-void serial_putc(char c);
 void serial_puts(const char *s);
 
 /* Non-blocking: returns true if a byte was consumed. */

@@ -41,11 +41,16 @@ static int test_sched_yield_basic(void) {
 }
 
 static int test_sched_yield_many_times(void) {
-    /* Call sched_yield many times to verify it doesn't deadlock or crash */
-    for (int i = 0; i < 1000; i++) {
-        syscall1(SYS_sched_yield, 0);
-    }
-    return TEST_PASS;
+	/* Call sched_yield a small number of times and assert each call
+	 * succeeds. The original loop ran 1000 iterations with no assertions
+	 * at all, which only ever proved the kernel did not deadlock -- and
+	 * burned CPU on an idle machine. 16 iterations is enough to exercise
+	 * a reschedule without dominating the test run. */
+	for (int i = 0; i < 16; i++) {
+		long ret = syscall1(SYS_sched_yield, 0);
+		TEST_ASSERT_EQ(ret, 0, "sched_yield should succeed");
+	}
+	return TEST_PASS;
 }
 
 static int test_sched_yield_with_fork(void) {

@@ -30,10 +30,9 @@ struct context {
 
 ### SIMD / FPU State
 
-**The lazy `TS`-based scheme described in earlier versions of this page is not
-what the code does.** `context.S` saves and restores the FPU state eagerly on
-every switch, with `fxsave`/`fxrstor`, into a per-task `fpu_state` buffer. `TS`
-is never set to trigger a #NM, and there is no FPU exception handler.
+`context.S` saves and restores the FPU state eagerly on every switch, with
+`fxsave`/`fxrstor`, into a per-task `fpu_state` buffer. `TS` is never set to
+trigger a #NM, and there is no FPU exception handler.
 
 The buffer is `FXSAVE`-shaped: 512 bytes covering x87 and XMM0-15. `fxsave` does
 **not** save bits 128-255 of YMM0-15, and userspace is still compiled with

@@ -177,31 +177,41 @@ static int test_munmap_partial(void) {
 /* ===== mprotect ===== */
 
 static int test_mprotect_readonly(void) {
-    void *addr = (void*)syscall6(SYS_mmap, 0, PAGE_SIZE, PROT_READ | PROT_WRITE,
-                                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    TEST_ASSERT(addr != MAP_FAILED, "mmap should succeed");
+	void *addr = (void*)syscall6(SYS_mmap, 0, PAGE_SIZE, PROT_READ | PROT_WRITE,
+				     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	TEST_ASSERT(addr != MAP_FAILED, "mmap should succeed");
 
-    long ret = syscall3(SYS_mprotect, (long)addr, PAGE_SIZE, PROT_READ);
-    TEST_ASSERT_EQ(ret, 0, "mprotect to READ should succeed");
+	long ret = syscall3(SYS_mprotect, (long)addr, PAGE_SIZE, PROT_READ);
+	TEST_ASSERT_EQ(ret, 0, "mprotect to READ should succeed");
 
-    /* Write should fault - can't test easily without signal handler */
+	/*
+	 * Verifying that a write now faults would require a signal handler,
+	 * which the test framework does not provide, so the enforcement of
+	 * the new permissions is not asserted here. The mprotect call itself
+	 * returning 0 is the only thing this test can claim.
+	 */
 
-    ret = syscall2(SYS_munmap, (long)addr, PAGE_SIZE);
-    TEST_ASSERT_EQ(ret, 0, "munmap should succeed");
-    return TEST_PASS;
+	ret = syscall2(SYS_munmap, (long)addr, PAGE_SIZE);
+	TEST_ASSERT_EQ(ret, 0, "munmap should succeed");
+	return TEST_PASS;
 }
 
 static int test_mprotect_noaccess(void) {
-    void *addr = (void*)syscall6(SYS_mmap, 0, PAGE_SIZE, PROT_READ | PROT_WRITE,
-                                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    TEST_ASSERT(addr != MAP_FAILED, "mmap should succeed");
+	void *addr = (void*)syscall6(SYS_mmap, 0, PAGE_SIZE, PROT_READ | PROT_WRITE,
+				     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	TEST_ASSERT(addr != MAP_FAILED, "mmap should succeed");
 
-    long ret = syscall3(SYS_mprotect, (long)addr, PAGE_SIZE, PROT_NONE);
-    TEST_ASSERT_EQ(ret, 0, "mprotect to NONE should succeed");
+	long ret = syscall3(SYS_mprotect, (long)addr, PAGE_SIZE, PROT_NONE);
+	TEST_ASSERT_EQ(ret, 0, "mprotect to NONE should succeed");
 
-    ret = syscall2(SYS_munmap, (long)addr, PAGE_SIZE);
-    TEST_ASSERT_EQ(ret, 0, "munmap should succeed");
-    return TEST_PASS;
+	/*
+	 * As with test_mprotect_readonly, verifying that an access now
+	 * faults requires a signal handler the framework does not provide,
+	 * so the kernel's enforcement is not asserted here.
+	 */
+	ret = syscall2(SYS_munmap, (long)addr, PAGE_SIZE);
+	TEST_ASSERT_EQ(ret, 0, "munmap should succeed");
+	return TEST_PASS;
 }
 
 static int test_mprotect_invalid_addr(void) {

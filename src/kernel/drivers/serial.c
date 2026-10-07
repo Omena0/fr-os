@@ -51,11 +51,6 @@ void serial_putc_blocking(char c)
 	outb(COM1, (uint8_t)c);
 }
 
-void serial_putc(char c)
-{
-	serial_putc_blocking(c);
-}
-
 void serial_puts(const char *s)
 {
 	for (; *s; s++)

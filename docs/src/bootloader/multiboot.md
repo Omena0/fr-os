@@ -2,21 +2,9 @@
 
 ## Policy
 
-The OS bootloader is a **custom two-stage design** (stage1 + stage2). It does **not** use the Multiboot or Multiboot2 specification as its primary boot protocol.
+The OS bootloader uses a **custom two-stage design** (stage1 + stage2) as its primary boot protocol.
 
-**There is no Multiboot2 path.** Everything below this section describes a
-feature that is not in the tree, and nothing in this repository has ever booted a
-kernel that way. Specifically, all of the following are absent:
-
-- the `MB2_MAGIC` / `MB2_ARCH` constants,
-- a `.multiboot` section in `src/kernel/link.ld`,
-- any `-kernel` invocation: `run.sh` boots `build/os.img` and nothing else,
-- any Multiboot2 tag parsing in stage 1, stage 2 or the kernel.
-
-The only boot protocol is stage 1 → stage 2 → `Fr Core`, over a raw disk image.
-What follows is retained because it is a reasonable design sketch for a
-convenience path someone may want to add, **not** because it describes this
-system. Treat every constant in it as one you would have to invent.
+A Multiboot2 compatibility path is a planned convenience feature. The design below describes the intended Multiboot2 interface; no constants, sections, or tag-parsing code exist yet.
 
 ## Multiboot2 Header (Development Mode)
 

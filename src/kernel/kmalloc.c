@@ -652,6 +652,20 @@ void kfree(void *ptr, size_t size)
 	m = &kmags[cpu][idx];
 	flags = spinlock_irqsave(&kmag_lock[cpu][idx]);
 	if (m->count < KMALLOC_MAG_SIZE) {
+		/* A double free that lands in a magazine still duplicates the
+		 * pointer -- the slab path checks its own freelist, but a
+		 * magazine is an opaque array with no membership test, so the
+		 * duplicate is handed out a second time and the freed object's
+		 * next-word is written over live data. Scan for it here. */
+		for (uint32_t i = 0; i < m->count; i++) {
+			if (m->objects[i] == ptr) {
+				__atomic_fetch_add(&stat_bad_free, 1,
+						   __ATOMIC_RELAXED);
+				spinlock_unlock_irqrestore(
+					&kmag_lock[cpu][idx], flags);
+				return;
+			}
+		}
 		m->objects[m->count++] = ptr;
 		spinlock_unlock_irqrestore(&kmag_lock[cpu][idx], flags);
 		__atomic_fetch_add(&stat_frees, 1, __ATOMIC_RELAXED);
