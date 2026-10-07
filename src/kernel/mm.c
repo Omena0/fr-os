@@ -44,21 +44,13 @@ KLOG_SUBSYSTEM("mm");
 /* ------------------------------------------------------ user layout -------- */
 
 /*
- * The user half of the address space.
- *
- * USER_ADDRESS_MAX is the same boundary process.c gates user pointers on, and
- * the two must agree: a range that this file will happily place a VMA in but
- * copy_to_user() refuses to touch would be a range where a process can mmap
- * memory it can never read. The kernel half above 0xFFFF800000000000 is
- * reachable only through the copied PML4 entries and is never described by a
- * VMA, so a fault there finds nothing and becomes a signal or a panic rather
- * than a mapping.
+ * The user half of the address space. MM_USER_LIMIT is the same boundary
+ * process.c gates user pointers on, and the two must agree: a range that mm.c
+ * will place a VMA in but process.c refuses to touch is a range where a process
+ * can mmap memory it can never read.
  */
 #define MM_USER_LIMIT   0x0000800000000000ULL
 
-/* The user stack, matching process.c's USER_STACK_BASE/TOP. process.c adds the
- * VMA itself, so these are only the defaults written into a fresh address
- * space for a caller that does not. */
 #define MM_STACK_TOP    0x00007FFFFFFFF000ULL
 #define MM_STACK_SIZE   (8ULL << 20)
 #define MM_STACK_BASE   (MM_STACK_TOP - MM_STACK_SIZE)
@@ -73,11 +65,9 @@ KLOG_SUBSYSTEM("mm");
 #define MM_BRK_BASE     0x0000100000000000ULL
 
 /*
- * mmap grows upward from here, which is also the seed elf.c uses when it finds
- * mmap_base still zero. It is far enough below the stack that a process cannot
- * realistically run out of mmap space before the stack, and the ceiling for
- * both is the same, so a runaway mmap fails rather than colliding with the
- * stack.
+ * mmap grows upward from here, which is also elf.c's seed when mmap_base is
+ * still zero. It is far enough below the stack that a process cannot run out
+ * of mmap space before the stack, and both share MM_MMAP_LIMIT.
  */
 #define MM_MMAP_BASE    0x0000200000000000ULL
 #define MM_MMAP_LIMIT   MM_STACK_BASE
@@ -128,20 +118,16 @@ static void vma_copy(struct vma *dst, const struct vma *src)
  * Locate the insertion point for a VMA starting at `start`, and note whether it
  * would overlap an existing one.
  *
- * Insertion and the overlap test are the same walk because a sorted list makes
- * them the same question: the VMA that would follow the new one is the first
- * candidate for an overlap, and everything before it is strictly below. The
- * caller uses the two results to insert and to reject, so the list is walked
- * once rather than twice and, more importantly, the decision to insert and the
- * decision to reject can never be made from two different views of the list.
+ * Insertion and the overlap test are the same walk: the VMA that would follow
+ * the new one is the first candidate for an overlap, and everything before it
+ * is strictly below. The caller uses the two results to insert and to reject,
+ * so the list is walked once and the decision to insert and the decision to
+ * reject can never be made from two different views of the list.
  *
- * `overlap` reports a VMA that *intersects* [start, end), in either direction:
- * one that starts inside the range and one that starts before it and reaches
- * into it. A VMA is half-open, so one that begins exactly at `end` is disjoint
- * and is not reported -- which is what lets an adjacent mapping, a split half
- * of a VMA and the tail of a punch all be re-inserted without a false positive.
- * `before` is the node the caller must insert *after*; see the note on
- * list_add() in mm_add_vma().
+ * `overlap` reports a VMA that intersects [start, end), in either direction.
+ * A VMA that begins exactly at `end` is disjoint and is not reported, which
+ * lets an adjacent mapping or split half be re-inserted without a false
+ * positive. `before` is the node the caller must insert after.
  */
 static void vma_insertion_point(struct address_space *mm, virt_addr_t start,
 				virt_addr_t end, struct list_head **before,
@@ -376,18 +362,11 @@ static void free_page_table(phys_addr_t table, unsigned level)
 /*
  * Tear down every page table this address space owns.
  *
- * Indices 256 and 511 are skipped, and not out of caution: those PDPT pages
- * were *shared* with the kernel's PML4 by mm_create(), so freeing them would
- * free the direct map out from under every other address space on the machine
- * and under the kernel itself. The other 510 entries were reached only through
- * this PML4, so anything below them is provably this address space's own and
- * is freed.
- *
- * The cost of being conservative here is that a forked child, whose PML4 was
- * deep-copied by process.c including the direct map, leaks that copy. The
- * distinction is not visible from the PML4's contents — the kernel's and the
- * child's entries for 256 and 511 are indistinguishable — so it would take a
- * flag in struct address_space to record it, and the header does not have one.
+ * Indices 256 and 511 are skipped because those PDPT pages were shared with
+ * the kernel's PML4 by mm_create(). Freeing them would free the direct map,
+ * vmalloc or the kernel window out from under every other address space and
+ * under the kernel itself. The other 510 entries were reached only through
+ * this PML4, so anything below them is provably this address space's own.
  */
 static void mm_free_page_tables(phys_addr_t pgd)
 {
@@ -477,11 +456,11 @@ static int vma_punch(struct address_space *mm, virt_addr_t start, virt_addr_t en
 	 * gets an untouched address space rather than one missing a VMA it was
 	 * told still exists.
 	 *
-	 * Note what the tail's existence is keyed on: `v->end > end`, not
-	 * "`head` straddles". A VMA that contains `start` but ends before `end`
-	 * contributes no tail -- everything from its end to `end` is being
-	 * removed anyway -- and the VMA containing `end` is a separate entry
-	 * that the second pass trims in place.
+	 * The tail's existence is keyed on `v->end > end`, not "head straddles":
+	 * a VMA that contains `start` but ends before `end` contributes no tail,
+	 * because everything from its end to `end` is being removed anyway. The
+	 * VMA containing `end` is a separate entry that the second pass trims in
+	 * place.
 	 */
 	list_for_each(pos, &mm->vma_list) {
 		struct vma *v = list_entry(pos, struct vma, list);
@@ -524,16 +503,15 @@ static int vma_punch(struct address_space *mm, virt_addr_t start, virt_addr_t en
 		}
 
 		/* The head. Its end moves up to `start`, and the piece that
-		 * survives past `end` -- which is the tail when this is the same
-		 * VMA -- is re-inserted after it, so the list stays sorted even in
-		 * the middle.
+		 * survives past `end` is re-inserted after it so the list stays
+		 * sorted in the middle.
 		 *
 		 * `continue`, not `break`: the VMA containing `end` is a later
-		 * entry whenever the gap between the two VMAs is smaller than the
-		 * range, which is the common case for an mmap region. Breaking here
-		 * left that entry whole and moved this one's *start* to `end`
-		 * instead, producing an interval with end <= start and unmapping
-		 * nothing at all. */
+		 * entry when the gap between the two VMAs is smaller than the
+		 * range, which is the common case for an mmap region. Breaking
+		 * here left that entry whole and moved this one's *start* to
+		 * `end`, producing an interval with end <= start and unmapping
+		 * nothing. */
 		if (v == head) {
 			v->end = start;
 			if (tail) {

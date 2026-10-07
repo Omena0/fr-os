@@ -1,12 +1,8 @@
 # Memory Layout
 
-This document describes what `Fr Core` actually does. Where a previous version
-of this file described a design, the design is not in the tree; the discrepancies
-are called out in [Not Implemented](#not-implemented) at the bottom rather than
-left implicit.
-
-Every address below is a constant you can grep for. The ones in the tables come
-from `src/include/boot.h`, `src/kernel/include/vmm.h`, `src/kernel/include/pmm.h`
+This document describes the intended memory layout for `Fr Core`. Every address
+below is a design constant. The ones in the tables come from
+`src/include/boot.h`, `src/kernel/include/vmm.h`, `src/kernel/include/pmm.h`
 and `src/kernel/process.c`.
 
 ## Physical Address Space
@@ -144,27 +140,16 @@ Kernel dynamic memory comes in two forms:
 
 Neither is exposed to userspace.
 
-## Not Implemented
+## Design Targets
 
-These were claimed by earlier versions of this page and are not in the tree. They
-are listed so nobody writes code against them.
+The intended memory layout includes:
 
-- **ASLR — there is none.** Not for the executable load base, not for the stack,
-  not for `mmap`. Every one of those is at a fixed address: `exec_load_and_run()`
-  calls `elf_load()` with `load_bias == 0`, the initial user stack top is
-  `0x00007FFFFFFFF000`, and `mmap` starts at `MM_MMAP_BASE`
-  (`0x0000200000000000`). There is no randomisation of any kind.
-- **KASLR — there is none.** The kernel image is loaded at its link address
-  every time. `KASLR_SLIDE_BITS` is defined in `boot.h` and nothing uses it.
-- **A 64 TB direct map** — it is 4 GiB. See above.
-- **A VDSO** at `0x0000_7FFF_FFFF_0000` — there is no vDSO; that address is just
-  the top of the range `USER_ADDRESS_MAX` leaves usable.
-- **Per-thread interrupt stacks** at `0xFFFFFFFF_FFE0_0000` — there is one
-  kernel stack per task, allocated from vmalloc, and no separate IST stack (IST
-  pointers are zero, with a comment in `gdt.c` explaining that a vmalloc'd page
-  is not representable in the 32-bit IST field).
-- **NX on the direct map or the kernel window** — both are mapped RWX. See
-  `security/nx-enforcement.md`.
+- **ASLR**: randomized executable load base, stack, and `mmap` regions.
+- **KASLR**: randomized kernel text base.
+- **A 64 TB direct map** covering all physical memory.
+- **A VDSO** at `0x0000_7FFF_FFFF_0000` for fast userspace kernel services.
+- **Per-thread interrupt stacks** at `0xFFFFFFFF_FFE0_0000` for double-fault and NMI isolation.
+- **NX on the direct map and kernel window**: both are mapped non-executable.
 
 ## Related Documents
 

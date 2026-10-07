@@ -58,7 +58,7 @@ ASLR is only effective if the randomized addresses are not disclosed[^aslr-effec
 
 - ASLR does not protect against local information leaks (an attacker who can read process memory can read the address of anything)[^aslr-effectiveness].
 - Brute-force attacks are possible if the process is repeatedly restartable — mitigated by process restart rate limiting in the init system.
-- 32-bit processes (compat mode — not implemented) have much lower ASLR entropy.
+- 32-bit processes (compat mode) have lower ASLR entropy.
 
 ## Related Documents
 

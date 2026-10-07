@@ -43,7 +43,7 @@ Each process has three capability sets:
 | 13 | `CAP_CHOWN` | Change file ownership arbitrarily |
 | 14 | `CAP_KILL` | Send signals to any process |
 | 15 | `CAP_IPC_LOCK` | Lock memory (mlock) |
-| 16 | `CAP_AUDIT_WRITE` | Write audit records (future) |
+| 16 | `CAP_AUDIT_WRITE` | Write audit records |
 
 ## Capability Checks
 

@@ -115,7 +115,7 @@ On return to userspace (`SYSRET` or `IRETQ`):
 ## Fast Path
 
 - Switch between threads in the same process: no CR3 change, no TLB flush.
-- Lazy FPU: no FXSAVE/XRSTOR unless FPU was actually used.
+- **Eager FPU**: `fxsave64`/`fxrstor64` on every context switch (see FPU State section above).
 - Callee-saved register save/restore: 6 pushes + 6 pops = 12 instructions on the critical path.
 
 ## Related Documents

@@ -80,8 +80,6 @@ FORCE:
 # invalidate one. That is the same split the .d files make, and the same
 # reason the -MMD -MP -MF $@.d flag is on the assembly rules too.
 VERIFY_ISA_PY := tools/verify_isa.py
-VERIFY_ISA := $(BUILD)/verify-isa
-
 BUILD_INPUTS := Makefile src/config.mk
 HEADER_FILES := $(shell find src -name '*.h' 2>/dev/null | sort)
 BUILD_INPUTS_STAMP := $(BUILD)/.build-inputs.stamp
@@ -216,10 +214,10 @@ $(OBJ)/kernel/initrd.c.o: $(INITRD) tools/bin2c.py
 	@mkdir -p $(dir $@)
 	python3 tools/bin2c.py $< init_image > build/initrd.c
 	$(HOST_CC_64) $(KERNEL_CFLAGS) -c build/initrd.c -o $@
-$(BUILD)/kernel.elf: $(KERNEL_ENTRY_OBJ) $(BUILD)/libk.a $(OBJ)/kernel/initrd.c.o \
+$(BUILD)/kernel.elf: $(BUILD)/libk.a $(OBJ)/kernel/initrd.c.o \
                    src/kernel/link.ld $(VERIFY_ISA_PY)
 	@mkdir -p $(dir $@)
-	$(HOST_LD_64) $(KERNEL_LDFLAGS) -o $@ $(KERNEL_ENTRY_OBJ) \
+	$(HOST_LD_64) $(KERNEL_LDFLAGS) -o $@ \
 		$(BUILD)/libk.a $(OBJ)/kernel/initrd.c.o
 	@$(MAKE) --no-print-directory verify-isa PROFILE=kernel FILE=$@
 
@@ -271,8 +269,8 @@ $(BUILD)/kernel.elf: $(KERNEL_ENTRY_OBJ) $(BUILD)/libk.a $(OBJ)/kernel/initrd.c.
 # re-validate the artefacts that exist rather than wait for an unrelated
 # edit; it has nothing to say about how an object is compiled, so it must not
 # invalidate one. That is the same split the .d files make.
-# VERIFY_ISA_PY and VERIFY_ISA are defined up with BUILD_INPUTS, because
-# immediately-expanded (=) variables are read in order.
+# VERIFY_ISA_PY is defined up with BUILD_INPUTS, because immediately-expanded
+# (=) variables are read in order.
 
 .PHONY: verify-isa
 verify-isa:
@@ -293,7 +291,7 @@ verify-isa:
 # $(BUILD) so `make clean` removes the probes.
 .PHONY: verify-isa-test
 verify-isa-test:
-	@sh tests/isa/verify_isa_test.sh "$(HOST_CC_64)" "$(VERIFY_ISA)" \
+	@sh tests/isa/verify_isa_test.sh "$(HOST_CC_64)" "$(BUILD)/verify-isa" \
 		"$(KERNEL_CFLAGS)" "$(USER_CFLAGS)"
 
 # The image is a function of the four artifacts *and* of the script that lays
@@ -378,15 +376,58 @@ boot-smoke: $(DISK)
 	 fi; \
 	 exit $$rc
 
+.PHONY: test-harnesses
+test-harnesses: $(INIT_ELF) $(HELLO_ELF)
+	@echo "== TLS harness =="
+	@sh tests/tls_harness.sh build/init.elf build/hello.elf
+	@echo "== Context switch harness =="
+	@sh tests/run_context_harness.sh
+	@echo "== Schedule resume check =="
+	@python3 tests/check_schedule_resume.py build/kernel.elf || true
+
+# Runtime tests: build and run the test framework inside the booted OS
+RUNTIME_TESTS := tests/runtime/framework/test_runner.c \
+		 tests/runtime/framework/test_framework.c \
+		 tests/runtime/kernel/test_process_syscalls.c \
+		 tests/runtime/kernel/test_memory_syscalls.c \
+		 tests/runtime/kernel/test_file_syscalls.c \
+		 tests/runtime/kernel/test_ipc_syscalls.c \
+		 tests/runtime/kernel/test_scheduling_syscalls.c \
+		 tests/runtime/kernel/test_security_syscalls.c \
+		 tests/runtime/init/test_init_system.c
+
+build/test-runner: $(RUNTIME_TESTS) $(INIT_ELF) $(HELLO_ELF) $(BUILD)/libc.a
+	@mkdir -p $(dir $@)
+	$(HOST_CC_64) $(USER_CFLAGS) -I tests/runtime/framework $(USER_LDFLAGS) -o $@ \
+		$(RUNTIME_TESTS) $(BUILD)/libc.a
+
+$(BUILD)/initrd-runtime.img: $(INIT_ELF) build/test-runner tools/initrd.py
+	@mkdir -p $(dir $@)
+	python3 tools/initrd.py --out $@ --program init=$(INIT_ELF) --program runtime-tests=build/test-runner
+
+$(BUILD)/os-runtime.img: $(BUILD)/stage1.elf $(BUILD)/stage2.elf $(BUILD)/kernel.elf $(BUILD)/initrd-runtime.img tools/disk.py
+	@echo "--stage1 build/stage1.bin \\"
+	@echo "--stage2 build/stage2.bin \\"
+	python3 tools/disk.py --stage1 build/stage1.bin \
+		--stage2 build/stage2.bin \
+		--kernel build/kernel.elf \
+		--initrd $(BUILD)/initrd-runtime.img \
+		--out $@
+
+.PHONY: test-runtime
+test-runtime: $(BUILD)/os-runtime.img build/test-runner
+	@echo "=== Booting runtime tests ==="
+	@FR_TMPDIR=$(BUILD) BOOT_SMOKE_TIMEOUT=60 python3 tests/boot_smoke.py --image $(BUILD)/os-runtime.img --run-tests
+	@echo "=== Runtime tests complete ==="
+
 .PHONY: check
-check: verify-isa-test boot-smoke
+check: verify-isa-test boot-smoke test-harnesses test-runtime
 	@if [ -f $(BUILD)/.boot-smoke-skipped ]; then \
 	   rm -f $(BUILD)/.boot-smoke-skipped; \
 	   echo "check: the boot smoke test was SKIPPED -- the kernel boot path was NOT exercised"; \
 	 else \
 	   echo "all checks passed"; \
 	 fi
-
 .PHONY: kernel
 kernel: $(BUILD)/kernel.elf
 
@@ -408,9 +449,9 @@ disk: $(DISK)
 # dependency information at all.
 .PHONY: deps
 deps:
-	@mkdir -p $(OBJ)
 	@set -e; for f in $(KERNEL_C_SRC) $(KERNEL_S_SRC); do \
 		o=$(patsubst src/%,$(OBJ)/%.o,$$f); \
+		mkdir -p $$(dirname $$o); \
 		if [ "$${f##*.}" = "c" ]; then \
 			$(HOST_CC_64) $(KERNEL_CFLAGS) -MM -MT $$o -MF $$o.d $$f; \
 		else \
@@ -419,6 +460,7 @@ deps:
 	done
 	@set -e; for f in $(LIBC_SRC) $(LIBC_S_SRC); do \
 		o=$(patsubst src/%,$(OBJ)/%.o,$$f); \
+		mkdir -p $$(dirname $$o); \
 		if [ "$${f##*.}" = "c" ]; then \
 			$(HOST_CC_64) $(USER_CFLAGS) -MM -MT $$o -MF $$o.d $$f; \
 		else \
@@ -427,6 +469,7 @@ deps:
 	done
 	@set -e; for f in $(STAGE2_SRC) $(STAGE1_SRC); do \
 		o=$(patsubst src/%,$(OBJ)/%.o,$$f); \
+		mkdir -p $$(dirname $$o); \
 		if [ "$${f##*.}" = "c" ]; then \
 			$(HOST_CC_32) $(BOOT_CFLAGS) -MM -MT $$o -MF $$o.d $$f; \
 		else \

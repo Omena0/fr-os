@@ -1,27 +1,16 @@
 /*
  * vmm.c — page tables, the direct map, vmalloc, and the CR3 switch.
  *
- * The hard part of this file is not any individual function; it is that the
- * first function cannot use anything the later ones provide. Building a page
- * table means writing to memory addressed by a page table that does not exist
- * yet, and the direct map that would normally make that easy is itself one of
- * the things being built here. The bootstrap below gets out of that with a
- * static pool inside the kernel image, which works because the bootloader is
- * still identity-mapping that image when vmm_init() runs.
+ * The hard part is not any individual function; it is that the first function
+ * cannot use anything the later ones provide. Building a page table means
+ * writing to memory addressed by a page table that does not exist yet, and the
+ * direct map is itself one of the things being built here. The bootstrap gets
+ * out of that with a static pool inside the kernel image, which works because
+ * the bootloader is still identity-mapping that image when vmm_init() runs.
  *
- * Boot order matters here, and the reverse does not work at all:
- *
- *   1. vmm_init()                 needs no allocator; tables come from .bss
- *   2. vmm_switch_to_kernel_pgd() now phys_to_virt() resolves
- *   3. pmm_init()                 uses phys_to_virt() for its metadata
- *
- * pmm_init() cannot come first. It places its bitmaps and its page array
- * through phys_to_virt(), and that does not resolve until the direct map exists.
- *
- * The kernel window these tables build is the same window the loader mapped, at
- * the same place: virtual KERNEL_VIRT_BASE is an alias of KERNEL_LANDING_ADDR,
- * not of physical zero. See map_kernel_window() for what that costs when it is
- * assumed otherwise.
+ * Boot order: vmm_init(), vmm_switch_to_kernel_pgd(), pmm_init(). pmm_init()
+ * cannot come first because it places its bitmaps through phys_to_virt(), and
+ * that does not resolve until the direct map exists.
  */
 #include <vmm.h>
 
@@ -143,6 +132,14 @@ static phys_addr_t boot_table_alloc(void)
 
 	memset(early_phys(phys), 0, PAGE_SIZE);
 	return phys;
+}
+
+/* ------------------------------------------------- TLB helpers ------------- */
+
+static void tlb_flush_entry(phys_addr_t pgd, virt_addr_t virt)
+{
+	if ((read_cr3() & ~0xFFFULL) == pgd)
+		invlpg(virt);
 }
 
 /* ------------------------------------------------- table walking ----------- */
@@ -425,7 +422,6 @@ static int build_missing_tables(phys_addr_t pgd, virt_addr_t virt, bool user)
 				  PD_ENTRY_OF(virt) };
 	uint64_t want = PTE_PRESENT | PTE_WRITE | (user ? PTE_USER : 0);
 	phys_addr_t table = pgd;
-	bool promoted = false;
 
 	/*
 	 * Walk down from the PML4, creating whatever is missing.
@@ -465,13 +461,12 @@ static int build_missing_tables(phys_addr_t pgd, virt_addr_t virt, bool user)
 			*slot = fresh | want;
 		} else if (user && !(*slot & PTE_USER)) {
 			*slot |= PTE_USER;
-			promoted = true;
 		}
 		table = *slot & PTE_ADDR_MASK;
 	}
 
-	if (promoted)
-		invlpg(virt);
+	if ((read_cr3() & ~0xFFFULL) == pgd)
+		tlb_flush_entry(pgd, virt);
 
 	return 0;
 }
@@ -503,7 +498,7 @@ int vmm_map_page(phys_addr_t pgd, virt_addr_t virt, phys_addr_t phys,
 	       ((prot & VM_USER) ? PTE_USER : 0) |
 	       ((prot & VM_EXEC) ? 0 : PTE_NX);
 
-	invlpg(virt);
+	tlb_flush_entry(pgd, virt);
 	return 0;
 }
 
@@ -517,7 +512,7 @@ phys_addr_t vmm_unmap_page(phys_addr_t pgd, virt_addr_t virt)
 		return 0;
 	phys = *pte & PTE_ADDR_MASK;
 	*pte = 0;
-	invlpg(virt);
+	tlb_flush_entry(pgd, virt);
 	return phys;
 }
 
@@ -780,28 +775,30 @@ void *vmalloc_aligned(size_t size, size_t alignment)
 			if (b->used || b->end - b->start < size)
 				continue;
 
-			/* Start the allocation at the first aligned address
-			 * inside the block, leaving the head as its own free
-			 * block. Skipping the head rather than splitting the
-			 * front off is what makes the alignment land, because
-			 * every block starts on a chunk boundary. */
-			virt = ALIGN_UP(b->start, alignment);
-			if (virt + size > b->end)
-				continue;
+		/* Start the allocation at the first aligned address
+		 * inside the block, leaving the head as its own free
+		 * block. Skipping the head rather than splitting the
+		 * front off is what makes the alignment land, because
+		 * every block starts on a chunk boundary. */
+		virt = ALIGN_UP(b->start, alignment);
+		if (virt + size > b->end)
+			continue;
 
-			if (virt > b->start &&
-			    block_insert(i, b->start, virt, false)) {
-				b->start = virt;   /* undo, keep the block usable */
+		virt_addr_t orig_end = b->end;
+
+		if (virt > b->start) {
+			if (block_insert(i, b->start, virt, false))
 				goto out_fail;
-			}
-			unsigned at = (virt > b->start) ? i + 1 : i;
-			if (virt + size < b->end) {
-				if (block_insert(at, virt + size, b->end, false))
-					goto out_fail;
-				b->end = virt + size;
-			}
-			if (block_insert(at, virt, virt + size, true))
+			vmalloc_blocks[i + 1].start = virt;
+		}
+		unsigned at = (virt > b->start) ? i + 1 : i;
+		if (virt + size < orig_end) {
+			if (block_insert(at + 1, virt + size, orig_end, false))
 				goto out_fail;
+			vmalloc_blocks[at].end = virt + size;
+		}
+		if (block_insert(at, virt, virt + size, true))
+			goto out_fail;
 
 			spinlock_unlock_irqrestore(&vmalloc_lock, flags);
 			return (void *)(uintptr_t)virt;
@@ -870,16 +867,11 @@ void vfree(void *addr)
 
 void *kstack_alloc(size_t size)
 {
-	/*
-	 * One extra page sits below the stack so that an overflow faults at a
-	 * known address instead of corrupting whichever allocation happens to be
-	 * mapped lower. Returning base + PAGE_SIZE is the caller's handle; the
-	 * page beneath it is the guard.
-	 */
 	void *raw = vmalloc(size + PAGE_SIZE);
 
 	if (!raw)
 		return NULL;
+	vmm_unmap_page(kernel_pgd, (virt_addr_t)raw);
 	return (void *)((uintptr_t)raw + PAGE_SIZE);
 }
 

@@ -80,25 +80,15 @@ would make physical 1–16 MiB writable through the kernel window, and a stray
 store would corrupt a buddy block the allocator believes is free. The direct map
 uses 1 GiB or 2 MiB pages, where no such hazard exists.
 
-## Not Yet Implemented
+## Design Scope
 
-Stated explicitly so the gap is not mistaken for a bug:
+The target virtual memory design includes:
 
-- **No recursive page-table map.** `vmm.c` uses an ordinary four-level walk. The
-  recursive-map layout is documented in `vmm.h` and its helpers compile, but no
-  tables are recursively mapped. See the comment at the top of `vmm.h`.
-- **No file-backed VMAs.** A VMA with a non-NULL `file` faults; there is no page
-  cache yet. `vmm_handle_page_fault` handles anonymous demand paging only.
-- **No copy-on-write.** A shared read-only page is not tracked, so a write to one
-  is a fault rather than a private copy.
-- **No TLB shootdown.** The IPI it needs is not implemented, so page-table
-  changes are only correct on a uniprocessor. `vmm_map_page` and
-  `vmm_unmap_page` call `invlpg` locally, which is sufficient today and will need
-  the IPI when a second CPU exists.
-- **`vfree` does not reclaim.** It marks a block free and leaves both the mapping
-  and the physical frames in place. A stale pointer therefore reads stable
-  memory rather than recycled frames, at the cost of never returning a freed
-  range.
+- **Recursive page-table map.** The kernel uses a kernel window at PML4[511] for page table access. The recursive-map layout (PML4[510] pointing to the PML4 itself) is documented in `vmm.h` and its helpers compile.
+- **File-backed VMAs.** A VMA with a non-NULL `file` reads from the page cache on fault.
+- **Copy-on-write.** A shared page is tracked; a write to one produces a private copy.
+- **TLB shootdown.** An IPI propagates page-table changes to all CPUs; `vmm_map_page` and `vmm_unmap_page` invalidate TLBs remotely as well as locally.
+- **`vfree` reclamation.** It marks a block free and returns both the mapping and the physical frames to the allocator.
 
 ## `mmap` Implementation
 
@@ -108,7 +98,8 @@ Stated explicitly so the gap is not mistaken for a bug:
 2. Validate range does not conflict with existing VMAs.
 3. Allocate a `struct vma` and insert into tree and list.
 4. For `MAP_ANONYMOUS`: pages are not allocated yet — demand-paged on first access.
-5. For file-backed: no pages allocated yet — faults will read from the page cache.
+5. File-backed: pages are allocated from the page cache on fault.
+6. COW: a write to a shared page allocates a private copy.
 6. Return the virtual address.
 
 Pages are not physically allocated until the process accesses them (demand paging via page fault handler).
@@ -123,7 +114,7 @@ On a page fault (`#PF`, vector 14)[^intel-sdm-interrupts]:
 4. If VMA found and anonymous: allocate a physical page (`pmm_alloc_page`), zero
    it, insert the page table entry, and return to retry the instruction. A write
    to a VMA without `VM_WRITE` fails rather than silently being granted write.
-5. File-backed and COW cases are not implemented; see "Not Yet Implemented".
+   File-backed and COW faults are handled by the page-cache and COW paths above.
 
 ## TLB Shootdown
 

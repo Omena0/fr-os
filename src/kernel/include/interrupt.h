@@ -220,6 +220,26 @@ struct interrupt_frame {
  * These asserts pin the C side against the documented numbers, and the
  * .set FRAME_* block in the assembly is the same list; the build fails if a
  * field is added or reordered in only one of the two.
+ *
+ * Frame layout at interrupt_dispatch entry (RSP == frame pointer):
+ *
+ *   Ring-3 (user interrupt):           Ring-0 (kernel interrupt):
+ *   +0   rax                            +0   rax
+ *   ...                                 ...
+ *   +64  r11                            +64  r11
+ *   +72  vector                          +72  vector
+ *   +80  error_code                      +80  error_code
+ *   +88  rip                             +88  rip
+ *   +96  cs                              +96  cs
+ *   +104 rflags                          +104 rflags
+ *   +112 rsp (user RSP)                  +112 [interrupted kernel stack]
+ *   +120 ss (user SS)                    +120 [interrupted kernel stack]
+ *
+ * The CPU pushes RSP/SS only on privilege change (ring-3 -> ring-0).
+ * For ring-0 interrupts the frame is 112 bytes; for ring-3 it is 128 bytes.
+ * The struct below uses the ring-3 layout (128 bytes) so that the common
+ * prefix (up to rflags) is at fixed offsets for both rings. The rsp/ss
+ * fields are only valid when frame_from_user(f) is true.
  */
 _Static_assert(offsetof(struct interrupt_frame, vector) == 72,
 	       "interrupt_entry.S pushes the vector at offset 72");
@@ -233,8 +253,8 @@ _Static_assert(offsetof(struct interrupt_frame, rflags) == 104,
 _Static_assert(offsetof(struct interrupt_frame, rsp) == 112, "bad rsp offset");
 _Static_assert(offsetof(struct interrupt_frame, ss) == 120, "bad ss offset");
 _Static_assert(sizeof(struct interrupt_frame) == 128,
-	       "the stub pops 16 bytes of vector and error code after 9 saved "
-	       "registers; a size change here has to change the stub too");
+	       "struct uses ring-3 layout (128 bytes); ring-0 frame is 112 bytes "
+	       "and only the prefix up to rflags is valid");
 
 /* Raised on ring 3 by a POP SS or interrupt, to prevent an attacker from
  * slipping a second stack frame in between the two CPU pushes. */
@@ -251,6 +271,14 @@ _Static_assert(sizeof(struct interrupt_frame) == 128,
 static inline bool frame_from_user(const struct interrupt_frame *f)
 {
 	return (f->cs & 3) == 3;
+}
+
+/* Return the interrupted context's RSP. For ring-3 this is the saved user RSP;
+ * for ring-0 it is the kernel RSP at the point of interrupt, which equals the
+ * frame pointer plus the ring-0 frame size (112). */
+static inline uint64_t frame_user_rsp(const struct interrupt_frame *f)
+{
+	return frame_from_user(f) ? f->rsp : (uint64_t)f + 112;
 }
 
 /* ------------------------------------------------------------- API --------- */

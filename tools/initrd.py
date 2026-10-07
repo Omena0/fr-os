@@ -72,7 +72,12 @@ def main() -> int:
         left, path = spec.split("=", 1)
         if ":" in left:
             name, mode_s = left.split(":", 1)
-            mode = int(mode_s, 8)
+            try:
+                mode = int(mode_s, 8)
+            except ValueError:
+                print(f"error: invalid mode {mode_s!r} for {name}",
+                      file=sys.stderr)
+                return 1
         else:
             name, mode = left, 0o755
         entries.append((name, path, mode))

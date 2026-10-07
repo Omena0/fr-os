@@ -45,19 +45,18 @@ static u32 alloc_pid(void)
 /* ------------------------------------------------------------------ alloc --- */
 
 /*
- * Build the saved-register block a fresh task will be resumed into. It lives at
- * the top of the task's own kernel stack, and its `rip` is the C trampoline,
- * so the very first switch into the task looks like a return from
- * context_switch() that happened to call into a function with a valid frame.
+ * Build the saved-register block a fresh task will resume into. It lives
+ * at the top of the task's kernel stack, with `rip` pointing at
+ * task_trampoline so the first switch looks like a return from
+ * context_switch().
  */
 static void *build_initial_frame(void *stack_top)
 {
-	/*
-	 * 64 rather than sizeof(struct context): the frame base has to be
-	 * 16-byte aligned, and the struct is 56 bytes, so landing on an exact
-	 * multiple would leave the post-`ret` stack 16-aligned instead of the
-	 * 8 mod 16 the ABI wants at function entry. The extra 8 bytes of
-	 * headroom cost nothing and keep the arithmetic obvious.
+	/* 64 bytes: the frame base must be 16-byte aligned, and
+	 * sizeof(struct context) is 56, so landing on an exact
+	 * multiple would leave post-`ret` stack 8 mod 16 instead of the
+	 * ABI wants at function entry. The extra 8 bytes cost
+	 * nothing and keep the arithmetic obvious.
 	 */
 	struct context *c = (struct context *)((u64)stack_top - 64);
 

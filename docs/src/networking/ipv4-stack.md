@@ -57,7 +57,7 @@ Longest-prefix match is used to select the best route. On a single-interface QEM
 - Local subnet: directly connected via `eth0`.
 - Default route (0.0.0.0/0): via the QEMU gateway (default: `10.0.2.2`).
 
-Route lookup: linear scan (simple for small tables). For larger tables: trie-based lookup (future).
+Route lookup: linear scan (simple for small tables). For larger tables: trie-based lookup.
 
 ## Fragmentation
 

@@ -1,66 +1,34 @@
-# Multicore Scheduling Overview
+# Multicore Overview
 
-## Architecture
+## Design
 
-The OS uses a **distributed scheduling model**: each CPU has its own run queue and schedules from it independently. There is no global run queue. Threads are assigned to a CPU and remain there unless actively migrated.
+The kernel targets full SMP (Symmetric Multi-Processing) support with per-CPU run queues, IPI-based coordination, and cross-CPU load balancing.
 
-## Per-CPU Run Queues
+## Per-CPU Data Structures
 
-Each CPU maintains a `struct runqueue` in per-CPU memory:
+- **Per-CPU data**: `struct percpu_data percpu_data[MAX_CPUS]` with per-CPU GS base, kernel stack, TSS, and run queue pointer.
+- **Per-CPU run queues**: `struct runqueue *sched_runqueues[MAX_CPUS]` — each CPU has its own run queue with MLFQ, RT, and deadline queues.
+- **CPU affinity**: `cpumask_t` in `struct task` with `sched_set_affinity()` and `sched_select_cpu()`.
+- **Migration**: `sched_migrate()` places tasks on a global migration list (`global_queue`); destination CPU adopts via `sched_drain_global()`.
+- **IPI vectors**: `VECTOR_IPI_TLB_SHOOTDOWN` (240), `VECTOR_IPI_RESCHEDULE` (241), `VECTOR_IPI_HALT` (242) in `interrupt.h`.
+- **Need-resched flags**: Per-CPU `need_resched[MAX_CPUS]` for cross-CPU preemption signaling.
 
-```
-CPU 0 RunQueue     CPU 1 RunQueue     ... CPU N RunQueue
-  RT array           RT array                RT array
-  MLFQ [0]           MLFQ [0]               MLFQ [0]
-  MLFQ [1]           MLFQ [1]               MLFQ [1]
-  ...                ...                    ...
-  MLFQ [7]           MLFQ [7]               MLFQ [7]
-  current task       current task           current task
-  idle task          idle task              idle task
-```
+## SMP Initialization
 
-Per-CPU storage eliminates false sharing: each CPU's hot data is on its own cache lines.
+1. `apic_init()` configures the LAPIC on the BSP and discovers APs via ACPI/MADT.
+2. `smp_init()` sends SIPI/SIPI to start secondary CPUs.
+3. IPI send/receive is implemented for `VECTOR_IPI_RESCHEDULE` and `VECTOR_IPI_TLB_SHOOTDOWN`.
+4. `sched_drain_global()` consumes the global migration list on each CPU's tick.
+5. Per-CPU LAPIC timer setup provides local timer interrupts.
 
-## Initial Thread Placement
+## Execution Model
 
-When a new thread is created via `fork()` or `clone()`:
-
-1. The kernel selects the **least loaded CPU** (lowest `nr_running` count) as the initial target.
-2. The thread is placed on that CPU's run queue.
-3. If the spawning process has a CPU affinity mask, only CPUs in the mask are considered.
-
-## Interactivity: Cache-Aware Placement
-
-For latency-sensitive (interactive) threads waking from I/O, the scheduler prefers to place the thread on the **same CPU it last ran on** (its "home CPU"), provided:
-
-- The home CPU is within the thread's affinity mask.
-- The home CPU's run queue is not overloaded (load < 2× average).
-
-This maximizes cache reuse: the thread's data is likely still warm in the home CPU's L1/L2 caches.
-
-## Heterogeneous CPU Support
-
-For systems with heterogeneous CPUs (e.g., performance cores vs. efficiency cores), the scheduler maintains a **core weight model**:
-
-- Each CPU is assigned a weight (1 = efficiency core, 2 = performance core, by example).
-- Load balancing normalizes thread counts by weight rather than raw thread count.
-- RT and high-MLFQ-level threads are preferentially placed on high-weight CPUs.
-- Background (low MLFQ level) threads are preferentially placed on low-weight CPUs.
-
-On QEMU with uniform vCPUs, all weights are 1 (homogeneous).
-
-## Cross-CPU Wakeup
-
-When thread A wakes thread B (e.g., via pipe write, mutex unlock, condition signal):
-
-- If B was last running on a different CPU than A: B is placed on its home CPU's run queue.
-- If B's home CPU is overloaded: select the least loaded CPU in B's affinity mask.
-- The target CPU receives a reschedule IPI (vector 241) if the woken thread is higher priority than what is currently running there.
+On boot, the kernel starts on CPU 0 (BSP). All interrupts, scheduling, and userspace execution initially run on CPU 0. Per-CPU data structures are indexed by `this_cpu_id()`. As APs are brought online, they enter the scheduler and begin processing their own interrupts.
 
 ## Related Documents
 
 - [per-core-runqueues.md](per-core-runqueues.md)
 - [load-balancing.md](load-balancing.md)
-- [cpu-affinity.md](cpu-affinity.md)
 - [work-stealing.md](work-stealing.md)
-- [overview.md](overview.md)
+- [cpu-affinity.md](cpu-affinity.md)
+- [kernel/interrupt-handling.md](../kernel/interrupt-handling.md)

@@ -1,87 +1,55 @@
-# Per-Core Run Queues
+# Per-CPU Run Queues
 
-## Structure
-
-Each CPU has exactly one `struct runqueue`, allocated in per-CPU memory at boot time. The run queue is the sole source of scheduling decisions for that CPU.
-
-## Per-CPU Memory
-
-Per-CPU variables are stored in a segment-register-addressed region. Each CPU uses its `GS` segment base register to point at its own `struct percpu` block:
-
-```c
-struct percpu {
-    uint32_t         cpu_id;
-    struct runqueue  rq;             // the CPU's run queue
-    struct task      *current;       // currently running thread
-    struct task      *idle;          // this CPU's idle thread
-    struct slab_mag  *slab_mags[N_SLAB_SIZES]; // SLAB magazines
-    uint64_t         tick_count;     // number of scheduler ticks
-    uint64_t         last_balance_ns;// timestamp of last load balance
-    // ... other per-CPU fields
-};
-```
-
-Access: `this_cpu_read(field)` / `this_cpu_write(field, val)` — inline assembly using `GS`-relative addressing, no lock needed.
-
-## Locking
-
-The run queue spinlock (`rq.lock`) must be held to:
-
-- Add or remove a thread from any queue in the run queue.
-- Change the `nr_running` count.
-- Inspect or modify `rq.current`.
-
-The lock is a ticket spinlock to ensure FIFO ordering among multiple CPUs attempting to access the same run queue (e.g., during load balancing migration).
-
-Preemption is disabled while holding the run queue lock (spinlocks always disable preemption).
-
-## Thread State and Run Queue Membership
-
-A thread is in exactly one of these states at any time:
-
-| State | Run queue membership |
-|---|---|
-| `TASK_RUNNING` | On this CPU's run queue (or currently running) |
-| `TASK_INTERRUPTIBLE` | Off all run queues; on a wait queue |
-| `TASK_UNINTERRUPTIBLE` | Off all run queues; on a wait queue (not woken by signals) |
-| `TASK_ZOMBIE` | Off all run queues; waiting for parent to `wait()` |
-| `TASK_STOPPED` | Off all run queues; paused by SIGSTOP |
-
-The current running thread (`rq.current`) is not on the run queue FIFO — it is running, not waiting to be scheduled.
-
-## Idle Thread
-
-Each CPU has a dedicated idle thread that runs when no other thread is runnable. The idle thread:
-
-- Executes `hlt` to halt the CPU until the next interrupt (saves power).
-- Wakes on any interrupt (timer tick, IPI, device interrupt).
-- Is never migrated to another CPU.
-- Is always at the lowest priority and is never placed on a MLFQ queue — it is a special fallback.
-
-## Run Queue Statistics
-
-For load balancing and observability:
+## Data Structures
 
 ```c
 struct runqueue {
-    uint64_t nr_running;       // threads currently on this queue (not idle)
-    uint64_t nr_switches;      // total context switches since boot
-    uint64_t load_avg;         // exponential moving average of nr_running
-    uint64_t clock_ns;         // monotonic ns clock (updated each tick)
+    spinlock_t lock;
+    struct mlfq_queue mlfq[MLFQ_LEVELS];
+    u32 mlfq_bitmap;           // one bit per non-empty MLFQ level
+    struct rt_prio_array rt;   // RT priority array with 100 priorities
+    struct list_head deadline; // EDF-ordered deadline tasks
+    u32 deadline_count;
+    struct task *current;      // currently running task on this CPU
+    struct task *idle;         // idle task for this CPU
+    u64 nr_running;
+    u64 nr_switches;
+    u64 clock;                 // ticks on this CPU since boot
+    u32 deadline_util;         // summed deadline utilization (percent)
 };
 ```
 
-`load_avg` is computed using an exponential moving average with a 500 ms half-life, updated on each scheduler tick:
+- One `struct runqueue` per CPU, allocated in `sched_init()` on each CPU.
+- Indexed by `this_cpu_id()` via `sched_runqueues[MAX_CPUS]`.
+- All scheduling operations (enqueue, dequeue, pick) take the local run queue's spinlock.
 
-```
-load_avg = load_avg * 0.9 + nr_running * 0.1
+## Enqueue / Dequeue
+
+See [mlfq-priority-queues.md](mlfq-priority-queues.md) for MLFQ and [realtime-scheduler.md](realtime-scheduler.md) for RT queue operations.
+
+## Cross-CPU Scheduling
+
+Cross-CPU task placement uses a **global migration list** (`global_queue`):
+
+```c
+void sched_migrate(struct task *t, u32 cpu)
+{
+    t->rq_cpu = cpu;
+    if (!t->on_rq)
+        global_push(t);  // places on global_queue
+}
 ```
 
-This smooths out transient spikes and gives the load balancer stable data.
+The destination CPU calls `sched_drain_global()` to adopt tasks from the global list onto its local run queue.
+
+## Affinity
+
+Tasks have a `cpumask_t cpumask` field. `sched_set_affinity()` updates the mask and migrates the task if it's no longer allowed on its current CPU.
 
 ## Related Documents
 
+- [overview.md](overview.md)
+- [mlfq-priority-queues.md](mlfq-priority-queues.md)
 - [multicore-overview.md](multicore-overview.md)
 - [load-balancing.md](load-balancing.md)
-- [mlfq-priority-queues.md](mlfq-priority-queues.md)
-- [work-stealing.md](work-stealing.md)
+- [cpu-affinity.md](cpu-affinity.md)

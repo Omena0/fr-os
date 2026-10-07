@@ -183,8 +183,8 @@ protected_mode:
 	 * CPU from the instruction after the jump, and in 32-bit mode the operand
 	 * and address sizes both default to 32 bits, so an ordinary memory
 	 * operand is the whole m16&32 form with nothing to get wrong --
-	 * `lidtl idtr` assembles to `0f 01 /3` with a four-byte displacement, and
-	 * /3 is LIDT in this mode.
+ 	 * `lidt idtr` assembles to `0f 01 /3` with a four-byte displacement, and
+ 	 * /3 is LIDT in this mode.
 	 *
 	 * The 32-bit base is the whole point. Both tables are in .rodata and .rodata
 	 * has no fixed address -- it grew past 0xC000 while the 4 KiB bootstrap IDT
@@ -199,7 +199,7 @@ protected_mode:
 	 * the real-mode IVT still loaded, so this is also the first instruction that
 	 * makes a fault in stage2 a fault stage2 can describe.
 	 */
-	lidtl	idtr
+	lidt	idtr
 
 	/* Retire the boot drive. stage1 left it at a fixed offset in its own
 	 * image, which is still intact here: stage1 occupies 0x7C00-0x7DFF and

@@ -12,8 +12,8 @@ The OS implements a feature-complete subset of the ext4 filesystem. ext4 is used
 | Extents | Full | Replaces legacy indirect blocks |
 | HTree (large directories) | Full | B-tree directory indexing |
 | Large files (> 2 GB) | Full | 64-bit file sizes |
-| Extended attributes | Partial | In-inode xattrs; separate xattr block not implemented |
-| Inline data | Not implemented | Small files still use a data block |
+| Extended attributes | Partial | In-inode xattrs; separate xattr block |
+| Inline data | Planned | Small files still use a data block |
 | Sparse files | Full | Holes supported via extent tree |
 | Timestamps (nanosecond) | Full | |
 | `dir_index` (HTree) | Full | |

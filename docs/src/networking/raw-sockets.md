@@ -4,7 +4,7 @@
 
 Raw sockets (`SOCK_RAW`) allow a process to send and receive IP packets directly, bypassing the transport layer (TCP/UDP). They are used for:
 
-- Custom protocols not implemented by the kernel.
+- Custom protocols.
 - Packet injection and capture (network testing, monitoring).
 - ICMP implementations (`ping`).
 - Custom routing protocols.

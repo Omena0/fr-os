@@ -1,14 +1,11 @@
 /*
  * kprintf.c — formatted output built on a pluggable character sink.
  *
- * The formatter itself knows nothing about consoles. It emits characters one at
- * a time through a function pointer, and the callers adapt that to whatever
- * needs the text: the console, a fixed buffer, the panic dump, or a trace ring.
+ * The formatter emits characters through a function pointer; callers adapt
+ * it to the console, a buffer, the panic dump, or a trace ring.
  *
- * Conversion is done into a fixed local buffer and emitted with the padding
- * logic in one place, rather than each conversion handling its own width. That
- * keeps the number parser free of presentation concerns and makes it
- * testable.
+ * Conversion uses a fixed local buffer with padding logic in one place,
+ * keeping the number parser free of presentation concerns.
  */
 
 #include <kprintf.h>

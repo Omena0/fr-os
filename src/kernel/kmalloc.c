@@ -1,49 +1,15 @@
 /*
  * kmalloc: general kernel heap allocation.
  *
- * Two tiers, chosen by size. Requests up to KMALLOC_CACHE_MAX come from the
- * SLAB caches described in docs/src/memory/slab-allocator.md; anything larger
- * goes to vmalloc, which already hands out contiguous page-backed memory and
- * has no per-object overhead to amortise.
+ * Two tiers: requests up to KMALLOC_CACHE_MAX come from SLAB caches; larger
+ * ones go to vmalloc, which already hands out contiguous page-backed memory.
  *
- * The generic caches are the power-of-two set the document names, kmalloc-8
- * through kmalloc-4096. The 4 KiB ceiling is not arbitrary: it is the largest
- * class where a slab still holds a useful number of objects. An 8 KiB class
- * would need a 32 KiB slab to hold more than one object, so every such
- * allocation would cost four times its own size. Large objects are better off
- * on the vmalloc path, which is already correct for them.
+ * Locking is three-tier, cheapest first: per-CPU magazine, cache lock, zone
+ * lock. The magazine path is not lock-free — irqsave closes the window where
+ * an allocating interrupt observes a half-updated magazine.
  *
- * Locking is three-tier, cheapest first:
- *
- *   1. per-CPU magazine  -- one spinlock (irqsave) per CPU per cache
- *   2. cache lock        -- partial/full slab lists
- *   3. zone lock         -- inside pmm, for a new slab
- *
- * The document describes the magazine path as lock-free. It is not, and cannot
- * be while interrupts are enabled: an interrupt that allocates mid-push
- * observes a half-updated magazine, and the consequence is a duplicated
- * pointer handed to two callers. irqsave is a few cycles and closes the window.
- *
- * A slab's free count does not include objects parked in magazines, so a slab
- * whose objects are all in magazines looks "full" and is not returned to the
- * buddy allocator until those objects are flushed back. That is deliberately
- * conservative in the safe direction: reclaiming a slab early would free pages
- * that a magazine still hands out.
- *
- * Ordering. kmalloc_init() is the only thing that makes this allocator usable,
- * and every entry point here treats a cache that has not been through it as an
- * allocator with no pages: kmalloc() returns NULL, and it returns it before it
- * reads this_cpu_id(), so a call made before percpu_setup() cannot index the
- * per-CPU magazines with an unestablished CPU number. Nothing in this file
- * depends on a cache's fields being non-zero to be safe: every field that would
- * otherwise become a loop bound or a divisor is range-checked against the
- * slab's own capacity before it is used, so a zeroed cache produces a NULL
- * rather than a four-billion-iteration write loop. An allocation failure is
- * therefore always an answer this file can give.
- *
- * The `size` argument of kfree() is advisory. It selects a first candidate
- * cache, and the slab header decides the truth: a block is returned to the
- * class it was carved from, never to the class the caller happened to name.
+ * kfree() decides which tier a pointer came from by the pointer, not by size:
+ * vmalloc hands out page-aligned blocks, slab objects are never page-aligned.
  */
 
 #include <vmm.h>

@@ -3,7 +3,8 @@
 Stage 2 is `Fr Boot`'s second stage. It is a single binary built by
 `src/boot/stage2.ld` in three modes — 16-bit real, 32-bit protected, 64-bit long
 — with the mode-specific code in hand-written assembly and everything else in C
-compiled with `gcc -m32`.
+compiled with `gcc -m32` for 16/32-bit sections and `x86_64-elf-gcc` for the
+64-bit section.
 
 ## Entry Conditions
 
@@ -248,20 +249,20 @@ returns; if it ever did, `fail()` reports the fact.
 
 ```
 0x000000 – 0x0009FBFF   conventional RAM, low 1 MiB (MBR, stage1 image,
-                         stage 2's real-mode scratch, IVT/BIOS vectors)
+                          stage 2's real-mode scratch, IVT/BIOS vectors)
 0x008000 – 0x00DFFF     stage 2 image (.text, .trampoline, .rodata, .data,
-                         .bss) — at most 24 KiB, enforced by the linker
+                          .bss) — at most 24 KiB, enforced by the linker
 0x00E000 – 0x01FFFF     32-bit loader stack, 72 KiB, grows down from 0x20000
 0x020000 – 0x020FFF     firmware bounce window, up to eight 512-byte sectors
-                         per firmware call (BOUNCE_BYTES = 4 KiB)
+                          per firmware call (BOUNCE_BYTES = 4 KiB)
 0x021000 – 0x0210FF     INT 13h disk address packet (DAP_ADDR)
 0x021100 – 0x021FFF     VBE scratch, 0xF00 bytes (VBE_SCRATCH_ADDR)
 0x022000 – 0x022FFF     one program header reassembled out of the bounce window
-                         (PHDR_SCRATCH_ADDR)
+                          (PHDR_SCRATCH_ADDR)
 0x090000 – 0x090BFF     E820 map, up to 128 entries
 0x091000 – 0x0910E7     struct bootinfo
 0x100000 – 0x2CFFFF     the kernel image landing zone, once loaded
-                         (KERNEL_MAX_BYTES = 0x1D0000)
+                          (KERNEL_MAX_BYTES = 0x1D0000)
 0x2D0000 – 0x2DFFFF     bootstrap page tables
 ```
 

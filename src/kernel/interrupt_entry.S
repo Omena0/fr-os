@@ -410,6 +410,11 @@ ret_to_user:
  * interrupt_dispatch is entered. interrupt.h mirrors these numbers in
  * struct interrupt_frame and static-asserts them, so a change here that is not
  * mirrored there fails the build.
+ *
+ * Ring-3 (user interrupt) frame:  128 bytes (includes CPU-pushed RSP/SS)
+ * Ring-0 (kernel interrupt) frame: 112 bytes (no RSP/SS pushed by CPU)
+ * The struct uses the ring-3 layout; for ring-0 only the prefix up to
+ * FRAME_RFLAGS (offset 104) is valid. See frame_user_rsp() in interrupt.h.
  */
 	.set FRAME_RAX,		0
 	.set FRAME_RDI,		8
@@ -427,4 +432,4 @@ ret_to_user:
 	.set FRAME_RFLAGS,	104
 	.set FRAME_RSP,		112
 	.set FRAME_SS,		120
-	.set FRAME_SIZE,		128
+	.set FRAME_SIZE,	128		/* ring-3 frame size; ring-0 is 112 */

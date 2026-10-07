@@ -1,16 +1,13 @@
 /*
  * klog.c — structured kernel logging.
  *
- * Output goes to the console, which fans out to serial and the framebuffer. The
- * prefix carries level, CPU and timestamp, because a bare message is close to
- * useless in a multicore system where two subsystems can emit interleaved and
- * the ordering is the interesting part.
+ * Output goes to the console, which fans out to serial and framebuffer. The
+ * prefix carries level, CPU and timestamp; ordering is the interesting part
+ * in a multicore system.
  *
- * Formatting is done through kprintf's sink interface into a fixed stack
- * buffer. A heap allocation here would be a bug: klog is called from
- * allocation-free contexts (early boot, panic paths, interrupt handlers), and
- * a message that cannot be printed because the allocator is exhausted is a
- * message lost exactly when it mattered.
+ * Formatting uses a fixed stack buffer. A heap allocation here would be a bug
+ * because klog is called from allocation-free contexts (early boot, panic,
+ * interrupt handlers).
  */
 
 #include <klog.h>

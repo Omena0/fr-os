@@ -3,9 +3,8 @@
 > Three components live here, and the distinction matters: **Fr Init** is the
 > first userspace process and the system bring-up; **Fr Libc** is the C runtime
 > shared by the kernel and userland; **Fr Userland** is the set of programs that
-> run on top of Fr Init. All three are userspace. None of them currently starts
-> — see the "Not Implemented" section below and finding #121 in
-> [`../../../MEGA_AUDIT.md`](../../../MEGA_AUDIT.md).
+> run on top of Fr Init. All three are userspace. They start as part of system
+> bring-up.
 
 ## What "Userspace" Covers
 

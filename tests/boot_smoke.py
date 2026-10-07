@@ -473,7 +473,7 @@ def read_log(path):
         return b""
 
 
-def run_boot(root, image, log, errlog, timeout, allow_tcg, extra_args):
+def run_boot(root, image, log, errlog, timeout, allow_tcg, extra_args, command=None):
     """Boot the image via run.sh and return a dict describing what happened.
 
     run.sh is reused rather than reimplemented. Its QEMU invocation is the one
@@ -491,6 +491,11 @@ def run_boot(root, image, log, errlog, timeout, allow_tcg, extra_args):
     measured here) rather than the whole timeout. run.sh's watchdog is left in
     place as the backstop, so a bug in the polling loop costs time and not a
     hung test.
+
+    If command is given, once the boot milestones have been reached the
+    command is fed to the guest via the serial port and the function waits
+    until the guest's output contains a SUMMARY block; the parsed summary is
+    attached under "test_summary".
     """
     os.makedirs(os.path.dirname(log), exist_ok=True)
     for path in (log, errlog, log + ".watchdog"):
@@ -513,7 +518,7 @@ def run_boot(root, image, log, errlog, timeout, allow_tcg, extra_args):
     started = time.time()
     with open(errlog, "wb") as errfh:
         proc = subprocess.Popen(["./run.sh"] + list(extra_args), cwd=root,
-                                env=env, stdin=subprocess.DEVNULL,
+                                env=env, stdin=subprocess.PIPE,
                                 stdout=subprocess.DEVNULL, stderr=errfh)
         qemu_pid = None
         # Why the poll loop stopped, recorded rather than inferred. An earlier
@@ -522,6 +527,7 @@ def run_boot(root, image, log, errlog, timeout, allow_tcg, extra_args):
         # was reported as having reached the last milestone. A diagnostic that
         # invents the reason for the run it is diagnosing is worse than none.
         stop_reason = "bound"
+        test_summary = None
         try:
             while True:
                 if time.time() - started > timeout:
@@ -534,8 +540,45 @@ def run_boot(root, image, log, errlog, timeout, allow_tcg, extra_args):
                 _found, missing, _sig, _pres = scan(text)
                 if missing is None and _found:
                     stop_reason = "milestones"
+                    # Once the boot milestones are reached, optionally send a
+                    # command to the guest (e.g. "run runtime-tests") and wait
+                    # for the test-runner's SUMMARY block to appear in the log.
+                    if command is not None:
+                        # Give init a moment to process its flushed banner line,
+                        # then write the command to the guest's stdin (which QEMU
+                        # connects to its serial port).
+                        time.sleep(0.2)
+                        try:
+                            written = proc.stdin.write((command + "\n").encode())
+                            proc.stdin.flush()
+                            print("DEBUG: Sent command '%s' to guest (%d bytes written)"
+                                  % (command, written), file=sys.stderr)
+                        except BrokenPipeError:
+                            print("DEBUG: Failed to send command '%s' - broken pipe"
+                                  % command, file=sys.stderr)
+                            test_summary = None
+                            break
+                        except Exception as e:
+                            print("DEBUG: Failed to send command '%s' - %s"
+                                  % (command, e), file=sys.stderr)
+                            test_summary = None
+                            break
+                        # Poll for the SUMMARY line, which the test-runner prints
+                        # when it finishes running all suites.
+                        deadline = time.time() + timeout
+                        while time.time() < deadline:
+                            if proc.poll() is not None:
+                                break
+                            text = load_text(read_log(log))
+                            if "==================== SUMMARY ====================" in text:
+                                test_summary = _parse_summary(text)
+                                break
+                            time.sleep(0.05)
+                        else:
+                            # Timeout: the test-runner didn't produce a summary
+                            # within the allotted time.
+                            pass
                     break
-                if qemu_pid is None:
                     qemu_pid = find_qemu(proc.pid)
                 time.sleep(0.025)
         finally:
@@ -583,7 +626,68 @@ def run_boot(root, image, log, errlog, timeout, allow_tcg, extra_args):
         "timed_out_draining": timed_out_draining,
         "stderr": err,
         "log_bytes": len(read_log(log)),
+        "test_summary": test_summary,
     }
+
+
+def _parse_summary(text):
+    """Parse the test-runner SUMMARY block from the serial log.
+
+    Returns a dict with suites/tests counts, or None if not found.
+    """
+    lines = text.splitlines()
+    result = {"suites": None, "tests": None}
+    for i, line in enumerate(lines):
+        if "==================== SUMMARY ====================" in line:
+            # Look for the Suites and Tests lines in the next few lines
+            for j in range(i + 1, min(i + 4, len(lines))):
+                m = re.match(r"Suites:\s+(\d+)\s+total,\s+(\d+)\s+passed,\s+(\d+)\s+failed,\s+(\d+)\s+skipped", lines[j])
+                if m:
+                    result["suites"] = {"total": int(m.group(1)), "passed": int(m.group(2)), "failed": int(m.group(3)), "skipped": int(m.group(4))}
+                    continue
+                m = re.match(r"Tests:\s+(\d+)\s+total,\s+(\d+)\s+passed,\s+(\d+)\s+failed,\s+(\d+)\s+skipped", lines[j])
+                if m:
+                    result["tests"] = {"total": int(m.group(1)), "passed": int(m.group(2)), "failed": int(m.group(3)), "skipped": int(m.group(4))}
+                    continue
+            break
+    return result
+
+
+def print_runtime_tests(info, text):
+    """Print the runtime test results extracted from the serial log.
+
+    Returns "skip", "fail" or "pass".
+    """
+    summary = info.get("test_summary")
+    lines = text.splitlines()
+    summary_idx = None
+    for i, line in enumerate(lines):
+        if "==================== SUMMARY ====================" in line:
+            summary_idx = i
+            break
+    if summary_idx is None:
+        print("runtime-tests: no summary produced by the guest")
+        return "skip"
+    print("=== Runtime tests ===")
+    # Print suite result lines found before the summary
+    for i in range(summary_idx):
+        if "=== Suite " in lines[i]:
+            print("  %s" % lines[i][:160])
+    # Print the summary block
+    for j in range(summary_idx, min(summary_idx + 4, len(lines))):
+        print("  %s" % lines[j][:160])
+    # Determine verdict
+    failed_suites = 0
+    failed_tests = 0
+    if summary:
+        failed_suites = summary.get("suites", {}).get("failed", 0)
+        failed_tests = summary.get("tests", {}).get("failed", 0)
+    if failed_suites or failed_tests:
+        print("runtime-tests: FAIL -- %d suite(s) and %d test(s) failed"
+              % (failed_suites, failed_tests))
+        return "fail"
+    print("runtime-tests: PASS")
+    return "pass"
 
 
 def qemu_complaints(info):
@@ -970,12 +1074,16 @@ def main(argv):
     timeout_s = os.environ.get("BOOT_SMOKE_TIMEOUT", str(DEFAULT_TIMEOUT))
     allow_tcg = os.environ.get("BOOT_SMOKE_ALLOW_TCG", "") not in ("", "0")
     extra = []
+    run_tests = False
     args = argv[1:]
     i = 0
     while i < len(args):
         if args[i] == "--image" and i + 1 < len(args):
             image = args[i + 1]
             i += 2
+        elif args[i] == "--run-tests":
+            run_tests = True
+            i += 1
         else:
             extra.append(args[i])
             i += 1
@@ -1061,7 +1169,8 @@ def main(argv):
 
     accel = "TCG" if (not kvm_ok or os.environ.get("FORCE_TCG")) else "KVM"
     try:
-        info = run_boot(ROOT, mine, log, errlog, timeout, allow_tcg, extra)
+        command = "run runtime-tests" if run_tests else None
+        info = run_boot(ROOT, mine, log, errlog, timeout, allow_tcg, extra, command)
     finally:
         # The copy goes and the log stays: the image is reproducible from the
         # tree, and leaving a stale copy lying around is how this project read
@@ -1101,6 +1210,17 @@ def main(argv):
     if failure is not None:
         print(failure, file=sys.stderr)
         return EXIT_FAIL
+
+    # ---- runtime tests: the real checks ----
+    if run_tests:
+        verdict = print_runtime_tests(info, text)
+        if verdict == "skip":
+            print("runtime-tests: SKIP -- the test-runner did not finish; "
+                  "the runtime path was NOT exercised")
+            return EXIT_SKIP
+        if verdict == "fail":
+            print("runtime-tests: FAIL")
+            return EXIT_FAIL
 
     print("boot-smoke: PASS -- %d/%d milestones in order, no failure "
           "signature, %.1fs (%s)"

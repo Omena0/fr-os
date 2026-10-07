@@ -1,0 +1,111 @@
+/*
+ * test_ipc_syscalls.c - IPC syscall tests
+ *
+ * Tests for syscalls 128-139: pipe, pipe2, futex, ...
+ */
+
+#include "test_framework.h"
+#include <unistd.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+
+static inline long syscall1(long n, long a1) {
+    long ret;
+    asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1) : "rcx", "r11", "memory");
+    return ret;
+}
+
+static inline long syscall2(long n, long a1, long a2) {
+    long ret;
+    asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1), "S"(a2) : "rcx", "r11", "memory");
+    return ret;
+}
+
+static inline long syscall3(long n, long a1, long a2, long a3) {
+    long ret;
+    register long r10 asm("r10") = a3;
+    asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1), "S"(a2), "r"(r10) : "rcx", "r11", "memory");
+    return ret;
+}
+
+/* errno values */
+#define ENOMEM      12
+#define EFAULT      14
+#define EINVAL      22
+#define EMFILE      24
+#define ENFILE      23
+
+/* ===== pipe ===== */
+
+static int test_pipe_basic(void) {
+    int fds[2];
+    long ret = syscall2(SYS_pipe, (long)fds, 0);
+    TEST_ASSERT_EQ(ret, 0, "pipe should succeed");
+    TEST_ASSERT(fds[0] >= 0 && fds[1] >= 0, "both fds should be valid");
+    
+    /* Test they're readable/writable */
+    syscall1(SYS_close, fds[0]);
+    syscall1(SYS_close, fds[1]);
+    return TEST_PASS;
+}
+
+static int test_pipe_invalid_fds_ptr(void) {
+    /* Pass NULL for fds - should fail with EFAULT */
+    long ret = syscall2(SYS_pipe, 0, 0); /* both args 0 = NULL */
+    TEST_ASSERT_EQ(ret, -EFAULT, "pipe with NULL fds should return EFAULT");
+    return TEST_PASS;
+}
+
+static int test_pipe_read_write(void) {
+    int fds[2];
+    long ret = syscall2(SYS_pipe, (long)fds, 0);
+    TEST_ASSERT_EQ(ret, 0, "pipe should succeed");
+    
+    const char *msg = "hello\n";
+    ssize_t wret = syscall3(SYS_write, fds[1], (long)msg, 6);
+    TEST_ASSERT_EQ(wret, 6, "pipe write should succeed");
+    
+    char buf[10];
+    ssize_t rret = syscall3(SYS_read, fds[0], (long)buf, sizeof(buf));
+    TEST_ASSERT_EQ(rret, 6, "pipe read should return same data");
+    TEST_ASSERT_EQ(memcmp(buf, msg, 6), 0, "pipe data should match");
+    
+    syscall1(SYS_close, fds[0]);
+    syscall1(SYS_close, fds[1]);
+    return TEST_PASS;
+}
+
+/* ===== futex ===== */
+
+static int test_futex_basic(void) {
+    /* futex needs memory address and synchronization - skip basic test */
+    /* Just test that the syscall doesn't crash */
+    int val = 0;
+    long ret = syscall3(SYS_futex, (long)&val, FUTEX_WAIT, 0);
+    /* Will timeout or return EAGAIN/EINVAL/etc */
+    TEST_ASSERT(ret <= 0, "futex should return error or timeout");
+    return TEST_PASS;
+}
+
+static int test_futex_invalid_addr(void) {
+    /* Test futex with invalid address */
+    long ret = syscall3(SYS_futex, 0x1000, FUTEX_WAIT, 0);
+    TEST_ASSERT(ret == -EFAULT || ret == -EINVAL,
+                "futex with invalid address should return EFAULT/EINVAL");
+    return TEST_PASS;
+}
+
+/* ===== Test Suite Registration ===== */
+
+struct test_suite test_ipc_syscalls = {
+    .name = "IPC Syscalls",
+    .cases = (struct test_case[]) {
+        { "pipe_basic", test_pipe_basic, false },
+        { "pipe_invalid_fds_ptr", test_pipe_invalid_fds_ptr, false },
+        { "pipe_read_write", test_pipe_read_write, false },
+        { "futex_basic", test_futex_basic, false },
+        { "futex_invalid_addr", test_futex_invalid_addr, false },
+    },
+    .num_cases = 5,
+};

@@ -1,27 +1,10 @@
 /*
  * init.c — Fr Init, PID 1, the interactive REPL and the system bring-up.
  *
- * There is no login, no shell and no init in this kernel yet, so init has to
- * be all three: it announces itself, then reads commands from stdin forever
- * until that stream reaches EOF. Every byte it emits is tagged "Fr Init: " so
- * a multiplexed console log still says which process said what.
- *
- * The name hierarchy, as the banners below use it:
- *
- *   Fr OS          the project -- Fr Init is one of its components
- *     Fr Core      the kernel this process is executing on
- *     Fr Init      this process: PID 1 and the system's bring-up
- *     Fr Userland  the programs that run on top of Fr Init
- *     Fr Libc      the C runtime both of the above are built with
- *
- * So init calls *itself* Fr Init, reports the project as Fr OS, and names the
- * kernel as Fr Core. Printing KERNEL_VERSION_STRING -- which expands to "Fr
- * Core 0.1.0" -- as this process's own identity is how userspace used to
- * introduce itself as the kernel.
- *
- * Input-layer assumption: the terminal is in raw mode and sends \r for
- * Enter, so getline() is not used. The REPL reads byte-by-byte and
- * implements its own echo and backspace handling.
+ * No login, no shell and no init in this kernel yet, so init has to be all
+ * three: it announces itself, then reads commands from stdin forever until
+ * EOF. Every byte emitted is tagged "Fr Init: " so a multiplexed console log
+ * still says which process said what.
  */
 #include <stdarg.h>
 #include <stdio.h>
@@ -502,6 +485,10 @@ int main(void)
 			}
 			if (c < 0x20 || c == 0x7f)
 				continue;
+			if (cap >= sizeof(line) - 1) {
+				fputs("\n[init] line too long, truncated\n", stdout);
+				break;
+			}
 			line[cap++] = (char)c;
 			line[cap] = '\0';
 		}

@@ -1,31 +1,14 @@
 /*
  * pmm.c — buddy allocator for physical pages.
  *
- * The allocator manages physical frames in power-of-two blocks. A request for
- * 2^order frames is served from a free list for that order; if none is
- * available, a larger block is split down. Freeing coalesces a block with its
+ * A request for 2^order frames is served from a free list for that order; if
+ * none is available, a larger block is split down. Freeing coalesces with the
  * buddy recursively, which is what keeps fragmentation from growing without
- * bound: a 1 GiB block built from 4 KiB allocations becomes possible again as
- * soon as every one of its halves is free.
+ * bound.
  *
- * Implementation notes worth knowing before changing anything here:
- *
- *   - The page metadata array lives in the direct map, so phys_to_page() is a
- *     multiply and an add rather than a lookup.
- *   - Each zone is locked independently. The allocator is the busiest lock in
- *     the kernel and there is no reason for a DMA-zone allocation to contend
- *     with a high-memory one.
- *   - Only block *heads* live on the free lists. Every other frame of a
- *     free order-N block carries PG_TAIL and is reachable only through its
- *     head. Anything that wants to reserve, pin or otherwise take memory out
- *     of circulation must therefore walk the free lists — walking the page
- *     array for PG_FREE finds heads only, which is what silently did nothing
- *     when pmm_reserve_range() was asked to reserve a range that lay in the
- *     middle of a large block. See exclude_free_blocks_locked().
- *   - A free block's buddy can only be coalesced if it is itself free AND at
- *     the same order AND at a page-index that differs only in the order bit.
- *     All three conditions are checked; missing any one produces a corrupt
- *     allocator that mostly works.
+ * Only block heads live on the free lists. Every other frame of a free order-N
+ * block carries PG_TAIL and is reachable only through its head. Reserving must
+ * walk the free lists, not the page array.
  */
 
 #include <pmm.h>
@@ -47,27 +30,17 @@
  * the authority and that document is stale.)
  */
 
-/* Zone boundaries. ZONE_DMA exists because of the ISA bus, not because of the
- * CPU: it is the lowest 16 MiB of physical memory. */
 #define ZONE_DMA_END    0x01000000ull
 #define ZONE_NORMAL_END 0x100000000ull
 
 static struct pmm_zone zones[ZONE_COUNT];
 
-/* Page metadata array. Sized for the largest machine the kernel supports and
- * placed in the direct map during early init. */
+/* Page metadata array. */
 static struct page *page_array;
 
-/*
- * Frames the allocator tracks, i.e. the address-space bound derived from the
- * E820 map. This is *not* how much memory there is: it counts every frame below
- * the highest usable address, including the ones the E820 map reports as a hole.
- * pmm_usable_pages below is the honest "how much memory is there".
- */
 phys_addr_t pmm_total_pages;
 phys_addr_t pmm_usable_pages;
 
-/* Frames currently on a free list, across all zones. */
 phys_addr_t pmm_free_page_count;
 
 struct pmm_stats pmm_stats;
@@ -1045,7 +1018,6 @@ void pmm_init(phys_addr_t e820_phys, uint32_t e820_count)
 				    PAGE_SIZE);
 	meta_bytes = bitmap_bytes * 2 + page_array_bytes;
 
-	/* Prefer a single run for all of it. */
 	one_run = meta_find_run(map, e820_count, meta_bytes, &run_lo, &run_hi);
 
 	while (!one_run) {
@@ -1141,13 +1113,10 @@ void pmm_init(phys_addr_t e820_phys, uint32_t e820_count)
 	page_array = page_map;
 	present_words = (pmm_total_pages / 64) + 1;
 
-	/* 3. Default: everything is reserved. A frame becomes available only by
-	 * being explicitly marked present and unreserved below. The E820 gap
-	 * regions therefore stay unavailable for free. */
+	/* 3. Default: everything is reserved. */
 	memset(frame_present, 0, (size_t)present_words * sizeof(u64));
 	memset(frame_reserved, 0xFF, (size_t)present_words * sizeof(u64));
 
-	/* 4. Mark usable ranges present, and stamp each frame's zone. */
 	for (uint32_t i = 0; i < e820_count; i++) {
 		phys_addr_t base = map[i].base;
 		phys_addr_t length = map[i].length;
@@ -1257,10 +1226,9 @@ void pmm_init(phys_addr_t e820_phys, uint32_t e820_count)
 		}
 	}
 
-	/* 6. Hand the free memory to the buddy allocator. */
+	/* 5. Reserve the metadata, then the kernel image. */
+
 	/*
-	 * Build the free lists.
-	 *
 	 * Regions are handed over in ascending address order and blocks within a
 	 * region are cut at the largest order that is aligned at the current
 	 * frame and fits inside both the run of usable frames and the zone, which

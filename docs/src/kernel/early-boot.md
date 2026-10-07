@@ -13,17 +13,7 @@ Early boot is the phase from `kernel_main()` entry to the point where the schedu
 
 The sequence is strictly ordered. Each step depends on all prior steps.
 
-### Step 1 — Validate Boot Info
-
-```c
-kernel_main(struct BootInfo *boot_info) {
-    if (boot_info->magic != BOOT_MAGIC) early_panic("bad boot magic");
-    if (boot_info->version != BOOT_VERSION) early_panic("bad boot version");
-```
-
-`early_panic` writes to COM1 and halts. It does not use the normal panic system (not yet initialized). The `BootInfo` structure follows the Multiboot specification[^multiboot-bootinfo].
-
-### Step 2 — Early Serial Output
+### Step 1 — Early Serial Output
 
 ```c
     early_serial_init();   // COM1 at 115200 8N1, direct port I/O
@@ -31,111 +21,134 @@ kernel_main(struct BootInfo *boot_info) {
     early_printk("[early] Kernel started\n");
 ```
 
-### Step 3 — Physical Memory Manager
+### Step 2 — Validate Boot Info
 
 ```c
-    pmm_init(phys_of(boot.e820_addr), boot.e820_count);
+    kmain(uint64_t bootinfo_phys) {
+        if (boot_info->magic != BOOT_MAGIC) early_panic("bad boot magic");
+        if (boot_info->version != BOOT_VERSION) early_panic("bad boot version");
 ```
 
-There is no `memory_map` array inside `struct bootinfo`. The struct carries the
-E820 map's *physical address* and entry count and nothing else about memory —
-`boot.h` defines it, and the kernel copies it out of the loader's memory before
-touching anything. The E820 memory map is defined in the ACPI specification[^acpi-e820].
+`early_panic` writes to COM1 and halts. It does not use the normal panic system. The `BootInfo` structure follows the Multiboot specification[^multiboot-bootinfo].
 
-`pmm_init()` parses the map, reserves its own metadata arena and the kernel image
-(`KERNEL_LANDING_ADDR .. phys(_ebss)`), builds the buddy free lists, and makes
-memory available. `main.c` then reserves `[0, 1 MiB)` separately, because the
-bootloader is still executing out of it.
+### Step 3 — Copy Boot Info
 
-Stage 2's own bootstrap page tables at `0x2D0000` are **not** reserved by anyone,
-despite sitting just above the image. Finding #30.
+```c
+    const struct bootinfo *src = boot_ptr((phys_addr_t)bootinfo_phys);
+    boot = *src;
+    // Copy E820 map to kernel's static buffer
+```
 
-### Step 4 — Virtual Memory Manager
+The kernel copies the bootloader's structures before they can be reclaimed by the physical allocator.
+
+### Step 4 — Per-CPU Setup and CPU Features
+
+```c
+    percpu_setup(0);
+    cpu_features_init();
+```
+
+The per-CPU area must exist before anything uses `this_cpu()`, and CPU features must be detected before paging setup (which chooses 1 GiB vs 2 MiB pages based on CPUID).
+
+### Step 5 — Virtual Memory Manager
 
 ```c
     vmm_init();
+    vmm_switch_to_kernel_pgd();
 ```
 
-Sets up the kernel page tables (higher-half direct map, vmalloc region). Switches CR3 to the kernel PML4, discarding the bootloader's temporary page tables. After this, the identity map from the bootloader is no longer accessible.
+Sets up the kernel page tables (higher-half direct map, vmalloc region, kernel window). Switches CR3 to the kernel PML4, discarding the bootloader's temporary page tables.
 
-### Step 5 — SLAB Allocator
+### Step 6 — Physical Memory Manager
 
 ```c
-    slab_init();
+    pmm_init(kernel_virt_to_phys(e820_copy), boot.e820_count);
+    pmm_reserve_range(0, 1024 * 1024);              // Low 1 MiB (bootloader still there)
+    pmm_reserve_range(0x002D0000, 0x00010000);      // Bootstrap page tables
 ```
 
-Registers default slab caches for common kernel objects (`task_struct`, `file`, `inode`, `dentry`, `socket`, etc.). `kmalloc` becomes available after this point.
+PMM parses the E820 map, builds buddy free lists, and makes memory available. VMM must come first because PMM places its metadata through `phys_to_virt()`.
 
-### Step 6 — Structured Logging
+### Step 7 — SLAB Allocator
+
+```c
+    kmalloc_init();
+```
+
+Initializes generic kmalloc caches (8 bytes through 4 KiB). `kmalloc` becomes available after this point.
+
+### Step 8 — Framebuffer Console (if present)
+
+```c
+    console_init(&boot);  // Attaches framebuffer backend, allocates cell buffer
+```
+
+The framebuffer backend is attached here (after `kmalloc_init`) because it allocates the cell buffer.
+
+### Step 9 — Structured Logging
 
 ```c
     klog_init();
     klog_info("%s booting on %d CPUs", KERNEL_VERSION_STRING, cpu_features.logical_processors);
 ```
 
-The ring buffer, serial sink, and (later) framebuffer sink are activated. `early_printk` is replaced by `klog`.
+The ring buffer, serial sink, and framebuffer sink are activated. `early_printk` is replaced by `klog`.
 
-### Step 7 — GDT and TSS (per CPU 0)
-
-```c
-    gdt_init();    // Load kernel GDT
-    tss_init();    // Initialize CPU 0 TSS with kernel stack
-```
-
-### Step 8 — IDT and APIC
+### Step 10 — IDT and Interrupts
 
 ```c
-    idt_init();    // Set up all 256 IDT entries
-    apic_init();   // Enable LAPIC, configure I/O APIC, calibrate LAPIC timer
-    sti();         // Enable interrupts
+    idt_init();           // Set up all 256 IDT entries, install PIT, unmask IRQ0
 ```
 
-Interrupts are now active. The scheduler tick will fire, but the scheduler is not yet initialized — the tick handler returns immediately until step 9.
+The IDT is initialized before the GDT so that faults during GDT reload are caught by the kernel's own handlers, not the bootloader's.
 
-### Step 9 — Scheduler
+### Step 11 — GDT and TSS (per CPU 0)
 
 ```c
-    sched_init();  // Initialize MLFQ queues, real-time class, idle thread
+    asm volatile("cli");
+    gdt_reload(0);        // Load kernel GDT, TSS
+    tss_set_kernel_stack(__kernel_stack_top);
+    exceptions_init();    // Install exception handlers
 ```
 
-### Step 10 — Module System
+Interrupts are disabled across the GDT reload to prevent a timer tick from interleaving with the far-return frame. `tss_set_kernel_stack` sets RSP0 for ring-3 transitions.
+
+### Step 12 — Syscall Entry
 
 ```c
-    module_init();
+    syscall_init();       // Install LSTAR/STAR/SFMASK
 ```
 
-### Step 11 — Driver Probes
+Installed after the IDT so that a user process cannot reach a SYSCALL instruction with no dispatcher behind it.
+
+### Step 13 — TTY/Console
 
 ```c
-    driver_probe_all();  // Run all compiled-in driver init functions
+    tty_init();           // Ring buffers, keyboard handler, enable scanning
 ```
 
-Discovers PCI devices, initializes the block device layer, registers the framebuffer driver.
+Attaches the console TTY before creating the first user process.
 
-### Step 12 — Root Filesystem Mount
+### Step 14 — Scheduler
 
 ```c
-    vfs_init();
-    ext4_register();
-    mount_root();  // Mount ext4 from the boot device to "/"
+    sched_init();         // Initialize MLFQ queues, real-time class, idle thread
 ```
 
-### Step 13 — SMP Bring-Up
+Creates per-CPU run queues, idle task, and publishes `per_cpu(current)`.
+
+### Step 15 — Create Init Process
 
 ```c
-    smp_init();    // Send INIT/SIPI to all APs, wait for them to register
+    struct task *init = process_create_init();
+    // Creates first user process (PID 1), loads ELF, sets up address space
 ```
 
-Each AP runs its own abbreviated init: GDT, TSS, IDT, APIC, SLAB magazine, then enters the scheduler idle loop.
-
-### Step 14 — Spawn Init
+### Step 16 — Enter Scheduler
 
 ```c
-    kernel_exec("/sbin/init", NULL, NULL);
-    // Does not return
+    sched_start();        // Never returns; hands CPU to first runnable task
 ```
-
-`kernel_exec` creates the first user process (PID 1) and starts the scheduler. CPU 0 becomes a normal scheduler participant at this point.
 
 ## Error Handling During Early Boot
 

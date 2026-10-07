@@ -9,10 +9,14 @@
 
 The kernel is a **monolithic kernel** with the following characteristics:
 
-- All core subsystems (memory, scheduler, VFS, networking, IPC) run in ring 0.
+- Core subsystems (memory, scheduler) run in ring 0.
 - Device driver functionality is split: a minimal core driver runs in ring 0, the bulk of driver logic runs in ring 3 as a userspace process.
-- The kernel is **fully preemptible** outside of critical sections (spinlocks, interrupt handlers).
+- The kernel is **preemptible** outside of critical sections (spinlocks, interrupt handlers). Preemption is timer-driven via `need_resched`; there is no voluntary preemption from mutexes or RCU.
 - Kernel threads and user threads share the same scheduling infrastructure.
+
+The following subsystems are designed into the kernel: VFS, networking stack, IPC
+(pipes/shared memory), mutexes, RCU, loadable kernel modules, and security
+(capabilities/seccomp/namespaces).
 
 ## Source Layout
 
@@ -38,6 +42,27 @@ src/kernel/
 └── lib/                Internal kernel utility library
 ```
 
+The intended source layout groups subsystems into directories:
+
+```
+src/kernel/
+├── *.c                 Core kernel files (main.c, idt.c, gdt.c, vmm.c, pmm.c, 
+│                       kmalloc.c, sched.c, task.c, process.c, mm.c, syscall.c, 
+│                       elf.c, tty.c, console.c, klog.c, panic.c, percpu.c, 
+│                       cpu_features.c, module.c, ...)
+├── *.h                 Public headers (interrupt.h, sched.h, vmm.h, pmm.h, 
+│                       task.h, process.h, types.h, boot.h, syscall.h, ...)
+├── include/            Internal kernel headers
+├── drivers/            Driver sources (serial.c, keyboard.c, pci.c, ...)
+└── arch/x86_64/        Architecture-specific assembly and C
+    ├── *.c             (idt.c, gdt.c, apic.c, cpu.c)
+    └── *.S             (context.asm, syscall_entry.S, interrupt_entry.S)
+```
+
+Most subsystems live as individual `.c` files directly in `src/kernel/` rather than
+in subdirectories. The `mm/`, `sched/`, `fs/`, `ipc/`, `net/`, `security/`,
+`module/`, and `lib/` directories are the target layout.
+
 ## Core Kernel Components
 
 | Component | File(s) | Description |
@@ -60,12 +85,12 @@ Kernel objects (processes, threads, files, sockets, etc.) are reference-counted.
 | Lock type | Use case |
 |---|---|
 | Spinlock | Short critical sections in interrupt context or between CPUs |
-| Mutex | Long-held locks that allow sleeping (process context only) |
-| RW lock | Reader-heavy data (dentry cache, routing table) |
-| RCU | Read-mostly with infrequent updates (module list, process list) |
+| **Mutex** | Long-held locks that allow sleeping (process context only) |
+| **RW lock** | Reader-heavy data (dentry cache, routing table) |
+| **RCU** | Read-mostly with infrequent updates (module list, process list) |
 | Per-CPU | Data accessed only by one CPU (run queue, SLAB magazine) — no lock needed |
 
-Spinlocks disable preemption for their duration. Mutexes do not.
+Spinlocks disable preemption for their duration.
 
 ## Preemption Model
 
@@ -75,7 +100,7 @@ The kernel is preemptible with preemption disabled only in:
 - Interrupt handlers
 - NMI handlers
 
-Preemption is implemented via a per-thread `preempt_count`. When `preempt_count` drops to zero and a reschedule flag is set, the scheduler runs at the next safe point.
+Preemption is implemented via a per-thread `preempt_count`. When `preempt_count` drops to zero and a reschedule flag is set (by the timer tick), the scheduler runs at the next safe point.
 
 ## Related Documents
 

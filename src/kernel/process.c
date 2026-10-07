@@ -523,7 +523,10 @@ long copy_string_from_user(char *dst, u64 src, size_t max)
 
 	if (!t || !t->mm)
 		return -EFAULT;
-	if (src >= USER_ADDRESS_MAX)
+	/* Check the full range up to max bytes, not just the start address.
+	 * The loop walks up to max-1 bytes, so we must ensure src+max does
+	 * not wrap or exceed USER_ADDRESS_MAX. */
+	if (src >= USER_ADDRESS_MAX || max > USER_ADDRESS_MAX - src)
 		return -EFAULT;
 
 	size_t i = 0;
@@ -788,15 +791,13 @@ static phys_addr_t clone_table(phys_addr_t src, unsigned level)
 			child = page_to_phys(cp);
 			memcpy(phys_to_virt(child), phys_to_virt(e & PTE_ADDR_MASK),
 			       PAGE_SIZE);
+		} else if (level == 3 && (e & PTE_PS)) {
+			/* 1 GiB leaf: cannot be copied eagerly (order 18 exceeds
+			 * BUDDY_MAX_ORDER), so share the page. */
+			child = e & PTE_ADDR_MASK;
 		} else if (level == 2 && (e & PTE_PS)) {
-			/* A 2 MiB leaf: the frame is 512 contiguous pages. */
-			struct page *cp = pmm_alloc_pages(9, GFP_KERNEL);
-
-			if (!cp)
-				return 0;
-			child = page_to_phys(cp);
-			memcpy(phys_to_virt(child), phys_to_virt(e & PTE_ADDR_MASK),
-			       2ULL * 1024 * 1024);
+			/* 2 MiB leaf: share the page instead of copying 2 MiB. */
+			child = e & PTE_ADDR_MASK;
 		} else {
 			child = clone_table(e & PTE_ADDR_MASK, level - 1);
 			if (!child)
@@ -1723,8 +1724,8 @@ static long execve_common(struct task *t, u64 path, u64 argv, u64 envp)
 {
 	/* Two staging buffers: argv strings and envp strings, so the two
 	 * copies of a long argument cannot run into each other. */
-	static char argv_buf[MAX_EXEC_ARGS][MAX_ARG_LEN];
-	static char envp_buf[MAX_EXEC_ARGS][MAX_ARG_LEN];
+	char argv_buf[MAX_EXEC_ARGS][MAX_ARG_LEN];
+	char envp_buf[MAX_EXEC_ARGS][MAX_ARG_LEN];
 	char kpath[MAX_ARG_LEN];
 	char *kargv[MAX_EXEC_ARGS + 1];
 	char *kenvp[MAX_EXEC_ARGS + 1];

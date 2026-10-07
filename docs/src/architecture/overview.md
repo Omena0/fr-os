@@ -1,5 +1,11 @@
 # Architecture Overview
 
+> **This page describes the intended design and goals of the project, not the
+> current implementation state.** Unless a subsection explicitly says something
+> is implemented, treat it as a target the project is working toward.
+> For the verified current state, see [`../../STATE.md`](../../STATE.md) and
+> [`../../MEGA_AUDIT.md`](../../MEGA_AUDIT.md).
+
 > **Fr OS** is the project. **Fr Core** is the kernel. Everything on this page is
 > about the whole system unless it says otherwise. Where a page describes a
 > component, it names that component: `Fr Boot` (bootloader), `Fr Init` (first

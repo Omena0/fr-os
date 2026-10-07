@@ -118,8 +118,6 @@ static bool panic_addr_writable(uint64_t addr)
 			(addr >> 12) & 0x1FF] & 2) != 0;
 }
 
-/* Resolved once, on the first character: the tables do not change under a
- * panic, and walking them per character would be pure waste. */
 static bool panic_vga_usable = false;
 static bool panic_vga_probed = false;
 
@@ -163,8 +161,6 @@ static __noreturn void panic_common(const char *fmt, va_list ap,
 
 	kvsnprintf(panic_state.message, sizeof(panic_state.message), fmt, ap);
 
-	/* Red banner, then the message, then registers in hex. A panic is the
-	 * one place where readability beats brevity. */
 	panic_emit("\r\n\r\n");
 	panic_emit("==================================================\r\n");
 	panic_emit("           KERNEL PANIC\r\n");

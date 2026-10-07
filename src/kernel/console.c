@@ -158,17 +158,14 @@ static void console_fb_move(uint32_t x, uint32_t y);
 /*
  * Acquire and release the console.
  *
- * Interrupts are disabled for the duration because the callers include
- * interrupt handlers and panic paths: if an interrupt landed while this CPU
- * held the lock, and the handler also tried to print, the result is a
- * self-deadlock that no amount of care in the lock itself can fix.
+ * Interrupts are disabled for the duration because callers include interrupt
+ * handlers and panic paths: if an interrupt landed while this CPU held the
+ * lock, and the handler also tried to print, the result is a self-deadlock.
  *
- * The saved flag word has to travel with the lock, and it has to be per-CPU:
- * two CPUs can be inside the console at once and each must restore its own IF
- * state. It is returned by console_acquire and handed straight back to
- * console_release, so it lives in the caller's frame for exactly as long as
- * the lock is held. A shared variable would be correct on UP and wrong on SMP
- * the moment two CPUs overlapped.
+ * The saved flag word lives in the caller's frame, not a shared variable: two
+ * CPUs can be inside the console at once, and each must restore its own IF
+ * state. A shared variable would be correct on UP and wrong on SMP the moment
+ * two CPUs overlapped.
  */
 static u64 console_acquire(void)
 {
@@ -187,11 +184,10 @@ static void console_release(u64 flags)
  *
  * 0xB8000 is a fixed physical address, and the way to reach it changes
  * underneath this file: vmm_switch_to_kernel_pgd() replaces the bootloader's
- * identity view of the low 4 GiB, after which the only mapping of that page is
- * through the direct map. So the address is recomputed on every access rather
- * than cached -- console_init(NULL) enables this backend before the switch and
- * the first character after it is a store, so a value remembered from the wrong
- * regime is a #PF and nothing else.
+ * identity view of the low 4 GiB. The address is recomputed on every access
+ * rather than cached: console_init(NULL) enables this backend before the
+ * switch and the first character after it is a store, so a cached value from
+ * the wrong regime is a #PF.
  */
 static inline volatile struct vga_cell *vga_mem(void)
 {
@@ -327,7 +323,6 @@ static void console_fb_init(struct framebuffer_info *info)
 	 * of padding. Some BIOSes report a pitch wider than width * bpp/8; using
 	 * the pitch is what makes text land in the right place on those.
 	 */
-	uint32_t bytes_per_pixel = info->bpp / 8;
 	fb.cols = info->width / fb.font_width;
 	fb.rows = info->height / fb.font_height;
 	if (fb.cols == 0 || fb.rows == 0)

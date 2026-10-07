@@ -11,9 +11,9 @@ Userspace
 Kernel
   Virtual Memory Allocator (VMA)
       — manages virtual address space regions per process
-  SLAB Allocator
+  kmalloc (per-CPU caches backed by buddy allocator)
       — kernel object cache, fixed-size allocations
-      — backed by virtual pages from VMM
+      — backed by physical pages from PMM
   Virtual Memory Manager (VMM)
       — page-level virtual mapping (page tables, mmap, brk)
       — requests physical pages from PMM
@@ -22,29 +22,27 @@ Kernel
       — manages physical memory zones (DMA, Normal, High)
   Raw RAM Layer
       — frame tracking, allocation metadata
-      — NUMA node awareness
 ```
 
 ## Allocation Sizing Guide
 
 | Size | Recommended Allocator |
 |---|---|
-| 1 byte – 512 bytes | SLAB (from appropriate size class) |
-| 512 bytes – 8 KB | SLAB or `kmalloc` (backed by SLAB) |
+| 1 byte – 512 bytes | `kmalloc` (from appropriate size class) |
+| 512 bytes – 8 KB | `kmalloc` (larger size classes) |
 | 8 KB – 1 MB | `vmalloc` (VMM, non-contiguous physical) |
 | > 1 MB | `vmalloc` or direct buddy allocation |
 | Userspace heap | `malloc` (libc) → `brk`/`mmap` syscalls |
 
 ## Design Principles
 
-- **O(1) fast path**: Per-CPU SLAB magazines absorb the common case, so the
-  per-object cost is a push or pop rather than a list walk. The magazine path
+- **O(1) fast path**: Per-CPU `kmalloc` caches absorb the common case, so the
+  per-object cost is a push or pop rather than a list walk. The cache path
   does take a spinlock — it is not lock-free — but it is the cheapest of the
-  three tiers and it is what keeps an interrupt that allocates mid-operation
+  tiers and it is what keeps an interrupt that allocates mid-operation
   from handing the same pointer to two callers.
-- **Fragmentation avoidance**: SLAB reuses freed objects before requesting new
-  pages, and the buddy allocator coalesces free blocks with its buddy on free.
-  There is no compaction daemon and no page reclamation daemon.
+- **Fragmentation avoidance**: The buddy allocator coalesces free blocks with
+  its buddy on free. There is no compaction daemon and no page reclamation daemon.
 - **Strict physical/virtual separation**: `vmalloc` never assumes physical
   contiguity; only `pmm_alloc_dma_range()` does, and it exists for DMA.
 - **NUMA awareness**: none. `struct page` has no `numa_node`, and every zone is
@@ -56,8 +54,7 @@ Kernel
 
 | Layer | Locking |
 |---|---|
-| Per-CPU SLAB magazine | One spinlock (irqsave) per CPU per cache — **not** lock-free |
-| SLAB cache (`partial`/`full` lists) | Per-cache spinlock |
+| Per-CPU kmalloc cache | One spinlock (irqsave) per CPU per cache — **not** lock-free |
 | Buddy allocator | Per-zone spinlock |
 | PMM frame metadata bitmaps | Unsynchronised after `pmm_init()` |
 | VMM page-table updates | **None.** `invlpg` flushes whichever address space CR3 currently names, and nothing protects the walk |
@@ -76,7 +73,7 @@ and no overcommit manager. The documents that describe them —
 - [physical-allocator.md](physical-allocator.md)
 - [buddy-allocator.md](buddy-allocator.md)
 - [virtual-memory.md](virtual-memory.md)
-- [slab-allocator.md](slab-allocator.md)
+- [kmalloc.md](kmalloc.md)
 - [userspace-malloc.md](userspace-malloc.md)
 - [per-cpu-caches.md](per-cpu-caches.md)
 - [numa-policies.md](numa-policies.md)

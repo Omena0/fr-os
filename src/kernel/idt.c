@@ -49,27 +49,16 @@ struct idt_entry {
 	uint32_t reserved;
 } __attribute__((packed));
 
-/* 0x8E: present, DPL 0, type 0b01110 -- a 64-bit *interrupt* gate.
+/* 0x8E: present, DPL 0, type 0b01110 — a 64-bit interrupt gate.
  *
- * In long mode the type field has exactly two valid values, 0x0E and 0x0F, and
- * they differ in what they do to IF: 0x0E is an interrupt gate and clears IF on
- * entry, 0x0F is a trap gate and leaves it set. Every handler here wants IF
- * clear, and nothing in the entry stub issues a `cli`, so this has to be an
- * interrupt gate. With a trap gate a 100 Hz PIT line re-enters the dispatch
- * path while the previous handler is still running, against a PIC line that has
- * not been acknowledged yet.
+ * In long mode the type field has exactly two valid values, 0x0E and 0x0F.
+ * 0x0E is an interrupt gate (clears IF on entry), 0x0F is a trap gate (leaves
+ * IF set). Every handler here wants IF clear, so this must be 0x8E: with a
+ * trap gate a 100 Hz PIT line re-enters the dispatch path while the previous
+ * handler is still running, against a PIC line that has not been acknowledged.
  *
- * There is no gate-size bit here. The size of a gate is the width of the IDT
- * entry, not a field: a 32-bit IDT has 8-byte entries whose 0x0E/0x0F are the
- * *32-bit* interrupt/trap gates, and a 64-bit IDT has 16-byte entries whose
- * 0x0E/0x0F are the 64-bit ones. This table's struct idt_entry is already the
- * 16-byte form, so it was always 64-bit gates.
- *
- * An earlier version of this comment claimed the opposite -- that 0x0E was the
- * 32-bit gate, that its low three bits were a size field, and that handlers were
- * being entered at offset[31:0] and faulting. That was wrong, and it was not a
- * harmless wrong comment: it came with a change from 0x8E to 0x8F, which turned
- * all 256 gates into trap gates. Corrected in the commit that reverted it.
+ * The size of a gate is the width of the IDT entry, not a field: this
+ * struct idt_entry is already the 16-byte form, so it was always 64-bit gates.
  */
 #define IDT_TYPE_INTERRUPT_GATE  0x8E
 
@@ -424,7 +413,7 @@ static void report_exception(struct interrupt_frame *f, const char *action)
 		exception_name(f->vector), (unsigned long)f->vector,
 		(unsigned long)f->cs, (unsigned long)(f->cs & 3),
 		(unsigned long)f->rip, (unsigned long)f->error_code,
-		(unsigned long)f->rsp, action);
+		(unsigned long)frame_user_rsp(f), action);
 
 	kprintf("     rdi=0x%016lx rsi=0x%016lx rdx=0x%016lx rcx=0x%016lx "
 		"r8=0x%016lx r9=0x%016lx r10=0x%016lx r11=0x%016lx\n",

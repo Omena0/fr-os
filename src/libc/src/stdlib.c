@@ -273,21 +273,21 @@ static int strtoxx(const char *nptr, char **endptr, int base, int is_unsigned,
 
 int atoi(const char *nptr)
 {
-	int result;
+	int result = 0;
 	strtoxx(nptr, NULL, 10, 0, &result, W_INT);
 	return result;
 }
 
 long atol(const char *nptr)
 {
-	long result;
+	long result = 0;
 	strtoxx(nptr, NULL, 10, 0, &result, W_LONG);
 	return result;
 }
 
 long long atoll(const char *nptr)
 {
-	long long result;
+	long long result = 0;
 	strtoxx(nptr, NULL, 10, 0, &result, W_LLONG);
 	return result;
 }

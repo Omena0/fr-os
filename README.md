@@ -67,7 +67,7 @@ The serial port is the primary observation channel. It is not a convenience.
 
 The kernel boots. This is a real, verified statement, not an aspiration — see
 [`MEGA_AUDIT.md`](MEGA_AUDIT.md) for the boot log that establishes it and for the
-status of every one of the 177 findings in a full source-tree audit.
+status of every one of the findings in a full source-tree audit.
 
 A boot gets as far as this:
 
@@ -87,18 +87,23 @@ memory: 4058 MiB total, 4057 MiB free, 7 E820 entries
 ```
 
 The `abcdefg` and the `0.000` timestamps are both real, both known, and both
-listed in the audit. **The system does not yet reach userspace.** Fr Init cannot
-start, so nothing after this point has been exercised. The audit's "what actually
-blocks the system now" section lists, in order: the initrd container being handed
-to the ELF loader instead of an ELF; the syscall entry path; the absence of a
-timer; `build_missing_tables()` being unable to create a PDPT; and the absence of
-any TLS setup.
+listed in the audit. **The system reaches userspace.** Fr Init runs in ring 3
+and prints its prompt; the boot-smoke test in `tests/boot_smoke.py` asserts the
+full chain from stage1 through to "Fr Init: type 'help' for the command list,
+EOF to stop", and `make check` runs it on every CI build. The audit's "what
+actually blocks the system now" section lists, in order: the initrd container
+being handed to the ELF loader instead of an ELF; the syscall entry path; the
+absence of a timer; `build_missing_tables()` being unable to create a PDPT;
+and the absence of any TLS setup.
 
 ## Documentation
 
-`docs/src/` holds the design documentation. It is a mixture of implemented
-behaviour, design intent, and — for a number of subsystems — pure fiction. Read
-the status line on any page that has one before you write code against it.
+`docs/src/` holds the design documentation. Unless a page explicitly states that
+something is implemented, **treat it as a goal or intended behaviour**, not the
+current state. Many subsystems documented here do not yet exist in code.
+
+For the verified current state, see [`STATE.md`](STATE.md) and
+[`MEGA_AUDIT.md`](MEGA_AUDIT.md).
 
 Start with:
 
@@ -120,9 +125,9 @@ src/userspace/    Fr Init and Fr Userland
 src/include/      Shared headers, including version.h (the branding macros)
 tools/            disk.py, initrd.py, bin2c.py, psf2c.py — the build helpers
 docs/src/         Documentation
-MEGA_AUDIT.md     177-finding source audit with a per-finding status
+MEGA_AUDIT.md     source audit with a per-finding status
 ```
 
 ## Licence
 
-See `config.json`. The copyright holder field has never been filled in.
+See `docs/config.json`. The copyright holder is Omena0.

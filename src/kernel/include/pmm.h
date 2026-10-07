@@ -42,7 +42,7 @@
 #define PG_FREE        (1u << 0)
 #define PG_ALLOCATED   (1u << 1)
 #define PG_BUDDY       (1u << 2)   /* head of a buddy block at some order */
-#define PG_SLAB        (1u << 3)
+#define PG_SLAB        (1u << 9)
 #define PG_TAIL        (1u << 4)   /* interior page of a higher-order block */
 #define PG_ZEROED      (1u << 5)   /* known to be all zeroes */
 #define PG_PINNED      (1u << 6)   /* mlock'd: never reclaim */

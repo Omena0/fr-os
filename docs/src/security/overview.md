@@ -12,8 +12,8 @@ Security is built into the OS at every layer. The core principle is **default-de
 | Process reads another process's memory | Virtual address space isolation (page tables, U/S bit) |
 | Heap/stack buffer overflow → arbitrary code execution | ASLR + NX/XD + stack canaries + guard pages |
 | Compromised service pivots to root | Capability bitmask, seccomp filter, namespace isolation |
-| Kernel code execution via DMA | IOMMU (future); currently QEMU provides virtual device isolation |
-| Timing side-channels (Spectre) | Kernel page-table isolation (KPTI, future); SMEP prevents kernel gadgets from userspace |
+| Kernel code execution via DMA | IOMMU; QEMU provides virtual device isolation |
+| Timing side-channels (Spectre) | Kernel page-table isolation (KPTI); SMEP prevents kernel gadgets from userspace |
 | Resource exhaustion (DoS) | Per-process resource limits (`RLIMIT_*`), memory overcommit policy |
 
 ## Security Subsystems

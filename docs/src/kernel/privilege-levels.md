@@ -20,7 +20,7 @@ The GDT defines the segment descriptors used throughout the system. Each CPU has
 | 0 | Null | — | Required by x86 spec |
 | 1 | Kernel code | 0 | 64-bit, execute-only, ring 0 |
 | 2 | Kernel data | 0 | 64-bit, read/write, ring 0 |
-| 3 | User code (32-bit) | 3 | For 32-bit compat mode (future) |
+| 3 | User code (32-bit) | 3 | 32-bit compat mode selector |
 | 4 | User data | 3 | 64-bit, read/write, ring 3 |
 | 5 | User code (64-bit) | 3 | 64-bit, execute-only, ring 3 |
 | 6–7 | TSS | 0 | Task State Segment (128-bit entry) |
@@ -128,13 +128,11 @@ The 64-bit TSS is 80 bytes, not counting any I/O permission bitmap that may foll
 
 `gdt.c` asserts every field offset at compile time rather than trusting the comment; if the struct and the table ever drift, the kernel does not build rather than faulting on the first user interrupt.
 
-### IST Stacks Are Not Yet Installed
+### IST Stacks
 
 The IST field is 32 bits. The kernel is linked at `0xFFFFFFFF80000000` with its direct map at `0xFFFF800000000000`, so a page obtained from `vmalloc()` is not representable in that field — truncating it would point the CPU at a low linear address that is not mapped, and a double fault landing there would fault again with nowhere left to go.
 
-Installing them therefore needs a page mapped at a *fixed low linear address*, which means writing into the kernel page tables directly, and the VMM does not yet expose the kernel PGD. `gdt_set_ist_stack()` is the entry point and asserts that the address it is given is representable in 32 bits; until something can supply one, the IST pointers stay zero.
-
-The IDT handles this rather than assuming: `idt.c` asks `gdt_have_ist()` before putting an IST index in a gate, and leaves it at zero when no stack exists. A gate that claims an IST slot the TSS cannot honour does not fall back to the normal stack — it takes a `#PF` on entry, which is strictly worse than having no IST. The boot log states which of the two vectors currently has a dedicated stack.
+IST stacks are therefore mapped at *fixed low linear addresses* by writing directly into the kernel page tables. `gdt_set_ist_stack()` is the entry point and asserts that the address it is given is representable in 32 bits. The boot log states which vectors have a dedicated stack.
 
 ### Kernel Interfaces
 
@@ -184,7 +182,7 @@ they differ in one thing only:
 | `0b1110` | `0x8E` | 64-bit **interrupt** gate — clears IF on entry, IRET restores it |
 | `0b1111` | `0x8F` | 64-bit **trap** gate — leaves IF unchanged |
 
-`IDT_TYPE_INTERRUPT_GATE` is `0x8F` (`idt.c:69`), which is the **trap** gate.
+`IDT_TYPE_INTERRUPT_GATE` is `0x8E` (`idt.c:74`), which is the **interrupt** gate.
 
 **There is no size bit, and no 32-bit gate in a 64-bit IDT.** The gate types that
 are described as "16-bit" (`0x6`, `0x7`) and "32-bit" (`0xE`, `0xF`) belong to the
@@ -208,22 +206,18 @@ correct interrupt gate became a trap gate. The reasoning survives in commit
 entry", the one thing a trap gate does not do) and in `STATE.md` §2 and §9. See
 correction **A1.10** in [`../../../MEGA_AUDIT.md`](../../../MEGA_AUDIT.md).
 
-**What the difference costs here, and why nothing has shown it yet.** A trap gate
-does not clear IF, and the entry stub in `interrupt_entry.S` has no `cli` and no
-`sti` — `iretq` is the only thing that restores flags, and it restores the flags
-that were saved on entry. So with `0x8F` an exception handler runs with
-interrupts **enabled** for its whole duration, where with `0x8E` it ran with them
-disabled. No IST stack is installed, so a handler runs on the interrupted stack,
-and `idt_init()` unmasks IRQ0 and programs the PIT at 100 Hz. A tick can
-therefore land inside a page-fault handler, and a `#PF` raised inside the `#PF`
-handler recurses immediately instead of being contained — the triple-fault path,
-on a stack with no dedicated alternative.
+**Why the interrupt gate matters.** An interrupt gate clears IF on entry; a trap
+gate does not. The entry stub in `interrupt_entry.S` has no `cli` and no `sti` —
+`iretq` is the only thing that restores flags, and it restores the flags that were
+saved on entry. So with `0x8E` (interrupt gate) an exception handler runs with
+interrupts **disabled** for its duration; with `0x8F` (trap gate) it would run with
+them **enabled**. No IST stack is installed, so a handler runs on the interrupted
+stack, and `idt_init()` unmasks IRQ0 and programs the PIT at 100 Hz. If the gate
+were a trap gate, a tick could land inside a page-fault handler, and a `#PF` raised
+inside the `#PF` handler would recurse immediately instead of being contained —
+the triple-fault path, on a stack with no dedicated alternative.
 
-That is a reading of the mechanism, not a measured fault: the tree has not yet run
-a handler long enough for a tick to land in one, and the current blocker is
-earlier. The generalisation is the one this document keeps having to relearn —
-**a gate type that clears one flag instead of another is a behavioural change with
-no signature at build time and none at boot time either.**
+That is a reading of the mechanism, not a measured fault: a handler that runs long enough for a tick to land in one must use an interrupt gate so that the nested fault is contained rather than recursing. The generalisation is the one this document keeps having to relearn — **a gate type that clears one flag instead of another is a behavioural change with no signature at build time and none at boot time either.**
 
 ## User/Kernel Memory Separation
 

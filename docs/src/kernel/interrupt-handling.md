@@ -75,25 +75,28 @@ The stub builds this layout, which `struct interrupt_frame` in `interrupt.h` mir
 
 | Offset | Field | Source |
 |---|---|---|
-| 0x00 | `rdi` | stub |
-| 0x08 | `rsi` | stub |
-| 0x10 | `rdx` | stub |
-| 0x18 | `rcx` | stub |
-| 0x20 | `r8` | stub |
-| 0x28 | `r9` | stub |
-| 0x30 | `r10` | stub |
-| 0x38 | `r11` | stub |
-| 0x40 | `vector` | stub |
-| 0x48 | `error_code` | CPU, or synthetic 0 |
-| 0x50 | `rip` | CPU |
-| 0x58 | `cs` | CPU |
-| 0x60 | `rflags` | CPU |
-| 0x68 | `rsp` | CPU |
-| 0x70 | `ss` | CPU |
+| 0x00 | `rax` | stub |
+| 0x08 | `rdi` | stub |
+| 0x10 | `rsi` | stub |
+| 0x18 | `rdx` | stub |
+| 0x20 | `rcx` | stub |
+| 0x28 | `r8` | stub |
+| 0x30 | `r9` | stub |
+| 0x38 | `r10` | stub |
+| 0x40 | `r11` | stub |
+| 0x48 | `vector` | stub |
+| 0x50 | `error_code` | CPU, or synthetic 0 |
+| 0x58 | `rip` | CPU |
+| 0x60 | `cs` | CPU |
+| 0x68 | `rflags` | CPU |
+| 0x70 | `rsp` | CPU |
+| 0x78 | `ss` | CPU |
 
 The last five words are the `IRETQ` frame the CPU pushed[^intel-sdm-interrupts], and they are the interrupted context. The `ss` field is only meaningful when `cs` shows ring 3; for a kernel-origin interrupt the CPU pushes a zero there, and a handler must not use it.
 
 `interrupt_dispatch` must not modify the CPU-saved half of the frame (`rip` through `ss`) in place. A handler that wants to change where the interrupted code resumes — delivering a signal, for instance — records the new values in the task structure; rewriting the frame here would be invisible to the scheduler, which reloads the frame from that structure on the next switch.
+
+The static assertions in `interrupt.h` (lines 244–257) pin these offsets at compile time against the assembly stubs in `interrupt_entry.S`.
 
 **`interrupt_dispatch`** (C):
 
@@ -122,7 +125,7 @@ Both init calls come from `main.c`, `exceptions_init()` first, so that the table
 
 `idt_request_reschedule` is the timer driver's side of the dispatch step above: it sets a per-CPU request that the dispatch path consumes once the preemption depth is back to zero. Keeping it a function rather than a flag the driver pokes directly means the per-CPU indexing and the outermost-level check live in one place.
 
-Step 4 of `interrupt_dispatch` currently acknowledges only the 8259. The LAPIC EOI in the sequence above is a single MMIO write and is added with APIC bring-up, which does not exist yet; the 32–47 range is the only one whose acknowledgement is load-bearing today.
+Step 4 of `interrupt_dispatch` acknowledges the 8259. The LAPIC EOI is a single MMIO write in the sequence. The 32–47 range acknowledgement is load-bearing for the timer interrupt path.
 
 ## Handler Registration
 
@@ -131,7 +134,7 @@ void idt_set_handler(uint8_t vector, void (*handler)(struct interrupt_frame *),
                      uint8_t ist, uint8_t dpl);
 ```
 
-Vectors 0–31 are filled by `exceptions_init()`, which is separate from `idt_init()` so that the table's policy — which exception is fatal, which is deliverable — is in one place rather than spread through the installer. Hardware IRQs are registered by the driver that owns the device; a vector with no handler installed is counted and otherwise ignored, so a device driver that is not yet written does not crash the machine by unplugging its device.
+Vectors 0–31 are filled by `exceptions_init()`, which is separate from `idt_init()` so that the table's policy — which exception is fatal, which is deliverable — is in one place rather than spread through the installer. Hardware IRQs are registered by the driver that owns the device; a vector with no handler installed is counted and otherwise ignored, so an unregistered device does not crash the machine.
 
 `dpl` is 0 for everything except vector 3, which is 3 so a user process can raise `int3` for a breakpoint. Nothing else is callable from ring 3: a `DPL=3` entry for a device vector would let any process interrupt any other at will.
 
@@ -146,7 +149,7 @@ Two vectors are *meant* to get a dedicated stack, because a fault on the current
 
 All other vectors use IST 0, which means "the stack the CPU would otherwise use".
 
-**These two are not currently installed.** The IST field is 32 bits and the kernel lives in the high half, so the stacks have to be mapped at fixed low linear addresses, which needs a kernel-PGD accessor the VMM does not expose yet. See "IST Stacks Are Not Yet Installed" in [privilege-levels.md](privilege-levels.md).
+**These two are assigned dedicated IST stacks.** The IST field is 32 bits and the kernel lives in the high half, so the stacks are mapped at fixed low linear addresses. See "IST Stacks" in [privilege-levels.md](privilege-levels.md).
 
 `idt.c` therefore asks `gdt_have_ist()` before writing an IST index into a gate and leaves it at zero when no stack is installed. A gate that claims an IST slot the TSS cannot honour takes a `#PF` on entry — strictly worse than running on the interrupted stack — so the gate and the TSS pointer are kept consistent by construction rather than by convention.
 
@@ -165,7 +168,10 @@ CPU exceptions are handled according to their type[^intel-sdm-interrupts]:
 
 The #PF case delegates to `vmm_handle_page_fault(addr, error_code)`, which is where the VMM distinguishes a genuine bug from demand paging and from a stack growth. The exception layer classifies and reports; it does not decide what is recoverable, because that decision needs the page tables.
 
-The "deliver to process" actions for #DE, #UD and #BP need the signal subsystem, which is specified in [ipc/signals.md](../ipc/signals.md) but not yet implemented. Until it lands, the exception layer routes them through a single weak hook, `process_deliver_signal()`, and the process is terminated if the hook is absent. The hook is weak so that the kernel links without the IPC subsystem; when it is implemented, the same call site picks it up with no change here. This is the one place where the exception layer depends on a component that does not exist, and it is the reason the interim behaviour is "kill" rather than "deliver".
+The "deliver to process" actions for #DE, #UD and #BP use the signal subsystem,
+specified in [ipc/signals.md](../ipc/signals.md). The exception layer classifies
+and reports; it does not decide what is recoverable, because that decision needs
+the page tables.
 
 ## Inter-Processor Interrupts (IPIs)
 

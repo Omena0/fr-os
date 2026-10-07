@@ -19,13 +19,8 @@ struct cpu_features cpu_features;
  * A thin wrapper so the leaf selectors are written in a readable order.
  *
  * Named cpuid_raw rather than cpuid because GCC already owns `cpuid` as a
- * builtin taking and returning a __cpuid_result; a static function of the same
- * name is a redefinition, not an overload, and the build stops.
- *
- * On x86-64, EBX is an ordinary register and CPUID can write it directly; the
- * "CPUID clobbers EBX" workaround is a 32-bit PIC issue that does not apply
- * here. GCC is told the outputs so it never assumes a register survives the
- * call.
+ * builtin; a static function of the same name is a redefinition. EBX is an
+ * ordinary register on x86-64, so CPUID can write it directly.
  */
 static inline void cpuid_raw(uint32_t leaf, uint32_t sub,
 			     uint32_t *a, uint32_t *b, uint32_t *c, uint32_t *d)
@@ -61,33 +56,16 @@ static inline void feat_set(uint64_t *f, uint32_t reg, uint32_t bit, uint64_t id
 /*
  * Measure the TSC against PIT channel 2.
  *
- * CPUID leaf 0x15 is the cheap answer and is used when it is there, but plenty
- * of machines do not implement it -- AMD parts commonly answer 0x16 with a
- * *base* frequency rather than the TSC, and QEMU's TCG answers neither. With
- * no frequency, klog's clock is zero, so every line in the log reads
- * `[    0.000 ...]`: the timestamps look present and carry no information, which
- * is worse than not having them because it reads like the whole boot took under
- * a millisecond.
+ * CPUID leaf 0x15 is the cheap answer and is used when present, but many
+ * machines do not implement it. With no frequency, klog's clock is zero and
+ * every line reads [    0.000 ...]: the timestamps look present but carry no
+ * information, which is worse than not having them.
  *
  * Channel 2 is the PIT's spare channel, wired to the PC speaker's gate and to
  * bit 5 of port 0x61. It is programmed in mode 0, so its output goes high when
- * the count reaches zero, and bit 5 of port 0x61 follows it. That gives a
- * hardware event to measure against: read the TSC, wait for the bit, read it
- * again.
- *
- * This is not the "delay loop that has no place in code that runs before the
- * scheduler exists" the old comment called it. Nothing here polls on a
- * counter of its own making; it waits for a hardware edge, and the wait is
- * bounded by the PIT count, so it cannot hang. The bound is the point: if the
- * edge never comes -- no PIT, port 0x61 behaving oddly, virtualised timer --
- * this returns 0 after a fixed number of reads and the caller keeps the
- * "unknown frequency" behaviour rather than hanging the boot.
- *
- * Accuracy is whatever the PIT's input clock is worth. 1193182 Hz is the
- * standard value and is accurate to about 0.01%, so a 50 ms window gives
- * roughly 0.01% frequency error -- far better than the millisecond
- * resolution klog actually prints, and good enough for scheduling decisions
- * that are compared against the same TSC.
+ * the count reaches zero, and bit 5 of port 0x61 follows it. The wait is
+ * bounded by the PIT count, so it cannot hang: if the edge never comes this
+ * returns 0 and the caller keeps the "unknown frequency" behaviour.
  */
 #define PIT_INPUT_HZ    1193182ULL
 #define PIT_CH2_PORT    0x42
@@ -182,14 +160,13 @@ void cpu_features_init(void)
 		cpu_features.family = ((a >> 8) & 0xF) + ((a >> 20) & 0xF);
 		cpu_features.model = ((a >> 4) & 0xF) | ((a >> 16) & 0xF);
 		cpu_features.stepping = a & 0xF;
-		/*
-		 * EBX[23:16] is only defined when the hyper-threading bit
-		 * (EDX 28) is set; on a machine without it the field is reserved
-		 * and reads 0. Normalising here rather than at the print site is
-		 * deliberate: there are two printers of this field — this file and
-		 * main.c — and a `?: 1` fallback in only one of them is how two
-		 * prints of one field came to disagree within a single boot.
-		 */
+	/*
+	 * EBX[23:16] is only defined when hyper-threading (EDX 28) is set; on a
+	 * machine without it the field is reserved and reads 0. Normalising here
+	 * rather than at the print site is deliberate: two printers of this field
+	 * (this file and main.c) must agree, or the two prints of one field
+	 * disagree within a single boot.
+	 */
 		cpu_features.logical_cpus = (b >> 16) & 0xFF;
 
 		if (!cpu_features.logical_cpus)
@@ -206,13 +183,11 @@ void cpu_features_init(void)
 	}
 
 	/*
-	 * Invariant TSC is CPUID.0x80000007 EDX bit 8.
-	 *
-	 * It is not CPUID.0x80000001 EDX bit 8, which is reserved and reads zero
-	 * — that is where this used to be read from, so `invariant_tsc` was
-	 * permanently false. It was invisible because the only print of it is
-	 * inside the `if (tsc_khz)` branch below, and tsc_khz was itself always
-	 * zero, so no boot had ever reached it.
+	 * Invariant TSC is CPUID.0x80000007 EDX bit 8, not leaf 1 EDX bit 8
+	 * (reserved, reads 0). The old code read the wrong leaf, so
+	 * invariant_tsc was permanently false and invisible because the only
+	 * print is inside the `if (tsc_khz)` branch, which was itself always
+	 * zero.
 	 */
 	if (max_ext >= 0x80000007u) {
 		cpuid_raw(0x80000007u, 0, &a, &b, &c, &d);
@@ -313,15 +288,13 @@ void cpu_features_init(void)
 
 	/*
 	 * The feature mask: one bit per feature ID, grouped by the CPUID leaf
-	 * register the feature comes from. Each line below names the register and
-	 * the CPUID bit explicitly rather than letting a constant imply them —
-	 * the old code folded four leaves into one bit namespace by reusing the
-	 * CPUID bit number as the mask bit, so nine bit positions carried two or
-	 * three different meanings and a feature from one leaf answered for a
-	 * feature from another. Seven of the old constants also named a register
+	 * register. Each FEAT() line names the register and the CPUID bit
+	 * explicitly — the old code folded four leaves into one bit namespace by
+	 * reusing the CPUID bit number as the mask bit, so nine positions carried
+	 * two or three different meanings, and seven constants named registers
 	 * the code never read (AVX, SSE, SSE2, ERMS, ERMS2, FSRM, SHA), so those
-	 * bits were reporting whatever unrelated feature happened to occupy the
-	 * same position. See the block comment in cpu_features.h.
+	 * bits reported unrelated features. See the block comment in
+	 * cpu_features.h.
 	 */
 	uint64_t f = 0;
 
@@ -351,22 +324,20 @@ void cpu_features_init(void)
 	FEAT(cpu_features.basic_ecx, 26, CPU_FEATURE_XSAVE);
 	/*
 	 * ECX bit 27 is AVX; bit 28 is OSXSAVE. These were the other way round,
-	 * which made every "can this CPU do X" question in the tree answer the
-	 * wrong thing, and one of the answers was load-bearing.
+	 * which made every "can this CPU do X" question answer the wrong thing,
+	 * and one of the answers was load-bearing.
 	 *
 	 * stage2_long.S gates its XSETBV on ECX.27 && ECX.28. With the bits
 	 * swapped, cpu_features reported OSXSAVE=0 and AVX=1, so the loader's gate
-	 * -- correctly written -- was skipped and XCR0 was never written on any
-	 * machine. Measured three ways on this host: the boot log's feature mask has
-	 * the OSXSAVE bit clear and the AVX bit set, a `-d int` register dump shows
-	 * CR4.OSXSAVE clear, and an exec trace contains no xsetbv at all.
+	 * was skipped and XCR0 was never written. Measured: the boot log's feature
+	 * mask has the OSXSAVE bit clear, CR4.OSXSAVE clear, and the exec trace
+	 * contains no xsetbv at all.
 	 *
-	 * The error direction matters. Swapped this way, `cpu_has(CPU_FEATURE_AVX)`
-	 * answers "can the OS use XCR0", so a CPU with XSAVE and OSXSAVE but no AVX
-	 * -- a KNL, or a hypervisor masking the bit -- passes a check meant to stop
-	 * it. The other way round merely under-reports and disables features, which
-	 * is safe. The mask keeps its bit *IDs*; only the mapping changes, so no
-	 * stored mask is invalidated.
+	 * Swapped this way, `cpu_has(CPU_FEATURE_AVX)` answers "can the OS use
+	 * XCR0", so a CPU with XSAVE and OSXSAVE but no AVX passes a check meant
+	 * to stop it. The other way round merely under-reports and disables
+	 * features, which is safe. The mask keeps its bit IDs; only the mapping
+	 * changes, so no stored mask is invalidated.
 	 */
 	FEAT(cpu_features.basic_ecx, 27, CPU_FEATURE_AVX);
 	FEAT(cpu_features.basic_ecx, 28, CPU_FEATURE_OSXSAVE);

@@ -316,7 +316,6 @@ chs_read:
 	movb	%dl, chs_sector
 	incb	chs_sector
 
-	/* Track to cylinder and head. */
 	movw	chs_track, %ax
 	xorw	%dx, %dx
 	divw	bx_heads		/* AX = cylinder, DX = head */
@@ -492,9 +491,6 @@ puthexw:
 	popw	%ax
 	ret
 
-/* ---------------------------------------------------------------------------
- * serial_puts — write the NUL-terminated string at DS:SI to COM1.
- * --------------------------------------------------------------------------- */
 serial_puts:
 	pushw	%ax
 	pushw	%si

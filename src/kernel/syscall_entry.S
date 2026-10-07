@@ -263,6 +263,7 @@ syscall_entry:
 	 */
 	movq	USER_RSP_DISP(%rsp), %rsp
 
+	sti
 	sysretq
 
 .Lsyscall_lost:

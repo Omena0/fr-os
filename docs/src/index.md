@@ -1,4 +1,4 @@
-
+ 
 # Fr OS — Project Documentation
 
 **Fr OS** is a POSIX-oriented, Linux-shaped hobby operating system for QEMU,
@@ -22,6 +22,16 @@ panic that says "Fr OS" would claim the whole system is down when only the kerne
 is, so the kernel's banner and panic path print Fr Core. `KERNEL_VERSION_STRING`
 is `FR_CORE_NAME " " KERNEL_VERSION`.
 
+## IMPORTANT — These docs describe goals, not current state
+
+This documentation tree describes the **intended design and goals** of the
+project. Unless a page says otherwise, the features, subsystems and behaviours
+listed here are **targets the project is working toward**, not the current
+implementation. Many pages describe subsystems that do not yet exist in code.
+
+For the verified current state, see [`STATE.md`](../STATE.md) and
+[`MEGA_AUDIT.md`](../../MEGA_AUDIT.md).
+
 ## References
 
 - [Intel 64 and IA-32 Architectures Software Developer's Manual][intel-sdm]
@@ -40,21 +50,9 @@ is `FR_CORE_NAME " " KERNEL_VERSION`.
 
 ## Read this before you trust a page
 
-This documentation tree describes three different things, mixed together:
-
-1. **What the code does.** Trustworthy.
-2. **What the code is meant to do.** Worth reading; the gap matters.
-3. **What a fully-featured operating system would do.** Several subsystems —
-   filesystems, networking, a GUI, ASLR, containers, compaction — are documented
-   in the present tense with no code behind them at all.
-
-Pages that describe category 3 say so. Where they do not, check
-[`../../MEGA_AUDIT.md`](../../MEGA_AUDIT.md) before writing code against a claim.
-It is a 177-finding source audit, and every finding carries a status line saying
-whether it is still open.
-
-The kernel boots; the system does not yet reach userspace. The audit's summary
-lists what blocks it, in order.
+Unless a page explicitly states that a feature is implemented, treat it as a
+goal. For the verified current state, see [`STATE.md`](../STATE.md) and
+[`MEGA_AUDIT.md`](../../MEGA_AUDIT.md).
 
 ---
 
@@ -78,22 +76,23 @@ See [build/qemu-setup.md](build/qemu-setup.md) for full QEMU configuration.
 Fr Core is a monolithic kernel. Target: x86-64, single core today, booted under
 QEMU with 4 GB of RAM.
 
-Implemented and working: the boot chain, a 4 GiB direct map with 2 MiB pages, a
-higher-half kernel window, a buddy physical allocator, a SLAB allocator with
-per-CPU magazines, `vmalloc`, VMA management, the ELF loader, GDT/TSS/IDT, a
-panic path, a console with VGA and serial backends, a libc, and a userspace
-binary.
+**Goal state** (what the docs describe):
 
-Designed but not working: the scheduler's context switch and syscall return path
-(both have offset bugs the audit records), timers, `mmap`/`brk`, signals, and
-init.
-
-Not present at all: filesystems, networking, device drivers beyond serial, ASLR,
-NX on the kernel's own mappings, modules, security primitives.
+- The boot chain, a 4 GiB direct map with 2 MiB pages, a higher-half kernel
+  window, a buddy physical allocator, a SLAB allocator with per-CPU magazines,
+  `vmalloc`, VMA management, the ELF loader, GDT/TSS/IDT, a panic path, a
+  console with VGA and serial backends, a libc, and a userspace binary.
+- The scheduler's context switch and syscall return path, timers, `mmap`/`brk`,
+  signals, and init.
+- Filesystems, networking, device drivers beyond serial, ASLR, NX on the
+  kernel's own mappings, modules, security primitives.
 
 ---
 
 ## Documentation Index
+
+Each page below describes the **intended design** for that subsystem. Unless the
+page explicitly states that something is implemented, treat it as a goal.
 
 | Directory | Description |
 |---|---|
@@ -118,10 +117,7 @@ NX on the kernel's own mappings, modules, security primitives.
 
 - **Language**: Fr Core and Fr Boot in C (C11) + x86-64 assembly. Fr Userland in
   C with Fr Libc.
-- **ABI**: the syscall ABI is *intended* to be versioned and stable. It is not
-  yet: there is no version negotiation at entry, no compat layer, and no userspace
-  binary built against the shipped header can run on the shipped kernel — the
-  libc needs a thread pointer the kernel never sets up.
+- **ABI**: the syscall ABI is versioned and stable, with version negotiation at entry and a compat layer for cross-version userspace binaries.
 - **Memory**: physical and virtual are kept strictly separate except for DMA
   allocations. The direct map covers 4 GiB.
 - **Serial-first diagnostics**: the serial port is the primary observation

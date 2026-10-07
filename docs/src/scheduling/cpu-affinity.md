@@ -1,84 +1,54 @@
-# CPU Affinity
+# CPU Affinity (sched_setaffinity / sched_getaffinity)
 
-## Overview
+## Status
 
-CPU affinity allows a thread or process to be restricted to a specific subset of CPUs. The kernel respects affinity during scheduling decisions, load balancing, and wakeup placement.
+CPU affinity is **implemented** in the kernel data structures and syscalls, but only CPU 0 is online so it has no practical effect.
 
-## Affinity Mask
+## Implementation
 
-Affinity is represented as a bitmask: one bit per CPU. Bit N is set if the thread may run on CPU N.
-
-```c
-typedef struct {
-    uint64_t bits[4];   // supports up to 256 CPUs
-} cpumask_t;
-```
-
-On a system with 18 CPUs (as in the QEMU reference config), only bits 0–17 are valid.
-
-## Default Affinity
-
-By default, a new thread inherits its parent's affinity mask. The default for PID 1 (init) is all CPUs online at boot.
-
-## Setting and Getting Affinity
-
-### Syscall Interface
+### Data Structures
 
 ```c
-// Set affinity for thread tid
-int sched_setaffinity(pid_t tid, size_t cpusetsize, const cpu_set_t *mask);
-
-// Get current affinity
-int sched_getaffinity(pid_t tid, size_t cpusetsize, cpu_set_t *mask);
+// In task.h
+cpumask_t cpumask;    // 4 words = 256 bits for MAX_CPUS
+u64 affinity_mask;    // cached single-CPU mask (1 << cpu) or 0 if unpinned
 ```
 
-Requires:
+### Syscalls
 
-- Setting one's own affinity: no special privilege needed (but cannot expand beyond the current mask).
-- Setting another thread's affinity: requires same UID or `CAP_SYS_NICE`.
+- `sched_setaffinity(pid, cpusetsize, mask)` — sets the task's CPU mask.
+- `sched_getaffinity(pid, cpusetsize, mask)` — reads the task's CPU mask.
 
-### Inheritance
+Both require `CAP_SYS_NICE` for other processes; a process can always set its own affinity.
 
-`fork()` and `clone()` inherit the parent's affinity mask. `exec()` preserves the affinity mask across the exec boundary.
-
-## Kernel Enforcement
-
-Affinity is enforced at three points:
-
-1. **Initial placement**: `fork()`/`clone()` selects an initial CPU from the affinity mask.
-2. **Load balancing**: The load balancer never migrates a thread to a CPU not in its affinity mask.
-3. **Wakeup**: When a sleeping thread wakes, it is placed on a CPU in its affinity mask (preferring the home CPU if it is in the mask).
-
-## Use Cases
-
-### Isolating Real-Time Threads
-
-Pin a real-time thread to a dedicated CPU to eliminate scheduling jitter from other threads:
+### Kernel API
 
 ```c
-cpu_set_t mask;
-CPU_ZERO(&mask);
-CPU_SET(17, &mask);   // CPU 17 exclusively for this RT thread
-sched_setaffinity(rt_tid, sizeof(mask), &mask);
+int sched_set_affinity(struct task *t, const cpumask_t *mask);
+u32 sched_select_cpu(const cpumask_t *mask, u32 preferred);
+void sched_migrate(struct task *t, u32 cpu);
 ```
 
-### NUMA-Aware Allocation
+- `sched_set_affinity()`: validates mask, copies to `t->cpumask`, computes `affinity_mask` optimization (single bit if pinned to one CPU), and migrates if the task is currently running on a disallowed CPU.
+- `sched_select_cpu()`: picks the first allowed CPU at or after `preferred`.
+- `sched_migrate()`: places the task on the global migration list for the target CPU.
 
-Pin threads that access specific memory regions to CPUs close to those NUMA nodes. Combined with NUMA-aware memory allocation (see [memory/numa-policies.md](../memory/numa-policies.md)), this minimizes remote memory access latency.
+### Migration on Affinity Change
 
-### Userspace Driver Isolation
+If a runnable task's affinity is changed to exclude its current CPU:
 
-Userspace drivers may be pinned to specific CPUs to prevent them from interfering with application threads.
+1. Task is removed from current CPU's run queue (under that CPU's lock).
+2. Task is placed on the global migration list.
+3. Destination CPU adopts it via `sched_drain_global()` when it next runs.
 
-## Affinity and Load Balancing Interaction
+Since only CPU 0 runs, step 3 never executes for other CPUs.
 
-If a thread's affinity mask contains only one CPU, it is effectively pinned and the load balancer will never migrate it. If the affinity mask is a subset of all CPUs, the load balancer respects the mask but still balances within the allowed CPUs.
+## Current Limitation
 
-A thread pinned to a single overloaded CPU cannot benefit from load balancing. This is a trade-off: cache locality vs. load distribution. The operator must make this decision explicitly by setting the affinity mask.
+With only CPU 0 online, all tasks effectively have affinity `{0}`. The affinity mask is stored and checked but no migration to other CPUs can occur because they don't exist.
 
 ## Related Documents
 
+- [per-core-runqueues.md](per-core-runqueues.md)
 - [multicore-overview.md](multicore-overview.md)
-- [load-balancing.md](load-balancing.md)
-- [realtime-scheduler.md](realtime-scheduler.md)
 - [syscalls/scheduling-syscalls.md](../syscalls/scheduling-syscalls.md)

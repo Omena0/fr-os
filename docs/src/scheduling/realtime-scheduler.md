@@ -1,79 +1,59 @@
-# Real-Time Scheduler
+# Real-Time Scheduler (SCHED_FIFO / SCHED_RR)
 
-## Overview
+## Status
 
-The real-time (RT) scheduler class handles threads that require deterministic, low-latency scheduling. RT threads always preempt MLFQ threads. No MLFQ thread runs while any RT thread is runnable on the same CPU.
+The real-time scheduler class is **implemented**.
 
-## RT Priority Model
+## Design
 
-RT threads have a static priority value in the range [0, 99]. Higher values mean higher priority (opposite convention from `nice`):
+Real-time threads are scheduled above all MLFQ threads. Within the RT class:
 
-- Priority 99: Highest RT priority.
-- Priority 0: Lowest RT priority (but still above all MLFQ threads).
+- **Strict priority**: higher `rt_priority` (0–99) always runs first.
+- **SCHED_FIFO**: runs until it blocks, yields, or is preempted by a higher-priority RT task.
+- **SCHED_RR**: same as FIFO but with a time slice (`RT_RR_QUANTUM` = 10 ticks); when the slice expires, the thread rotates to the tail of its priority queue.
+- **RT bandwidth reserve**: RT tasks together get at most `RT_BUDGET_TICKS` (950) out of `RT_PERIOD_TICKS` (1000) = 95% of CPU time. A task that exhausts its budget is throttled until the next period.
 
-## Scheduling Policy
+## Data Structures
 
-Within the RT class, scheduling is **strict priority preemptive**:
-
-1. The highest-priority runnable RT thread always runs.
-2. Ties (same priority): FIFO ordering — the thread that became runnable first runs first.
-3. An RT thread runs until it:
-   - Blocks (I/O, mutex, sleep).
-   - Yields (`sched_yield()`).
-   - Is preempted by a higher-priority RT thread.
-   - (Optional) Exhausts its deadline-mode time budget.
-
-Unlike MLFQ, RT threads are **never demoted**. An RT thread at priority 50 will always preempt an RT thread at priority 49.
-
-## RT Thread Creation
-
-A thread is placed in the RT class via:
-
-```c
-struct sched_param param = { .sched_priority = 80 };
-sched_setscheduler(tid, SCHED_FIFO, &param);
-```
-
-Requires `CAP_SYS_NICE`.
-
-POSIX scheduling policies exposed:
-
-- `SCHED_FIFO`: Strict priority FIFO as described above.
-- `SCHED_RR`: Round-robin among threads of the same priority (each thread gets a fixed 10 ms quantum before the next same-priority RT thread runs). Still preempts all lower-priority RT threads.
-
-## Data Structure
-
-RT threads use the per-CPU `rt_prio_array`:
+Per-CPU run queue contains an RT priority array:
 
 ```c
 struct rt_prio_array {
-    uint64_t bitmap;                // 100-bit bitmask (two uint64_t for 128 bits)
-    struct list_head queue[100];    // one FIFO queue per priority level
+    u64 bitmap[2];              // two words cover 100 priorities
+    struct list_head queue[RT_PRIORITIES];
 };
 ```
 
-Dequeue: `ctzll(bitmap)` gives the highest non-empty priority — O(1).
+- `bitmap` tracks non-empty priority slots; `rt_bitmap_highest()` finds the highest-priority runnable task in O(1) via `__builtin_ctzll`.
+- Each priority has its own FIFO queue.
 
-## Throttling (RT Bandwidth)
+## Enqueue / Dequeue
 
-An unconstrained RT thread can starve the entire system. To prevent this, RT bandwidth throttling limits RT threads to a configurable fraction of CPU time:
+```c
+// Enqueue (rq_enqueue_locked)
+list_add_tail(&t->rq_node, &rq->rt.queue[t->rt_priority]);
+rt_bitmap_set(&rq->rt, t->rt_priority);
 
-- `RT_RUNTIME_US`: RT threads may run for at most this many microseconds per period.
-- `RT_PERIOD_US`: Period length (default: 1,000,000 µs = 1 second).
-- Default: RT threads get 950,000 µs / 1,000,000 µs = 95% of CPU time.
-- Remaining 5% is always available to MLFQ threads (prevents complete starvation).
+// Dequeue (rq_dequeue_locked)
+list_del(&t->rq_node);
+if (list_empty(&rq->rt.queue[prio]))
+    rt_bitmap_clear(&rq->rt, prio);
+```
 
-When an RT thread exceeds its runtime budget for the period, it is throttled: removed from the RT class for the remainder of the period and placed in MLFQ level 0 until the next period begins.
+## Preemption
 
-Throttling can be disabled per-system for embedded or real-time use cases (requires kernel build option).
+A newly woken RT task preempts the current task if its priority is higher. This is checked in `sched_add()` and `sched_wake()` via `rq_has_higher_locked()`.
 
-## CPU Affinity
+## Bandwidth Throttling
 
-RT threads support CPU affinity (see [cpu-affinity.md](cpu-affinity.md)). By default, RT threads can run on any CPU. For hard real-time workloads, pinning an RT thread to a dedicated CPU eliminates all migration overhead.
+On each timer tick (`sched_tick()`), the running RT task's `rt_slice` (for RR) or budget (for bandwidth) is decremented. When exhausted:
+
+- SCHED_RR: thread moved to tail of its priority queue.
+- Bandwidth: `rt_throttled` set; task removed from run queue until next period.
 
 ## Related Documents
 
 - [overview.md](overview.md)
+- [mlfq.md](mlfq.md)
 - [deadline-scheduling.md](deadline-scheduling.md)
-- [mlfq-priority-queues.md](mlfq-priority-queues.md)
-- [syscalls/scheduling-syscalls.md](../syscalls/scheduling-syscalls.md)
+- [multicore-overview.md](multicore-overview.md)

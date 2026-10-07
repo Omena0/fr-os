@@ -6,3 +6,5 @@
 __pycache__/
 *.pyc
 .highlight_cache
+docs/site/
+prompt.txt

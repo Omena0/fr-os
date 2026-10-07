@@ -168,7 +168,7 @@ fi
 # mux=on makes the stdio chardev bidirectional so input from the terminal
 # reaches the guest's COM1 receive interrupt.
 QEMU_ARGS+=(
-	-chardev stdio,id=ser0,signal=off
+	-chardev stdio,id=ser0,signal=off,logfile=$LOG
 	-serial chardev:ser0
 )
 
@@ -210,7 +210,6 @@ if [ "${1:-}" = "--gdb" ]; then
 fi
 
 mkdir -p build
-: > "$LOG"
 
 # The watchdog, and the log tail.
 #

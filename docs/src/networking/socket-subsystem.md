@@ -84,7 +84,7 @@ struct listen_sock {
 
 ## Port Assignment
 
-`sys_bind(AF_INET, ...)` with `sin_port == 0`: the kernel selects an ephemeral port from the range 49152–65535 (not currently in use for any socket with the same local IP).
+`sys_bind(AF_INET, ...)` with `sin_port == 0`: the kernel selects an ephemeral port from the range 49152–65535 not already in use for any socket with the same local IP.
 
 Port 0–1023: requires `CAP_NET_BIND`.
 

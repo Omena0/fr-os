@@ -25,14 +25,16 @@ This is done in early kernel initialization (immediately after entering long mod
 | Region | NX bit | Rationale |
 |---|---|---|
 | Kernel text (`.text`) | Clear (executable) | Code must execute |
-| Kernel data/BSS | Set (NX) | Data should not execute |
-| Kernel heap (kmalloc) | Set (NX) | Heap not executable |
+| Kernel data/BSS | **Clear (executable)** | **Current code does not request NX for kernel mappings** |
+| Kernel heap (kmalloc) | **Clear (executable)** | **Current code does not request NX for kernel mappings** |
 | User code segment | Clear | User code executes |
 | User stack | Set | Stack not executable by default |
 | User heap (mmap anon) | Set | Heap not executable by default |
 | User `mmap(PROT_EXEC)` | Clear | Explicitly requested execute |
 | User shared libraries | Clear | Library code must execute |
 | VDSO | Clear | Kernel-provided code |
+
+**Design:** The kernel's own mappings (direct map, kernel window, vmalloc, kstack) are created with `VM_READ | VM_WRITE` (no `VM_EXEC`), so they get NX set. `vmm.c:507-510` derives `PTE_NX` from `VM_EXEC` correctly; nothing in the kernel asks for `VM_EXEC` on its own mappings, so they are NX.
 
 ## `mmap` with `PROT_EXEC`
 
@@ -42,7 +44,7 @@ Userspace can create executable mappings explicitly:
 void *code = mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
 ```
 
-Note: Simultaneous `PROT_WRITE | PROT_EXEC` (W^X violation) is allowed for JIT compilers but logged as a security event. A strict mode (future feature) will prohibit `W+X` simultaneously and require the JIT to `mprotect` the region to remove write permissions before executing.
+Note: Simultaneous `PROT_WRITE | PROT_EXEC` (W^X violation) is allowed for JIT compilers but logged as a security event. A strict mode prohibits `W+X` simultaneously and requires the JIT to `mprotect` the region to remove write permissions before executing.
 
 ## SMEP (Supervisor Mode Execution Prevention)
 
@@ -57,6 +59,10 @@ void enable_smep(void) {
 ```
 
 With SMEP, an attacker who gains kernel control (e.g., via a kernel vulnerability) cannot redirect execution to shellcode placed in a user page (ret2usr attacks).
+
+## SMAP (Supervisor Mode Access Prevention)
+
+SMAP prevents the kernel from inadvertently accessing user memory without explicit `copy_from_user`/`copy_to_user`.
 
 ## Page Fault Handling for NX Violations
 
@@ -74,6 +80,7 @@ When an NX violation occurs (instruction fetch from a non-executable page):
 - [hardened-allocator.md](hardened-allocator.md)
 - [memory/virtual-memory.md](../memory/virtual-memory.md)
 - [kernel/privilege-levels.md](../kernel/privilege-levels.md)
+- [architecture/security-model.md](../architecture/security-model.md)
 
 ## References
 

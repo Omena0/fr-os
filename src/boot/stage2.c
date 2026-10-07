@@ -35,7 +35,7 @@ extern void stage2_enter_long_mode(uint32_t pml4_phys, uint32_t entry,
 /* Supplied by stage1 through the stack: the BIOS boot drive number. */
 extern uint8_t stage1_boot_drive;
 
-static uint8_t boot_drive;
+static uint8_t boot_drive = 0;
 
 /* ------------------------------------------------------------------ io ------ */
 
@@ -122,25 +122,13 @@ static void serial_puts(const char *s)
 /*
  * 64-bit hex, as sixteen digits with no prefix and no leading-zero suppression.
  *
- * The digit table is a static local rather than an immediate lookup so that
- * the whole routine is position-independent. It also has to be `static
- * volatile`-adjacent in the sense that it must not be emitted into a region
- * the loader stack can grow into: see the note on stack32 in stage2_entry.S,
- * which is exactly the bug that made this print its own table.
+ * Computed arithmetically rather than a lookup table, because the loader's
+ * diagnostics are the only way to see anything when the loader is broken, and
+ * a table in .rodata could be zeroed, making every number print as NUL bytes
+ * with no output to say why.
  */
 static void serial_puthex(uint64_t v)
 {
-	/*
-	 * No lookup table.
-	 *
-	 * This used to index a "0123456789abcdef" string in .rodata, and it is
-	 * worth keeping in mind that the loader's diagnostics are the only way to
-	 * see anything at all when the loader is what is broken: a table that has
-	 * been zeroed makes every number print as sixteen NUL bytes, which is
-	 * indistinguishable from having no output and hides the very failure that
-	 * zeroed it. Computing the digit arithmetically costs one compare and one
-	 * add, and there is nothing left to be overwritten.
-	 */
 	for (int i = 60; i >= 0; i -= 4) {
 		unsigned d = (unsigned)((v >> i) & 0xF);
 		serial_putc(d < 10 ? (char)('0' + d) : (char)('a' + d - 10));
@@ -194,7 +182,6 @@ static const char *diag_site;
 /* How many firmware round trips have been made. */
 static uint32_t diag_n;
 
-/* Clear the tripwire and count the call about to be made. */
 static inline void diag_tick(void)
 {
 	diag_n++;
@@ -259,8 +246,8 @@ static void fail(const char *what)
 #define BIOS_INT_MISC 0x15u
 
 /* 8042 status register bits, port 0x64. */
-#define PS2_STATUS_OBF 0x01	/* output buffer full: a byte is waiting */
-#define PS2_STATUS_IBF 0x02	/* input buffer full: a command is pending */
+#define PS2_STATUS_OBF 0x01
+#define PS2_STATUS_IBF 0x02
 
 static const uint32_t ps2_timeout = 100000u;
 
@@ -317,12 +304,8 @@ static bool ps2_write_data(uint8_t val)
  * A byte at a fixed physical address, through inline asm rather than a
  * dereferenced pointer.
  *
- * The addresses below are absolute and low, and GCC reads a dereference of a
- * constant address like 0x500 as a null pointer: -Warray-bounds reports
- * "array subscript 0 is outside array bounds of 'volatile uint8_t[0]'" and
- * "source object is likely at address zero". The access is deliberate and the
- * compiler has nothing to contribute to deciding it, so it is written as the
- * instruction it is.
+ * GCC treats a constant like 0x500 as a null-pointer dereference, so the
+ * access is written as the instruction it is.
  */
 static inline uint8_t phys_read8(uint32_t addr)
 {
@@ -337,21 +320,16 @@ static inline void phys_write8(uint32_t addr, uint8_t val)
 	__asm__ volatile("movb %0, (%1)" : : "q"(val), "r"(addr) : "memory");
 }
 
-#define A20_TEST_LO 0x00000500u		/* below 1 MiB: the alias target */
-#define A20_TEST_HI 0x00100500u		/* 1 MiB + 0x500: the same byte
-					 * when the gate is closed */
+#define A20_TEST_LO 0x00000500u
+#define A20_TEST_HI 0x00100500u
 
 /*
  * Is the gate actually open?
  *
- * 0x500 and 0x100500 are the same address while A20 is closed: the high one is
- * 1 MiB + 0x500, and forcing address line 20 low turns it into 0x500. Both are
- * ordinary RAM that stage2 owns nothing in, and the kernel image that later
- * covers 0x100500 is not written yet, so the test is three writes and three
- * reads with no lasting effect. A machine that cannot answer it has no memory
- * above 1 MiB, which this loader could not use anyway -- the image lands at
- * KERNEL_LANDING_ADDR -- so an inconclusive test is a real failure here rather
- * than one to shrug at.
+ * 0x500 and 0x100500 alias while A20 is closed. Both are ordinary RAM the
+ * loader owns nothing in, so the test is three writes and three reads with
+ * no lasting effect. A machine that cannot answer it has no memory above
+ * 1 MiB, which this loader could not use anyway.
  */
 static bool a20_is_open(void)
 {
@@ -372,21 +350,10 @@ static bool a20_is_open(void)
 /*
  * Method one: the keyboard controller's output port.
  *
- * Bit 0 of that register is the system reset line, and its polarity is the
- * opposite way round from the same bit in port 0x92. Here 1 means "running" and
- * 0 means "reset the machine" -- an 8042 output port read on a machine that has
- * finished booting has bit 0 set, and writing it back clear resets the CPU
- * before the kernel exists. QEMU models it exactly this way
- * (hw/input/pckbd.c: outport_write() calls qemu_system_reset_request() when
- * !(val & 1)), and its default outport is 0xCF = reset-inactive | A20 | 0xCC.
- *
- * So bit 0 is not merely preserved, it is forced on, and everything else in
- * the register is passed through untouched: those bits are the firmware's, and
- * the two that matter to a different device -- bits 4 and 5 mirror the output
- * buffer flags -- would corrupt the keyboard if they were rewritten.
- *
- * The keyboard is re-enabled on every path out of here, including the ones that
- * gave up, so a refused A20 does not cost a working keyboard.
+ * Bit 0 is forced on (not merely preserved) because writing it clear resets
+ * the CPU before the kernel exists. Everything else in the register is
+ * passed through untouched. The keyboard is re-enabled on every path out,
+ * so a refused A20 does not cost a working keyboard.
  */
 static bool a20_enable_8042(void)
 {
@@ -437,10 +404,10 @@ static bool a20_enable_8042(void)
 /*
  * Method two: the fast gate.
  *
- * Bit 0 here is the *opposite* control to the 8042's: in port 0x92 a 1 is the
- * CPU reset request and a 0 is normal, so this read-modify-write clears bit 0
- * and sets bit 1. Copying the 8042's polarity here would reboot the machine
- * instead of enabling A20.
+ * Bit 0 here has opposite polarity to the 8042 output port: here 0 is normal
+ * and 1 is reset, so this read-modify-write clears bit 0 and sets bit 1.
+ * Copying the 8042's polarity here would reboot the machine instead of
+ * enabling A20.
  */
 static bool a20_enable_fast_gate(void)
 {
@@ -552,8 +519,8 @@ static void seg16(uint32_t addr, uint16_t *seg, uint16_t *off)
 
 /* ------------------------------------------------------------ geometry ------ */
 
-static uint32_t geom_spt;	/* sectors per track */
-static uint32_t geom_heads;	/* heads */
+static uint32_t geom_spt;
+static uint32_t geom_heads;
 
 /*
  * INT 13h/AH=08h, read the drive geometry.
@@ -867,9 +834,8 @@ static void e820_query(void)
 		serial_putdec(type);
 		serial_puts("\r\n");
 
-		/* Some firmware repeats the previous entry as a terminator. */
-		if (have_last && base == last_base && length == 0)
-			break;
+	if (have_last && base == last_base && length == 0)
+		break;
 
 		last_base = base;
 		have_last = true;
@@ -896,7 +862,6 @@ static uint8_t *const vbe_mode = (uint8_t *)(uintptr_t)(VBE_SCRATCH_ADDR + 0x100
  * ones number a handful; this is comfortably more than any of them. */
 #define VBE_MAX_CANDIDATES 12
 
-/* INT 10h/AH=4F01h: fill in the 256-byte mode info block for `mode`. */
 static bool vbe_get_mode_info(uint16_t mode)
 {
 	uint16_t es;
@@ -913,13 +878,6 @@ static bool vbe_get_mode_info(uint16_t mode)
 	return ret == 0x004Fu;
 }
 
-/*
- * INT 10h/AH=4F02h: set the video mode, with the LFB bits in bit 14 of BH.
- *
- * The mode number is the low byte of BX, not of CX. Passing it in CX sets
- * mode 0 -- the BIOS follows BX, reads 0x4000 & 0xFF, and puts the machine
- * into 80x25 text while this function reports success.
- */
 static bool vbe_set_mode(uint16_t mode)
 {
 	uint16_t es;
@@ -1018,7 +976,6 @@ static void vbe_setup(void)
 	diag_site = "vbectrl";
 	diag_tick();
 
-	/* INT 10h/AX=4F00h: the controller information block. */
 	uint32_t ret = (uint32_t)bios_call(BIOS_INT_VIDEO, 0x4F00u, 0, 0, 0,
 					   0, di, es);
 
@@ -1059,9 +1016,6 @@ static void vbe_setup(void)
 	for (unsigned i = 0; i < 1024u; i++) {
 		uint16_t m;
 
-		/* Read through the segment the controller block named. Paging is
-		 * off and the flat segments have base 0, so the linear address is
-		 * just seg << 4 + off. */
 		uint32_t linear = ((uint32_t)list_seg << 4) + list_off + i * 2u;
 		uint8_t *p = (uint8_t *)(uintptr_t)linear;
 
@@ -1085,9 +1039,9 @@ static void vbe_setup(void)
 		uint16_t attrs = (uint16_t)(vbe_mode[0] | ((uint16_t)vbe_mode[1] << 8));
 
 		if (!(attrs & 0x0081u))
-			continue;		/* not supported, or not a graphics mode */
+			continue;
 		if (!(attrs & 0x0080u))
-			continue;		/* no linear framebuffer */
+			continue;
 
 		uint32_t width = (uint32_t)(vbe_mode[0x12] | ((uint32_t)vbe_mode[0x13] << 8));
 		uint32_t height = (uint32_t)(vbe_mode[0x14] | ((uint32_t)vbe_mode[0x15] << 8));
@@ -1113,7 +1067,6 @@ static void vbe_setup(void)
 		uint32_t score = width * height;
 
 		if (ncand == VBE_MAX_CANDIDATES) {
-			/* Full: displace the weakest entry if this one beats it. */
 			unsigned worst = 0;
 
 			for (unsigned k = 1; k < ncand; k++)
@@ -1136,8 +1089,7 @@ static void vbe_setup(void)
 		return;
 	}
 
-	/* Order the candidates best-first. A selection sort over a dozen entries
-	 * is cheaper to read than anything cleverer and runs once per boot. */
+	/* Order the candidates best-first. */
 	for (unsigned i = 1; i < ncand; i++) {
 		struct vbe_candidate keep = cand[i];
 		unsigned j = i;
@@ -1356,14 +1308,10 @@ static void load_kernel(void)
 
 	LOG("loading kernel...\r\n");
 
-	/* The ELF header lives in the first sector of the kernel image. */
 	if (!bios_read_bounce(KERNEL_LBA, 1))
 		fail("cannot read kernel ELF header");
 
-	/* The sector is in the bounce window, not the landing zone. Dereferencing
-	 * KERNEL_LANDING_ADDR without copying it first is how the loader ends up
-	 * rejecting a perfectly good kernel as "not an ELF image": it is reading
-	 * whatever the landing zone happened to contain. */
+	/* The sector is in the bounce window, not the landing zone. */
 	{
 		uint8_t *hdr_dst = (uint8_t *)(uintptr_t)KERNEL_LANDING_ADDR;
 		const uint8_t *hdr_src = (const uint8_t *)(uintptr_t)BOUNCE_ADDR;
@@ -1394,15 +1342,11 @@ static void load_kernel(void)
 	phdr_off = eh->e_phoff;
 
 	for (unsigned i = 0; i < eh->e_phnum; i++) {
-		/* Program headers beyond the first sector have to be re-read. The
-		 * bounce window is the source, so a header that straddles a sector
-		 * boundary is copied out and reassembled. */
 		uint32_t sector = (uint32_t)(phdr_off / 512);
 		uint32_t in_sector = (uint32_t)(phdr_off % 512);
 		uint8_t *dst_ph = (uint8_t *)(uintptr_t)PHDR_SCRATCH_ADDR;
 
 		if (in_sector + sizeof(phdr) > 512) {
-			/* Straddles: read both sectors and assemble. */
 			if (!bios_read_bounce((uint64_t)KERNEL_LBA + sector, 1))
 				fail("cannot read kernel program headers");
 			for (uint32_t i = 0; i < 512 - in_sector; i++)
@@ -1424,10 +1368,6 @@ static void load_kernel(void)
 
 		phdr_off += eh->e_phentsize;
 
-		/* Read the header back into the local. It was just written at
-		 * dst_ph, but through a `uint8_t *`, so nothing in the type system
-		 * says `phdr` is initialised -- and reading it directly from
-		 * dst_ph would be a strict-aliasing violation besides. */
 		phdr = *(const struct elf64_phdr *)(const void *)dst_ph;
 
 		if (phdr.p_type != PT_LOAD || phdr.p_memsz == 0)
@@ -1441,10 +1381,6 @@ static void load_kernel(void)
 		serial_puthex(phdr.p_memsz);
 		serial_puts("\r\n");
 
-		/* The kernel is linked for the higher half but loaded into the
-		 * landing zone at a fixed physical address; the bootstrap page
-		 * tables map one to the other. Relocation is therefore a plain
-		 * file-offset to landing-zone copy, and p_paddr is informational. */
 		/* The check has to be on p_memsz, not p_filesz. The difference
 		 * between them is .bss, which the kernel owns from physical zero
 		 * the moment it starts running, so a window sized by file size
@@ -1706,7 +1642,7 @@ static void boot_gdt_init(void)
 	gdt[0] = 0;
 	gdt[1] = 0x00AF9A000000FFFFULL;	/* 0x08 64-bit code, base 0, 4G */
 	gdt[2] = 0x00CF93000000FFFFULL;	/* 0x10 data, base 0, 4G */
-	gdt[3] = 0x0000FA000000FFFFULL;	/* 0x18 64-bit user code, DPL 3 */
+	gdt[3] = 0x00AF9A000000FFFFULL;	/* 0x18 64-bit user code, DPL 3 */
 	gdt[4] = 0x00CFF3000000FFFFULL;	/* 0x20 user data, DPL 3 */
 
 	/*
@@ -1812,7 +1748,7 @@ static void stage2_main(uint32_t entry_addr)
 
 	/* Hand off everything the kernel could not discover for itself. */
 	bootinfo->magic = BOOTINFO_MAGIC;
-	bootinfo->version = 1;
+	bootinfo->version = BOOTINFO_VERSION;
 	bootinfo->flags = (uint32_t)(fb_enabled ? BOOT_FLAG_HAS_FRAMEBUFFER : 0u);
 	bootinfo->kernel_phys_base = KERNEL_LANDING_ADDR;
 	bootinfo->kernel_virt_base = KERNEL_VIRT_BASE;
@@ -1823,7 +1759,8 @@ static void stage2_main(uint32_t entry_addr)
 	bootinfo->rsdp_addr = 0;
 	bootinfo->acpi_version = 0;
 	bootinfo->boot_drive = boot_drive;
-	bootinfo->cmdline[0] = '\0';
+	for (unsigned i = 0; i < sizeof(bootinfo->cmdline); i++)
+		bootinfo->cmdline[i] = '\0';
 
 	LOG("entering long mode, jumping to kernel at ");
 	serial_puthex(kernel_entry_vaddr);

@@ -4,7 +4,7 @@
 
 The IPC (Inter-Process Communication) subsystem provides mechanisms for processes and threads to communicate and synchronize. All IPC mechanisms are exposed through the POSIX-standard syscall interface.
 
-## Implemented Mechanisms
+## Mechanisms
 
 | Mechanism | Description | Document |
 |---|---|---|

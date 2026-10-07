@@ -87,16 +87,16 @@ static inline struct task *caller(void)
 
 /* ======================================================================= */
 
-static long sc_exit(struct syscall_regs *r)
+static __noreturn long sc_exit(struct syscall_regs *r)
 {
 	sys_exit((int)(s32)arg0(r));
-	return 0;
+	__builtin_unreachable();
 }
 
-static long sc_exit_group(struct syscall_regs *r)
+static __noreturn long sc_exit_group(struct syscall_regs *r)
 {
 	sys_exit_group((int)(s32)arg0(r));
-	return 0;
+	__builtin_unreachable();
 }
 
 static long sc_getpid(struct syscall_regs *r)
@@ -193,19 +193,15 @@ static long sc_clock_gettime(struct syscall_regs *r)
 
 	UNUSED(r);
 	/* Both clocks are the same counter. There is no RTC driver, so
-	 * CLOCK_REALTIME is uptime; the difference matters only to a program
-	 * that compares the two. */
+	 * CLOCK_REALTIME is uptime. */
 	{
 		/*
-		 * Read the clock once.
-		 *
-		 * Two reads, one per field, can straddle a tick. The second read is
-		 * the later one, so if it lands in the next second the pair
-		 * reconstructs as sec = N, nsec = (small), which is *earlier* than
-		 * the N-1 that the previous call returned. A timestamp that goes
-		 * backwards is worse than an imprecise one: init's uptime computes
-		 * `ms = (now - last) * 1e6 / 1e3` as unsigned, so one backwards step
-		 * underflows and prints a number in the billions of milliseconds.
+		 * Read the clock once. Two reads can straddle a tick; the second
+		 * read is the later one, so if it lands in the next second the pair
+		 * reconstructs as sec=N, nsec=small, which is *earlier* than the
+		 * N-1 the previous call returned. A backwards step underflows
+		 * init's unsigned ms computation and prints a number in the
+		 * billions.
 		 */
 		uint64_t now = sched_now_ns();
 
@@ -224,10 +220,9 @@ static long sc_open(struct syscall_regs *r)
 	UNUSED(r);
 	/*
 	 * Validated even though the answer is always the same. A syscall that
-	 * ignores its arguments cannot be used to probe for a valid pointer,
-	 * and more importantly the validation is what tells a caller its
-	 * pointer was wrong instead of silently reporting "no such file" for
-	 * an address that does not exist.
+	 * ignores its arguments silently reports "no such file" for a pointer
+	 * that does not exist; the validation is what tells the caller its
+	 * pointer was wrong.
 	 */
 	if (copy_string_from_user(path, arg0(r), sizeof(path)) < 0)
 		return -EFAULT;
@@ -246,11 +241,10 @@ static long sc_close(struct syscall_regs *r)
 }
 
 /*
- * Shared read/write body. The bounce buffer is on the kernel stack rather than
- * a per-CPU static for one reason that is not performance: a static would be a
- * single shared object, and two CPUs servicing a read and a write at the same
- * time would tear each other's data. A per-CPU array of 256 pages would not fit
- * in the kernel image budget.
+ * Shared read/write body. Bounce buffer on the kernel stack rather than a
+ * per-CPU static: a single shared object would tear data between two CPUs
+ * servicing a read and a write at the same time, and a per-CPU array of
+ * 256 pages would not fit in the kernel image budget.
  */
 #define IO_CHUNK PAGE_SIZE
 
@@ -477,6 +471,9 @@ static ssize_t pipe_read_op(struct file *f, void *buf, size_t count)
 	size_t done = 0;
 	bool nonblock = (f->f_flags & O_NONBLOCK) != 0;
 
+	if (count == 0)
+		return 0;
+
 	for (;;) {
 		size_t avail;
 
@@ -671,6 +668,12 @@ static long sc_brk(struct syscall_regs *r)
 		return (long)mm->brk;
 
 	want = ALIGN_UP(want, PAGE_SIZE);
+
+	/* Confine brk to the heap VMA only: never shrink below start_brk
+	 * (the initial heap base), and never grow past the RLIMIT_DATA bound. */
+	if (want < mm->start_brk)
+		want = mm->start_brk;
+
 	if (want < mm->brk) {
 		mm_remove_vma(mm, (virt_addr_t)want, (virt_addr_t)mm->brk);
 		mm->brk = want;
@@ -711,6 +714,10 @@ static long sc_mmap(struct syscall_regs *r)
 	if (len == 0 || len > (1ULL << 40))
 		return -EINVAL;
 	if (prot & ~(u64)(PROT_READ | PROT_WRITE | PROT_EXEC))
+		return -EINVAL;
+	/* W^X enforcement: reject simultaneous write + execute.
+	 * JITs must use mprotect to toggle between writable and executable. */
+	if ((prot & PROT_WRITE) && (prot & PROT_EXEC))
 		return -EINVAL;
 	if ((flags & MAP_SHARED) && (flags & MAP_PRIVATE))
 		return -EINVAL;
@@ -783,6 +790,9 @@ static long sc_mprotect(struct syscall_regs *r)
 	if (len == 0 || (addr & (PAGE_SIZE - 1)))
 		return -EINVAL;
 	if (prot & ~(u64)(PROT_READ | PROT_WRITE | PROT_EXEC))
+		return -EINVAL;
+	/* W^X enforcement: reject simultaneous write + execute. */
+	if ((prot & PROT_WRITE) && (prot & PROT_EXEC))
 		return -EINVAL;
 	len = ALIGN_UP(len, PAGE_SIZE);
 	if (addr + len < addr)
@@ -998,9 +1008,10 @@ long syscall_dispatch(struct syscall_regs *regs)
 		return -ENOSYS;
 
 	/*
-	 * Cleared before every dispatch and only cleared again by a handler
-	 * that is going to switch away for good. The entry path consults it
-	 * to decide whether its frame is still the right place to sysretq to.
+	 * Set ret_to_user = 1 before any early returns. This ensures the
+	 * invariant that the syscall entry path can rely on ret_to_user being
+	 * set for any syscall that reaches a handler, rather than depending
+	 * on the historical absence of early returns.
 	 */
 	syscall_cpus[this_cpu_id()].ret_to_user = 1;
 

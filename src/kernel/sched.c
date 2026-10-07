@@ -1,39 +1,17 @@
 /*
  * sched.c — the MLFQ scheduler.
  *
- * Shape of the thing
- * ------------------
- * Per CPU there is one struct runqueue holding four things: a deadline list, an
- * RT priority array, eight MLFQ levels, and the idle task. Nothing here is
- * global except the migration list, which exists so that a wakeup on a remote
- * CPU never takes a remote lock.
+ * Per-CPU runqueue with deadline, RT priority array, eight MLFQ levels, and
+ * the idle task. Selection is a strict cascade: deadline, RT, MLFQ, idle.
  *
- * Selection is a strict cascade:
+ * Tick accounting: every tick charges exec_budget. Zero demotes one level and
+ * recharges the new level's quantum. A voluntary yield does not recharge —
+ * that asymmetry is the anti-gaming property.
  *
- *   1. a runnable SCHED_DEADLINE task, earliest absolute deadline first
- *   2. a runnable SCHED_FIFO/SCHED_RR task, highest RT priority first
- *   3. the lowest-numbered non-empty MLFQ level
- *   4. the idle task
- *
- * Strict priority rather than a unified score is what makes the RT classes
- * mean what POSIX says they mean: an RT task is not "usually" first, it is
- * first, and no amount of normal work can delay it.
- *
- * Tick accounting
- * ---------------
- * Every tick charges one tick of exec_budget to the running task. Hitting zero
- * demotes one level and recharges the new level's full quantum. A voluntary
- * yield does *not* recharge: that asymmetry is the entire anti-gaming property
- * of the design. A task that yields just before its budget expires gets its
- * place back in the same level but has still spent the budget, so the next
- * tick demotes it anyway.
- *
- * Aging is the other half. Once per SCHED_AGING_INTERVAL ticks, every runnable
- * task in level L that has been waiting longer than L * MLFQ_AGE_TICKS is moved
- * up one level with a fresh quantum. The multiplier is what makes the guarantee
- * directional: the deeper a task is buried, the longer it must wait, so a deep
- * task always drains towards the top faster than new arrivals can pile onto the
- * level it is leaving.
+ * Aging: once per SCHED_AGING_INTERVAL ticks, runnable tasks in level L
+ * waiting longer than L * MLFQ_AGE_TICKS are promoted one level with a fresh
+ * quantum. The multiplier makes deeper tasks wait longer, so they drain toward
+ * the top faster than new arrivals can pile on.
  */
 #include <stdbool.h>
 #include <io.h>
@@ -246,66 +224,15 @@ static __noreturn void idle_thread(void *arg)
 		}
 
 		/*
-		 * hlt rather than a spin: with no runnable task there is
-		 * nothing to wait for except a timer interrupt, and halting
-		 * stops the CPU from stealing the bus from whatever is about
-		 * to make something runnable. The tick wakes the CPU and
-		 * sched_tick() re-checks, so a wakeup cannot be missed by
-		 * having gone to sleep over it.
+		 * hlt with IF set across the halt. IF must be set: with IF clear
+		 * the CPU wakes for nothing and the halt is permanent. The two
+		 * must be in one asm block: written separately the compiler can
+		 * sink sti past hlt, leaving the halt with IF still clear.
 		 *
-		 * IF must be set across the hlt. `hlt` halts until an
-		 * interrupt is *pending and unmasked*; with IF clear the CPU
-		 * wakes for nothing and the halt is permanent, which is what a
-		 * halted CPU with a live PIT underneath it must never be.
-		 *
-		 * Measured, and this is the whole reason the tree's timer had
-		 * never ticked. With `hlt()` alone here, the CPU sat at
-		 * RIP=0xffffffff8000bf76 with RFLAGS=0x46 -- IF clear -- while
-		 * `info pic` reported `pic0: irr=03 imr=fc isr=00`: IRQ0 pending,
-		 * IRQ0 unmasked, nothing in service. An interrupt that is
-		 * pending, unmasked and never delivered is only ever explained
-		 * by IF, and forcing IF on at that exact point under gdb made
-		 * `pit_irq` fire immediately on vector 32 with no other change.
-		 * Nothing in the tree had ever executed `sti`: `kmain` clears IF
-		 * before gdt_reload and never sets it again, every syscall
-		 * entry clears it, and irq_restore() only ever *enables*, so
-		 * it cannot restore a state that was never set.
-		 *
-		 * The re-enable is scoped to the halt rather than done once in
-		 * kmain because every path into this loop arrives with IF clear
-		 * -- from sched_block_current() under a syscall, or from
-		 * schedule() under a spinlock -- and a single global `sti`
-		 * would be undone by the next irq_save(). What matters is that
-		 * the CPU is interruptible while it is idle, which is the only
-		 * place this kernel can afford an interrupt today.
-		 *
-		 * `sti` and `hlt` are one asm block, and that is not a style
-		 * choice. Written as C the compiler is free to sink the `sti` past
-		 * the `hlt`, because `hlt` stops *delivery* and does not itself
-		 * change IF, so on GCC's model the two are reorderable. It also
-		 * sees a second, conditional `sti` reachable through
-		 * `irq_restore(flags)` and folds the two together.
-		 *
-		 * It did exactly that. The compiled idle loop is:
-		 *
-		 *     hlt
-		 *     test $0x2,%ah        <- bit 1 of AH, a general register
-		 *     je   skip
-		 *     sti
-		 *   skip:
-		 *
-		 * so the halt happens with IF still clear, and the `sti` that
-		 * would have rescued it is both downstream of the halt and gated
-		 * on a register that has nothing to do with the interrupt flag.
-		 * The machine stops for ever with a pending, unmasked interrupt
-		 * sitting on the PIC -- measured: RFLAGS=0x246 with HLT=1,
-		 * `pic0: irr=12 isr=01`, IRQ0 and IRQ4 both pending, neither
-		 * delivered, on every sample.
-		 *
-		 * One `asm volatile` block is opaque to the scheduler, so the two
-		 * instructions retire in the order written. There is no way to
-		 * express "halt with interrupts enabled" more weakly than this and
-		 * still have it mean that.
+		 * This is measured, not assumed. With hlt alone the CPU sat at
+		 * RIP=0xffffffff8000bf76 with RFLAGS=0x46 (IF clear) while
+		 * pic0 showed IRQ0 pending and unmasked. Forcing IF on at that
+		 * exact point made pit_irq fire immediately with no other change.
 		 */
 		__asm__ volatile("sti; hlt" ::: "memory");
 
@@ -860,25 +787,15 @@ void sched_wake(struct task *t)
 	if (t->state != TASK_BLOCKED && t->state != TASK_NEW)
 		return;
 
-	/*
-	 * I/O boost. A task that just stopped blocking on I/O is, by
-	 * construction, latency-sensitive: it has data waiting or a
-	 * dependency resolved, and every tick it spends in a queue is a tick
-	 * its requestor waits. It is placed at the *head* of its level rather
-	 * than promoted, which gives the same latency win without letting a
-	 * task that cycles through short reads climb the queue indefinitely.
-	 * The one-level promotion with the io_boost latch is the doc's rule
-	 * for exactly that concern, and it is applied first.
-	 */
+	struct runqueue *rq = sched_runqueues[this_cpu_id()];
+	u64 flags = spinlock_irqsave(&rq->lock);
+
 	if (t->mlfq_level > 0 && !t->io_boost && t->policy != SCHED_FIFO &&
 	    t->policy != SCHED_RR && t->policy != SCHED_DEADLINE) {
 		t->mlfq_level--;
 		t->io_boost = 1;
 		task_reset_budget(t);
 	}
-
-	struct runqueue *rq = sched_runqueues[this_cpu_id()];
-	u64 flags = spinlock_irqsave(&rq->lock);
 
 	if (!t->on_rq) {
 		t->state = TASK_RUNNABLE;
@@ -889,6 +806,7 @@ void sched_wake(struct task *t)
 	/* Preempt if the woken task belongs on this CPU and outranks us. */
 	flags = spinlock_irqsave(&rq->lock);
 	bool preempt = cpu_started[this_cpu_id()] && rq->current &&
+		       !rq->current->detached &&
 		       rq_has_higher_locked(rq, rq->current);
 	spinlock_unlock_irqrestore(&rq->lock, flags);
 
@@ -1000,65 +918,17 @@ __noreturn void sched_switch_to_new(struct task *t)
  * scheduled again — which, because the switch suspends it inside this loop,
  * means it returns by resuming here rather than by returning to its caller.
  *
- * The resume contract
- * -------------------
- * context_switch() publishes the caller's frame and `ret`s into the incoming
- * one. The frame it publishes ends at whatever address the `call` pushed, so a
- * suspended task's resume address is *exactly* the instruction after the
- * `call context_switch` below. There is no other candidate, and no source-level
- * way to move it: a resumption is a `ret` to a return address that was chosen
- * before the task was suspended. So the only question is what that instruction
- * has to be.
+ * The resume point is the jump back to `reschedule:` at the top of the loop.
+ * That satisfies two structural requirements:
  *
- * It has to satisfy two properties, and both are structural rather than
- * incidental:
+ *   1. It must not depend on CR3, because the resumed task runs with the
+ *      address space the switch installed for it.
+ *   2. It must be idempotent — re-entering the loop must not replay the
+ *      switch bookkeeping.
  *
- *   1. It must not depend on CR3, because the resumed task is running with the
- *      address space that *switch* installed for it, not the one that was live
- *      when it suspended. Any instruction that recomputes or reloads CR3 on the
- *      way back is a bug waiting for the first user process.
- *   2. It must be idempotent. Re-entering the loop must not replay the switch
- *      bookkeeping, or a resumed task runs the switch again, with the callee's
- *      arguments, for a pair of tasks that have already been switched.
- *
- * Both are satisfied by making the resume point the jump back to `reschedule:`
- * at the top of the loop, with every derived value recomputed there and nothing
- * between the jump and the top. Nothing is left after the call, so the compiler
- * has no dead code to sink past the switch point.
- *
- * Measured, not asserted. In build/kernel.elf:
- *
- *     ffffffff8000b057:  0f 22 d8          mov  %rax,%cr3      <- before the call
- *     ffffffff8000b08a:  e8 4d 52 00 00    call context_switch
- *     ffffffff8000b08f:  e9 4c fd ff ff    jmp  ffffffff8000ade0   <- the resume pad
- *                                                                           (= reschedule:)
- *
- * Five bytes, one instruction, a relative displacement and nothing else: no
- * memory operand, no call, no stack traffic, no CR3. Whichever address space
- * the switch installed, that `jmp` is valid, and the kernel half it lands in is
- * mapped in every PGD (mm.c copies PML4 entries 256 and 511 out of the kernel
- * page directory), so resuming a user task cannot fault on its own return.
- *
- * The bug this replaces, measured the same way from the pre-fix object. The
- * call used to be followed by __builtin_unreachable(), which told GCC the call
- * never returns and is a licence to sink anything below the switch. It took one.
- * With context_switch_to() inlined into schedule(), the object had:
- *
- *     bbf:  call  fpu_save
- *     bd0:  call  fpu_restore
- *     be3:  call  context_switch
- *     be8:  call  vmm_switch_to_kernel_pgd   <- the resume address, a call
- *     bed:  jmp   bb3                        <- back into the fpu_save block
- *
- * The resume address was therefore a *call*, not a jump: the `next->mm == NULL`
- * arm of the address-space switch had been sunk past the hand-off, and the
- * resume path jumped into the middle of the FPU sequence. So the first time any
- * task was resumed it re-ran the address-space switch for the pair it had just
- * left — installing the kernel PGD over a process's own — then fpu_save()'d into
- * the *other* task's save area, then called context_switch() again to switch
- * back to that same other task. Two runnable tasks ping-ponged forever, making
- * no forward progress and no diagnostic, with the address space of whichever
- * task had one destroyed on every lap.
+ * The pre-fix bug: __builtin_unreachable() after the call let GCC sink
+ * vmm_switch_to_kernel_pgd() past the hand-off, so the resume path jumped
+ * into the middle of the FPU sequence and two tasks ping-ponged forever.
  */
 void schedule(void)
 {
@@ -1066,6 +936,9 @@ void schedule(void)
 	struct task *prev;
 	struct task *next;
 	u64 flags;
+
+	if (per_cpu(preempt_count) != 0)
+		return;
 
 reschedule:
 	/*
@@ -1174,6 +1047,24 @@ __noreturn void sched_stop_current(void)
 	spinlock_unlock_irqrestore(&rq->lock, flags);
 
 	per_cpu(current) = rq->idle;
+
+	/*
+	 * The exiting task's address space and kernel stack have already been
+	 * torn down by task_release_resources() before this function is entered:
+	 * CR3 still holds the freed PML4 and the TSS/syscall kernel-stack slots
+	 * still point at the freed kstack. A ring-3 interrupt or syscall entry
+	 * arriving on either of those would land in reclaimed memory, so point
+	 * all three at the idle task before handing the CPU off on its stack.
+	 */
+	void *idle_stack_top = (void *)((u64)rq->idle->kernel_stack +
+					TASK_KERNEL_STACK_SIZE);
+	syscall_set_kernel_stack(idle_stack_top);
+	tss_set_kernel_stack(idle_stack_top);
+
+	if (rq->idle->mm)
+		write_cr3(rq->idle->mm->pgd);
+	else
+		vmm_switch_to_kernel_pgd();
 
 	if (rq->idle->fpu_state)
 		fpu_restore(rq->idle->fpu_state);
@@ -1337,14 +1228,6 @@ void sched_tick(void)
 			 */
 			task_reset_budget(t);
 			need_switch = true;
-		} else if (t->policy == SCHED_IDLE) {
-			/* The idle task gives up the CPU the moment anything
-			 * becomes runnable. It has no work of its own to
-			 * protect, so its only job is to notice. */
-			u64 flags = spinlock_irqsave(&rq->lock);
-
-			need_switch = rq_has_work_locked(rq, NULL);
-			spinlock_unlock_irqrestore(&rq->lock, flags);
 		} else {
 			/* Strict priority within the MLFQ: if anything better is
 			 * runnable, this task does not get the tick. */
@@ -1380,6 +1263,14 @@ int sched_sleep_ns(u64 ns)
 		ticks = 1;
 
 	/*
+	 * Set wake_tick BEFORE linking the node and releasing the lock.
+	 * This prevents a lost-wakeup race where the tick handler removes
+	 * the task from the sleep list before wake_tick is visible.
+	 */
+	t->wake_tick = now + ticks;
+	t->sleeping = true;
+
+	/*
 	 * Insertion keeps the list sorted by wake_tick so the expiry walk
 	 * stops at the first sleeper that is not due, which makes waking O(due)
 	 * rather than O(sleepers).
@@ -1396,8 +1287,6 @@ int sched_sleep_ns(u64 ns)
 	__list_add(&t->sleep_node, pos->prev, pos);
 	spinlock_unlock_irqrestore(&sleep_lock[this_cpu_id()], flags);
 
-	t->sleeping = true;
-	t->wake_tick = now + ticks;
 	sched_block_current();
 	return 0;
 }
@@ -1470,6 +1359,8 @@ int sched_set_policy(struct task *t, u32 policy, u32 rt_priority,
 		u64 util = (dl->runtime_ns * 100ULL) / dl->period_ns;
 
 		if (home->deadline_util + util > DEADLINE_MAX_UTIL_PCT) {
+			if (was_queued)
+				rq_enqueue_locked(home, t, false);
 			spinlock_unlock_irqrestore(&home->lock, flags);
 			return -EBUSY;
 		}

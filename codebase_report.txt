@@ -1,0 +1,265 @@
+src/libc/src/crt1.c:
+- _start score 50 Naked asm function, inherently fragile, requires exact knowledge of compiler register behavior
+- get_random_seed score 10 Unsafe cast of auxv integer to pointer dereference, relies on undocumented kernel layout
+
+src/libc/src/malloc_fork.c:
+- (no significant issues — 28-line trivial weak fallback)
+
+src/libc/src/stdlib.c:
+- strtoxx score 50 Nearly unreadable overflow check on line 216 with nested ternary and multiple casts, extremely hard to verify correctness
+- insertion_sort score 40 Two divergent implementations selected by element size, large-element byte-column rotation logic is subtle and was previously buggy (documented)
+- qsort / introsort_loop score 35 Recursive introsort with complex pivot selection and partition interaction, high surface for sorting algorithm bugs
+
+src/libc/src/assert.c:
+- put_num score 25 Inefficient per-digit output through a 2-byte temporary buffer, calling put() once per digit
+
+src/libc/src/syscall.c:
+- (no significant issues — clean thin wrappers)
+
+src/libc/src/unistd.c:
+- fork score 20 Reinitializes allocator and atexit state in child with documented simplification, but calling __libc_init() after __malloc_fork_child() re-runs arena creation which could race with inherited parent state
+- nanosleep score 10 Does not retry on EINTR unlike sleep(), inconsistent POSIX behavior in a 4-line function
+
+src/libc/src/time.c:
+- (no significant issues — clean dispatchers)
+
+src/libc/src/printf.c:
+- __libc_vformat score 30 343-line monolithic function handling all format parsing, very large single responsibility
+
+src/libc/src/string.c:
+- strstr score 15 Naive O(n*m) search with no optimization, acceptable for freestanding but poor algorithmic quality
+- strerror score 15 44-case switch statement, high maintenance cost for any errno additions
+
+src/libc/src/errno.c:
+- (no significant issues — trivial)
+
+src/libc/src/stdio.c:
+- fclose score 25 Nested ternary for fd reassignment on standard streams, hard to read and easy to break
+- getline score 20 Complex manual buffer growth with realloc, multiple ownership transfer points for *lineptr
+
+src/libc/src/malloc.c:
+- realloc score 65 100-line function with 4 distinct code paths (NULL, size-0, aligned, large, small-shrink, small-grow), aligned-pointer copy bounds are mathematically subtle and hard to verify
+- aligned_alloc_impl score 60 Pointer arithmetic writing shim words at hardcoded offsets relies on exact struct chunk layout and endianness assumptions
+- allocate_small score 50 Unusual unlock/create/relock/relock dance without holding the lock across arena creation, creates a window for list inconsistency
+- __malloc_fork_child score 25 Silently drops surplus cached chunks if freelist length differs from count, no validation that count matches list length
+
+src/kernel/main.c:
+- kmain:92-387 score 95 Massive god function (~300 lines) doing bootinfo validation, CPU features, VMM/PMM/kmalloc init, console, IDT/GDT, syscall, tty, scheduler, init process creation. Violates single responsibility; impossible to unit test; ordering bugs cause silent triple faults
+
+src/kernel/cpu_features.c:
+- cpu_features_init:130-438 score 90 300-line function doing all CPUID leaf parsing, vendor string, topology, TSC calibration, feature mask building. Mix of detection and policy; swapped AVX/OSXSAVE bits went undetected for months
+- calibrate_tsc_against_pit:81-128 score 75 Tight spin loop with magic constants (PIT_CAL_COUNT=59659, PIT_CAL_MAX_SPIN=2000000); no timeout in wall time; PIT port I/O timing varies wildly on emulated hardware
+
+src/kernel/elf.c:
+- elf_load:320-638 score 88 320-line two-pass loader with TLS handling, PT_PHDR resolution, VMA mapping, brk/mmap_base setup. Complex overlap logic in second pass; TLS block overlay with .init_array caused silent constructor loss
+- elf_load_tls:234-317 score 80 TLS thread pointer calculation (ALIGN_UP vs unaligned end) was wrong until measured; .tbss zeroing destroyed .init_array on overlay segments
+
+src/kernel/mm.c:
+- vmm_handle_page_fault:749-875 score 85 130-line fault handler mixing demand paging, COW (stub), file-backed (unsupported), permission checks, allocation. Gating on PF_PRESENT bit was wrong for user faults; demand paging for .bss failed silently
+- mm_create:248-310 score 70 Complex PML4 cloning with shared kernel entries (256, 384, 511); missing index 384 (vmalloc) caused process page faults on kernel stack access
+- vma_punch:441-539 score 75 VMA splitting/removal with head/tail allocation; continue vs break logic in second pass caused interval corruption (end <= start)
+
+src/kernel/syscall.c:
+- syscall_dispatch:994-1032 score 70 FPU dirty tracking mixed with dispatch; ret_to_user flag set before early returns but handler may block
+- file_read:251-290 score 70 Duplicated bounce buffer logic (u8 bounce[PAGE_SIZE]); O_NONBLOCK handling differs; short read/write leaves partial copy
+- file_write:292-328 score 70 Duplicated bounce buffer logic; O_NONBLOCK handling differs; short read/write leaves partial copy
+- sc_mmap:700-761 score 65 W^X enforcement but no MAP_FIXED_NOREPLACE; mm_remove_vma before mm_add_vma race with concurrent fault
+- pipe_read_op:466-518 score 65 Single waiter per direction (POSIX violation); wakeup races with lock release/reacquire
+- pipe_write_op:520-560 score 65 Single waiter per direction; wakeup races with lock release/reacquire
+
+src/kernel/kmalloc.c:
+- kfree:581-670 score 80 Tier decision by pointer alignment (page-aligned = vmalloc); slab_find_owner iterates all 10 caches; double-free detection only in slab not magazine
+- kmalloc:481-560 score 75 Fast/slow path with magazine refill; batch size = min(per_slab, 8); refill pushes in reverse to preserve address order
+- slab_new:263-325 score 70 Free list threading ascending (head=0, tail=per_slab-1); per_slab=0 check prevents 4B iteration bug from uninit cache
+
+src/kernel/pmm.c:
+- pmm_init:945-1342 score 95 400-line init: metadata placement (shrinks total_pages until fit), bitmap init, zone setup, free list building, kernel reservation. Metadata split across runs warns but continues; page_array zone assignment was missing (all ZONE_DMA)
+- exclude_free_blocks_locked:460-528 score 80 Two-pass reservation: collect intersecting blocks, split into claimed/survivors, free survivors via zone_free_locked (which coalesces). Hand-rolled list iteration to avoid -Wunused-value
+- zone_free_locked:382-430 score 75 Buddy coalescing with zone boundary check, PG_FREE+PG_BUDDY+order match; buddy pointer swap for lower address merge
+- pmm_alloc_dma_range:777-855 score 70 Bitmap scan with alignment stepping; run break resumes from failed frame not next aligned boundary
+
+src/kernel/vmm.c:
+- build_missing_tables:419-472 score 75 Creates PML4/PDPT/PD entries top-down; promotes existing supervisor entries to user (U/S bit). Missing PML4[384] caused all vmalloc to fail silently
+- vmalloc_grow:612-694 score 70 Allocates contiguous physical run via buddy; maps page-by-page with rollback on failure; block_insert shifts array O(n)
+- vmm_map_page:474-503 score 65 Walks to PT level, builds missing tables, maps leaf PTE. Remapping occupied PTE returns error (caller bug)
+
+src/kernel/percpu.c:
+- percpu_install_gs_base:111-149 score 60 GS base WRMSR + three verification paths (IA32_GS_BASE, this_cpu(), GS-relative mov). Step 2 caught movq %%gs bug (read selector not base)
+
+src/kernel/idt.c:
+- exception_handler:437-545 score 85 110-line policy: #PF first (demand paging), then SIGFPE/SIGILL/SIGTRAP for user, then segment/stack faults for user, else kernel panic. Ring-0 #PF goes fatal; process_deliver_signal hook may be NULL
+- interrupt_dispatch:906-965 score 70 Preempt count increment/decrement around handler; PIC EOI after handler; reschedule only at preempt_count==0 with runqueue check
+- pic_eoi:797-850 score 65 IRQ derivation (vector - VECTOR_IRQ_BASE); cascade IRQ2 assert; master+slave EOI order for slave IRQs
+
+src/kernel/gdt.c:
+- gdt_reload:146-213 score 65 GDT load + TSS descriptor (low/high 64-bit); memset kernel_tss resets IST stacks; percpu_install_gs_base after gdt_flush (GS base lost on reload)
+
+src/kernel/panic.c:
+- panic_common:154-215 score 60 Register dump via panic_regs (asm); panic_addr_writable walks page tables with no locks/alloc; VGA mirror probed once
+- panic_addr_writable:92-119 score 55 Bare 4-level page walk; rejects huge pages (PS bit) and absent levels; checks leaf writable
+
+src/kernel/process.c:
+- exec_load_and_run:1235-1392 score 88 ELF load, stack VMA, build_user_stack (auxv, AT_RANDOM), TLS pointer check, mm swap. Thread pointer from new mm not loaded to MSR_FS_BASE here (done in ret_to_user)
+- exec_enter_image:1483-1511 score 70 write_cr3(new_pgd), verify CR3 matches, mm_put(old_mm), iretq via process_enter_user. Old bug: exec returned 0, resumed old program with new mm pointers
+- sys_fork:876-963 score 75 Eager page table copy (clone_table recursive); no COW; FD table shared by reference; fork_ctx per-CPU for child resume RIP/RSP/RFLAGS
+- clone_table:766-817 score 65 Recursive page table copy; 1GiB/2MiB leaves shared (order 18 > BUDDY_MAX_ORDER); PTE_USER forced on copied entries
+- build_user_stack:1013-1147 score 70 Stack layout: strings → argv/envp vectors → auxv (11 entries). AT_RANDOM from TSC ^ mm pointer; STACK_PUT macro for 8-byte writes
+
+src/kernel/task.c:
+- task_alloc:74-163 score 65 Allocates task, kernel_stack, FPU state (512+64 bytes aligned), FD table; fpu_save captures reset state
+- task_release_resources:365-396 score 60 Order: FD table → mm (last user drops page tables) → FPU state → kernel stack. count_mm_users scans global task list
+
+src/kernel/sched.c:
+- schedule:933-1022 score 85 Main loop with resume contract (goto reschedule after context_switch). Drains global migration list; requeues prev if runnable; rq_pick_locked returns NULL → keep running
+- sched_tick:1171-1248 score 80 Budget charging, RT throttling (rt_consumed/rt_throttled), MLFQ demotion (budget==0 → level++), aging pass (SCHED_AGING_INTERML), sleeper wakeup. need_switch triggers schedule()
+- sched_switch_frame:847-909 score 70 CR3 switch (if mm differs), FPU save/restore, syscall/TSS stack update, per_cpu(current) update. Ordering: CR3/FPU before context_switch call
+- rq_pick_locked:445-483 score 65 Deadline → RT (bitmap highest) → MLFQ (ctz bitmap). NULL count/bitmap mismatch resets summary; idle task never enqueued
+
+src/kernel/console.c:
+- console_putc_attr:577-630 score 65 Escape handling, newline/r/tab/bspace, dual backend (VGA + framebuffer), serial always. cursor_x wrap calls console_newline (scroll logic)
+- handle_escape:480-572 score 60 Minimal CSI parser (ESC [ params ; params final); unknown sequences consumed silently; cursor position (H), erase (J/K), colour (m ignored)
+- fb_render_glyph:257-309 score 55 Per-pixel rendering with 32/24bpp shift by red/green/blue_shift; glyph 8x16 MSB-left; bounds check per glyph
+
+src/kernel/kprintf.c:
+- kvprintf:198-399 score 70 Full printf parser: flags/width/precision/length/conversion; va_copy for reuse; emit_padded handles sign/zero/left/precision; digit floor. %p always 0x + 16 hex digits
+
+src/kernel/klog.c:
+- klog_emit:42-115 score 60 Timestamp from live cpu_features.tsc_khz (not cached); drops trailing \n/\r from message; reserves space for newline in 640-byte line buffer
+
+src/kernel/kstring.c:
+- memset:316-323 score 55 Dispatch to memset_impl/memcpy_impl (SSE2/AVX2/scalar); non-temporal path for n >= nt_threshold (4x L1D)
+- memcpy:330-333 score 55 Dispatch to memset_impl/memcpy_impl; non-temporal path
+- kstring_init:587-622 score 55 CPUID leaf 4 scan for L1 data cache (type=1, level=1); nt_threshold = size * 4; falls back to 32K default
+
+src/kernel/drivers/serial.c:
+- serial_putc:54 score 40 Dead function — declared in the header and defined in the .c, but never called anywhere. serial_puts calls serial_putc_blocking directly, bypassing it.
+- (file: dead macros) score 30 UART_IER_TX_EMPTY (line 16), UART_IIR_NO_INT (19), UART_IIR_RX_AVAILABLE (20), and UART_IIR_TX_EMPTY (21) are defined but never used. UART_IER_RX_AVAILABLE (line 15) is also unused here — tty.c defines its own copy.
+
+src/kernel/drivers/serial.h:
+- (no issues found)
+
+src/kernel/drivers/font8x16.c:
+- (auto-generated data array, no functions to review)
+
+src/kernel/tty.c:
+- (no issues found — well-documented, complex but necessary locking logic)
+
+src/boot/stage2.c:
+- serial_puthex:130 score 95 Missing opening brace for function body — line 130 ends with `)` and line 131 jumps straight into `for` with no `{`; there are 2 closing braces but only 1 opening brace. This is a syntax error that prevents compilation.
+- load_kernel:1343 score 55 Variable shadowing — inner `for` loop variables `i` (lines 1351, 1356, 1363) shadow the outer loop variable `i` (line 1343). C99 scoping handles it correctly but it is error-prone for future maintainers.
+- e820_query:836 score 50 Misleading indentation — lines 839–844 are indented at the same level as the `if` body (2 tabs) but are actually at the for-loop body level (1 tab). A reader will believe last_base/e820_count only update when the `if` condition is true.
+
+src/userspace/init/init.c:
+- bench_mem:240 score 45 Confusing dual `rng() & 3u` checks — both the realloc branch (line 240) and the free branch (line 252) test `(rng() & 3u) == 0u` but each call consumes a separate RNG value. The probability distribution is non-obvious and a maintainer could easily assume both check the same call, breaking the intended distribution.
+- (dangling comment, lines 72–85, score 30 Comment block about "Replay the line after getline()" describes removed functionality and sits directly above `split()`, which it does not document.)
+
+src/userspace/hello/hello.c:
+- main score 20 Magic number `20` passed to `write()` for the string `"direct-write-stdout\n"` — correct but brittle; a string change silently breaks the count.
+
+src/userspace/main.c:
+- (empty file, 0 lines — orphaned stub with no content)
+
+tests/runtime/framework/test_runner.c:
+- main:28-131 score 75 Summary tallies are computed from `suite->num_cases` instead of the framework's actual per-test results, so a suite that fails only some of its cases is counted entirely as failed (and entirely as passed when it passes). The `else` branch handling TEST_SKIP at 109-115 is dead code because `test_run_suite` never returns TEST_SKIP. The `extern struct test_suite` declarations are embedded inside main.
+- print_usage:11-22 score 15 Hard-coded option list is duplicated in the arg-parsing loop at 34-52; adding an option requires editing two places and they can drift apart.
+
+tests/runtime/framework/test_framework.c:
+- test_log:13-21 score 25 Fixed 512-byte stack buffer with vsnprintf is fine, but the function is the only output path and writes directly to stderr via raw write() with no flushing strategy.
+
+tests/runtime/framework/test_framework.h:
+- TEST_ASSERT_STR_EQ:68-74 score 45 Calls `strcmp((a),(b))` without guarding for NULL; a null string operand crashes the test harness. The macro also evaluates `a` and `b` twice (once in the comparison, once in the failure-log arguments), so side effects fire twice.
+- TEST_ASSERT_EQ / TEST_ASSERT_NE / TEST_ASSERT_*:20-66 score 30 Each comparison macro evaluates its arguments multiple times; passing an expression with side effects (e.g. a function call or pointer dereference) can have unexpected behaviour or double-execute.
+
+tests/isa/isa_probe.c:
+- convert:86-91 score 30 Casts `u64 a` through `double` and back to `long`, which is lossy for values above 2^53 and silently wrong on overflow; the expression `(long)b + c` is also computed twice for no reason.
+- mix:77-83 score 10 Magic constant with no comment explaining its origin; trivial but opaque.
+
+tests/isa/legacy_simd.s:
+- (file) score 0 No functions — it is an instruction probe table. Note: the comment at 22-23 mentions maskmovd/maskmovq mnemonics that are not actually present in the file, which is mildly misleading.
+
+tests/isa/vex_avx.s:
+- (file) score 0 No functions — an instruction probe table (AVX/AVX-512 coverage).
+
+tests/isa/fxsave_only.s:
+- exempt:15-19 score 0 The only labelled entry; contains exactly the two exempted instructions (fxsave/fxrstor) followed by the neighbours that must be reported. Well-scoped.
+
+tests/isa/gpr_movs.s:
+- gpr_movs:22-74 score 0 A deliberately-constructed false-positive probe; the inline comments correctly explain why each mnemonic must not be flagged. No maintainability issues.
+
+tests/runtime/kernel/test_file_syscalls.c:
+- test_write_null_buffer:145-150 score 70 Passes NULL buffer to write syscall, invoking undefined behavior to "probe" kernel
+- test_read_null_buffer:171-176 score 70 Passes NULL buffer to read syscall, same UB probing issue
+- test_close_stdin_stdout_stderr:103-114 score 65 Closes stdin/stdout/stderr during test run, risks breaking test framework output
+- test_read_stdin:152-155 score 60 Empty stub test that unconditionally returns PASS, tests nothing
+- test_open_invalid_flags:89-95 score 55 Weak assertion accepts 3 different error codes, doesn't verify specific kernel behavior
+- syscall1:17-21 score 50 Duplicated inline asm syscall wrapper (repeated in 5+ test files)
+- syscall2:23-27 score 50 Duplicated inline asm syscall wrapper
+- syscall3:29-34 score 50 Duplicated inline asm syscall wrapper
+- syscall4:36-42 score 50 Duplicated inline asm syscall wrapper
+
+tests/runtime/kernel/test_ipc_syscalls.c:
+- test_futex_basic:68-76 score 75 Futex WAIT on stack address without timeout — can hang test indefinitely
+- test_pipe_invalid_fds_ptr:40-45 score 60 Passes 0 for both args but pipe expects (int fds[2], int flags) — wrong signature test
+- syscall2:13-17 score 50 Duplicated inline asm syscall wrapper
+- test_futex_invalid_addr:78-84 score 50 Uses hardcoded 0x1000 address for invalid pointer test
+
+tests/runtime/kernel/test_security_syscalls.c:
+- test_setuid_basic:24-29 score 60 Only tests "doesn't crash", accepts success or EPERM — no actual verification
+- test_setgid_basic:31-35 score 60 Same minimal test, no real verification
+- SYS_setuid:14 score 55 Hardcoded syscall numbers instead of using kernel headers
+- syscall2:18-22 score 50 Duplicated inline asm syscall wrapper
+
+tests/runtime/kernel/test_process_syscalls.c:
+- test_clone_basic:186-209 score 80 Uses malloc/free in kernel test context, complex child/parent logic with stack allocation
+- test_fork_pid_values:95-118 score 70 Complex fork test with intertwined child/parent assertions, hard to follow
+- test_wait4_wrong_pid:128-144 score 65 Fork + wait with wrong PID, complex control flow
+- test_fork_basic:77-93 score 60 Fork test with child/parent code paths mixed in one function
+- syscall1-5:39-73 score 50 Five duplicated syscall wrappers (repeated across test files)
+- test_arch_prctl_get_fs:324-329 score 55 Uses magic numbers 0x1001/0x1002 for ARCH_GET FS/GS
+- test_arch_prctl_get_gs:331-336 score 55 Same magic number issue
+
+tests/runtime/kernel/test_memory_syscalls.c:
+- test_mprotect_readonly:179-192 score 65 Comment admits "Write should fault - can't test easily without signal handler" — untested critical behavior
+- test_mprotect_noaccess:194-205 score 65 Same untested fault behavior
+- test_mremap_expand:215-230 score 60 Complex mremap test with data preservation checks
+- syscall1-6:56-93 score 50 Six duplicated syscall wrappers including unusual 6-arg version
+- test_madvise_dontneed:271-287 score 55 Comment "behavior may vary - just test it doesn't crash" — weak assertion
+- test_brk_expand:311-324 score 50 Uses brk for heap management test, assumes specific allocator behavior
+
+tests/runtime/kernel/test_scheduling_syscalls.c:
+- test_sched_yield_many_times:43-49 score 65 Busy loop 1000 yields with zero assertions, wastes CPU time
+- test_sched_yield_with_fork:51-66 score 60 Fork + yield test with complex child/parent synchronization
+- test_getcpu_basic:70-81 score 55 Accepts ENOSYS (not implemented) as valid result — masks missing implementation
+- syscall1/2/4:13-31 score 50 Duplicated syscall wrappers
+
+tests/runtime/init/test_init_system.c:
+- test_orphan_adoption:126-160 score 85 Extremely complex multi-generation fork test with timing-dependent sleeps (100ms, 1s)
+- test_nanosleep_precision:191-215 score 75 Timing-dependent test with 90% threshold, flaky on loaded systems
+- test_zombie_reaping:99-122 score 70 Uses 100ms sleep for zombie timing, race-prone
+- syscall1-4:38-63 score 50 Fourth duplication of syscall wrappers
+- test_open_close:251-265 score 55 Uses libc open/write/close/unlink instead of syscalls, inconsistent with other tests
+- test_stdout_stderr:240-249 score 55 Uses libc write/STDOUT_FILENO instead of syscall wrappers
+
+tests/context_switch_harness.c:
+- task_body:293-349 score 95 57-line function with first-resume logic, round loop, scheduling, stack checks, exit conditions — does too much
+- report:351-423 score 90 73-line function with complex switch count math, resumption accounting, per-task validation
+- sched_yield:250-286 score 80 Scheduler logic with runaway guard, frame publishing, context_switch asm call
+- check_first_resume:208-233 score 75 Validates frame offset, stack ownership, 6 registers in one dense function
+- build_frame:186-205 score 70 Complex stack frame construction with sentinel values, alignment math
+- main:435-457 score 65 Complex boot sequence with --restore-only mode, context_switch call that never returns
+- CHECK macro:149-157 score 60 Macro with printf + varargs, increments global failures, used throughout
+- die:164-168 score 55 Calls _exit directly, bypasses cleanup
+
+=== FIXED ===
+
+src/userspace/init/init.c:
+- main:505 score 90 Stack buffer overflow — `line[cap++]` writes into a 256-byte `line` buffer with no upper-bound check on `cap`. Typing more than 255 characters overflows the stack buffer.
+  - FIX: Added a bounds check before writing into `line`. If `cap >= sizeof(line) - 1`, the loop breaks with a "line too long, truncated" message instead of overflowing the stack buffer.
+
+tests/runtime/framework/test_framework.c:
+- test_run_suite:61-100 score 90 Static pass/fail/skip counters are never reset, so the per-suite summary prints cumulative totals across all suites; the return value is based on the cumulative `test_failed`, so once any suite fails every later suite returns TEST_FAIL even when all its tests pass — the runner then marks all subsequent suites as failed.
+  - FIX: Reset `test_passed`, `test_failed`, `test_skipped` to 0 at the top of `test_run_suite()`. Added `test_get_passed/get_failed/get_skipped()` accessors.
+
+tests/runtime/framework/test_runner.c:
+- main:28-131 score 75 Summary tallies are computed from `suite->num_cases` instead of the framework's actual per-test results, so a suite that fails only some of its cases is counted entirely as failed (and entirely as passed when it passes). The `else` branch handling TEST_SKIP at 109-115 is dead code because `test_run_suite` never returns TEST_SKIP. The `extern struct test_suite` declarations are embedded inside main.
+  - FIX: Summary tallies now use `test_get_passed/get_failed/get_skipped()` (the framework's actual per-test results) instead of `suite->num_cases`.

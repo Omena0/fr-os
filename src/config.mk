@@ -115,8 +115,9 @@ OBJ             := $(BUILD)/obj
 # appends to it later.
 #
 # The check is narrower than the policy, in a way worth knowing before relying
-# on it. `verify-isa` runs from the kernel.elf rule only (Makefile:198), so it
-# sees build/kernel.elf and nothing else -- not init.elf, not libc.a. And it
+# on it. `verify-isa` runs from three link rules -- hello.elf (Makefile:176),
+# init.elf (Makefile:198) and kernel.elf (Makefile:224) -- so it sees every
+# linked image in the tree, not just the kernel. And it
 # exempts fxsave/fxrstor on the grounds that they "move 512 bytes without
 # interpreting any of it", which is true and is also the whole problem: the
 # 512 bytes are the entire contract, and nothing in the build verifies that the
@@ -135,7 +136,7 @@ KERNEL_CFLAGS := \
 	-Werror=return-type -Wno-unused-parameter -Wno-address-of-packed-member \
 	-I src/include -I src/kernel/include -I src/kernel \
 	-mno-sse -mno-sse2 -mno-avx -mno-avx2 -mno-fma -mno-f16c \
-	-mno-mmx -mno-80387 -mno-80387 -msoft-float -mno-red-zone
+	-mno-mmx -mno-80387 -msoft-float -mno-red-zone
 
 # The kernel is loaded by stage2 at a fixed physical address, so the link
 # script pins the physical placement too.
@@ -200,11 +201,13 @@ BOOT_ASFLAGS := -m32 -I src/include/ -I src/boot/
 #
 # These four flags produce a byte-identical init.elf to the list without them
 # (no VEX instruction is emitted by the current sources, verified by md5), so
-# they are a statement of intent rather than a behaviour change. Unlike the
-# kernel list, they are not backed by a build gate: `verify-isa` is invoked from
-# the kernel.elf rule only (Makefile:198) and never looks at init.elf or
-# libc.a. This list is therefore the *only* thing standing between a future
-# -march= and silent YMM corruption.
+# they are a statement of intent rather than a behaviour change. They are
+# backed by a build gate: `verify-isa` runs on hello.elf (Makefile:176) and
+# init.elf (Makefile:198) as well as on kernel.elf (Makefile:224), so every
+# linked image in the tree is checked. What is NOT checked is libc.a, the
+# archive the userspace images link against -- a vector instruction in the
+# archive would be silently pulled into both. This list is therefore the
+# only thing standing between a future -march= and silent YMM corruption.
 USER_CFLAGS := \
 	-std=gnu11 -ffreestanding -nostdlib -fno-builtin -fno-stack-protector \
 	-fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables \

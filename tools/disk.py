@@ -41,42 +41,20 @@ INITRD_HEADER_FMT = "<QIIQ"  # magic, version, entry_count, total_len
 INITRD_HEADER_SIZE = struct.calcsize(INITRD_HEADER_FMT)
 
 
-def pad_to_sectors(data: bytes, what: str) -> int:
+def pad_to_sectors(data: bytes, what: str, limit: int = 0) -> int:
     """Return the sector count for `data`, or exit if it needs more than the
     reserved space."""
     sectors = (len(data) + SECTOR - 1) // SECTOR
+    if limit and sectors > limit:
+        print(f"error: {what} needs {sectors} sectors, limit is {limit}",
+              file=sys.stderr)
+        raise SystemExit(1)
     return sectors
 
 
 def read(path: str) -> bytes:
     with open(path, "rb") as fh:
         return fh.read()
-
-
-def build_initrd(entries: list[tuple[str, str]]) -> bytes:
-    """Bundle userspace programs into an initrd.
-
-    The format is deliberately trivial: a header followed by fixed-size records
-    of (name, offset, size, mode). The kernel's initrd reader walks it linearly
-    and copies each entry into the ramdisk filesystem. Using a real tar here
-    would force a tar parser into the kernel for no benefit — the kernel mounts
-    this into a ramfs, not a disk.
-    """
-    body = bytearray()
-    index = bytearray()
-
-    for name, path in entries:
-        payload = read(path)
-        offset = len(body)
-        body.extend(payload)
-        # Record: name_len(u16), mode(u16), size(u64), offset(u64)
-        name_bytes = name.encode()
-        index.extend(struct.pack("<HHQQ", len(name_bytes), 0o755, len(payload), offset))
-        index.extend(name_bytes)
-
-    total = INITRD_HEADER_SIZE + len(index) + len(body)
-    header = struct.pack(INITRD_HEADER_FMT, INITRD_MAGIC, 1, len(entries), total)
-    return header + bytes(index) + bytes(body)
 
 
 def main() -> int:
@@ -86,9 +64,6 @@ def main() -> int:
     ap.add_argument("--kernel", required=True)
     ap.add_argument("--initrd", help="prebuilt initrd blob")
     ap.add_argument("--out", required=True)
-    ap.add_argument("--init", action="append", default=[],
-                    metavar="NAME=PATH",
-                    help="userspace program to include in the initrd")
     ap.add_argument("--size-mb", type=int, default=64)
     args = ap.parse_args()
 
@@ -105,32 +80,17 @@ def main() -> int:
               file=sys.stderr)
         return 1
 
-    stage2_sectors = pad_to_sectors(stage2, "stage2")
-    if stage2_sectors > STAGE2_MAX_SECTORS:
-        print(f"error: stage2 is {stage2_sectors} sectors, "
-              f"limit is {STAGE2_MAX_SECTORS} ({STAGE2_MAX_SECTORS * SECTOR} bytes)",
-              file=sys.stderr)
-        return 1
+    stage2_sectors = pad_to_sectors(stage2, "stage2", STAGE2_MAX_SECTORS)
 
-    kernel_sectors = pad_to_sectors(kernel, "kernel")
-    if kernel_sectors > KERNEL_MAX_SECTORS:
-        print(f"error: kernel is {kernel_sectors} sectors, "
-              f"limit is {KERNEL_MAX_SECTORS} ({KERNEL_MAX_SECTORS * SECTOR} bytes)",
-              file=sys.stderr)
-        return 1
+    kernel_sectors = pad_to_sectors(kernel, "kernel", KERNEL_MAX_SECTORS)
 
-    entries = []
-    for spec in args.init:
-        if "=" not in spec:
-            print(f"error: --init expects NAME=PATH, got {spec!r}", file=sys.stderr)
-            return 1
-        name, path = spec.split("=", 1)
-        entries.append((name, path))
+    if KERNEL_LBA + kernel_sectors > INITRD_LBA:
+        print(f"error: kernel ends at LBA {KERNEL_LBA + kernel_sectors}, "
+              f"overlapping initrd at LBA {INITRD_LBA}", file=sys.stderr)
+        return 1
 
     if args.initrd:
         initrd = read(args.initrd)
-    elif entries:
-        initrd = build_initrd(entries)
     else:
         initrd = b""
 
@@ -168,7 +128,7 @@ def main() -> int:
           f"({kernel_sectors} sectors)")
     if initrd:
         print(f"  initrd  LBA {INITRD_LBA:<6} {len(initrd):>8} bytes "
-              f"({initrd_sectors} sectors, {len(entries)} entries)")
+              f"({initrd_sectors} sectors)")
     return 0
 
 

@@ -4,15 +4,15 @@
 
 Namespaces provide isolation boundaries for system resources. Each namespace is an independent instance of a global resource, visible only to processes within that namespace.
 
-## Implemented Namespaces
+## Namespace Types
 
 | Namespace | Isolates | Clone flag |
 |---|---|---|
 | PID | Process IDs | `CLONE_NEWPID` |
 | Mount | Filesystem mount tree | `CLONE_NEWNS` |
 | IPC | POSIX IPC objects (shm, semaphores) | `CLONE_NEWIPC` |
-| Network | Network interfaces, routing, sockets | `CLONE_NEWNET` (planned) |
-| UTS | Hostname and domain name | `CLONE_NEWUTS` (planned) |
+| Network | Network interfaces, routing, sockets | `CLONE_NEWNET` |
+| UTS | Hostname and domain name | `CLONE_NEWUTS` |
 
 ## PID Namespace Isolation
 

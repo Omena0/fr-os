@@ -478,7 +478,6 @@ void *malloc(size_t size)
 	ch = allocate_small(size);
 	if (!ch)
 		return NULL;
-	/* Poison the payload to catch use-after-free */
 	memset(chunk_to_ptr(ch), 0xFE, ch->size);
 	return chunk_to_ptr(ch);
 }

@@ -284,33 +284,15 @@ static void tty_in_push(char c)
 /*
  * Move anything the serial port has received into the input ring.
  *
- * COM1 is the console's primary channel -- run.sh's own header is a page about
- * why -- and it can receive the entire time. Nothing read it. `serial_getc()`
- * exists, works, and had no callers: the only consumer of COM1 was the transmit
- * side, so the console could print to the terminal and could not be typed at.
- * That is the gap this closes.
+ * COM1 is the console's primary channel. It is polled, not interrupt-driven:
+ * a UART whose receive interrupt does not arrive would otherwise make the
+ * terminal permanently untypable with no log line to say why. Polled, that
+ * machine reads its input. The cost is bounded: this runs once per pass of
+ * tty_read()'s loop, so a reader that is not blocked pays one LSR read.
  *
- * This is a missing feature rather than a workaround for the PS/2 problem
- * alongside it. The two input paths are independent -- a keyboard and a serial
- * line are both legitimate sources for the same ring -- and a console with two
- * working channels is better than one with two broken ones.
- *
- * Kept, and kept polled, as the second consumer of the receive FIFO rather than
- * as a replacement for the interrupt. Two reasons, and both are load-bearing.
- *
- * The fallback: an interrupt-driven input path is only as good as the device
- * behind it. This one is the console's own port, and a UART that does not
- * interrupt -- or an 8250 whose IER is still zero because serial_init() writes
- * 0x00 there -- would otherwise make the terminal permanently untypable, with
- * nothing in the log to say why. Polled, that machine reads its input.
- *
- * And the cost is bounded: this runs once per pass of tty_read()'s loop, so a
- * reader that is not blocked pays one LSR read and nothing else.
- *
- * It cannot double-consume. serial_getc() and com1_irq() both drain the same
- * receive FIFO, and a byte leaves the FIFO when the RBR is read: whichever of
- * the two reads it first has it, and the other sees the data-ready bit clear.
- * There is no window in which both hold the same byte.
+ * It cannot double-consume: serial_getc() and com1_irq() both drain the same
+ * receive FIFO, and a byte leaves the FIFO when the RBR is read. Whichever
+ * of the two reads it first has it.
  */
 static void tty_poll_serial(void)
 {

@@ -126,8 +126,8 @@ static int elf_validate(const void *image, size_t size, u64 *out_phoff)
 	/*
 	 * The entry size must be at least the size of the structure this
 	 * loader knows. A larger one is accepted — that is how the format is
-	 * meant to evolve — but the stride used to walk the table is the
-	 * file's, not this loader's.
+	 * meant to evolve — but the stride used to walk the table is the file's,
+	 * not this loader's.
 	 */
 	if (eh->e_phentsize < sizeof(struct elf64_phdr))
 		return -ENOEXEC;
@@ -268,21 +268,11 @@ static int elf_load_tls(struct address_space *mm, const u8 *base, u64 offset,
 	/*
 	 * .tbss, and only the part of it that is genuinely anonymous.
 	 *
-	 * This used to zero the whole tail, on the reasoning that a page shared
-	 * with the end of a PT_LOAD is present and so no fault would ever fill
-	 * it. That reasoning is right about the mechanism and wrong about the
-	 * consequence, because the shared bytes are not segment filler: on
-	 * build/init.elf .tbss is [0x409ff8,0x409ffc) and .init_array is
-	 * [0x409ff8,0x40a000), because a NOBITS section is laid out over
-	 * whatever follows it in the data segment. Zeroing the tail there
-	 * destroyed the first constructor pointer, so the program's
-	 * __attribute__((constructor)) functions silently stopped running.
-	 *
-	 * Everything below covered_end is live segment content and is left
-	 * alone. errno then starts out holding the first four bytes of
-	 * __init_array_start rather than zero, which is the documented
-	 * TLS-NOBITS-overlay behaviour and is harmless: nothing reads errno
-	 * before the first failed call overwrites it.
+	 * Previously the whole tail was zeroed, but that destroyed constructor
+	 * pointers when .tbss overlapped other data. The documented TLS-NOBITS-
+	 * overlay behaviour is that errno starts holding the first bytes of
+	 * __init_array_start rather than zero — which is harmless since nothing
+	 * reads errno before the first failed call overwrites it.
 	 */
 	zero_from = vaddr + filesz;
 	if (zero_from < covered_end)
@@ -329,8 +319,8 @@ int elf_load(struct address_space *mm, const void *image, size_t size,
 	u64 phdr_vaddr = 0;
 	u32 phdr_count = 0;
 	/* The image's PT_TLS, if it has one. Zeroed here rather than at the
-	 * point of use so that "no PT_TLS" and "PT_TLS of size zero" cannot be
-	 * confused: an image with no thread-local storage has no thread
+	 * point of use so that "no PT_TLS" and "PT_TLS of size zero" cannot
+	 * be confused: an image with no thread-local storage has no thread
 	 * pointer, and mm->tls_ptr == 0 says exactly that. */
 	u64 tls_offset = 0, tls_vaddr = 0, tls_filesz = 0, tls_memsz = 0;
 	u64 tls_align = 1;
@@ -366,12 +356,11 @@ int elf_load(struct address_space *mm, const void *image, size_t size,
 
 		if (ph->p_type == PT_TLS) {
 			/*
-			 * One block per process. A second PT_TLS would mean two
-			 * candidate thread pointers and no rule for choosing
-			 * between them, and silently taking the first is how a
-			 * program's own thread-local variables end up somewhere
-			 * the linker never put them.
-			 */
+		 * One block per process. A second PT_TLS would mean two candidate
+		 * thread pointers and no rule for choosing between them; silently
+		 * taking the first puts the program's thread-local variables where
+		 * the linker never put them.
+		 */
 			if (tls_seen)
 				return -ENOEXEC;
 			if (!in_bounds(ph->p_offset, ph->p_filesz, size))
@@ -380,23 +369,18 @@ int elf_load(struct address_space *mm, const void *image, size_t size,
 				return -ENOEXEC;
 			if (load_bias + ph->p_vaddr < load_bias)
 				return -ENOEXEC;
-			/*
-			 * The block, *and* the thread pointer, have to be in the
-			 * user half. The thread pointer can sit up to p_align-1
-			 * past the last byte of the block (see elf_load_tls), so
-			 * it is the bound that matters, not p_vaddr + p_memsz.
-			 * The kernel window is the bound available here;
-			 * user_memory_write() enforces the stricter user half
-			 * below when it copies the bytes, so a block that lands
-			 * between the two is rejected by the write rather than
-			 * mapped.
-			 */
-			if (load_bias + ph->p_vaddr + ph->p_memsz <
-			    load_bias + ph->p_vaddr)
-				return -ENOEXEC;
-			if (load_bias + ph->p_vaddr + ph->p_memsz +
-			    (ph->p_align ? ph->p_align : 1) - 1 >=
-			    VMM_KERNEL_BASE)
+/*
+	 * The block, *and* the thread pointer, must be in the user half.
+	 * The thread pointer can sit up to p_align-1 past the last byte of
+	 * the block (see elf_load_tls), so the bound that matters is
+	 * p_vaddr + p_memsz + align. The kernel window is the available
+	 * bound here; user_memory_write() enforces the stricter user half
+	 * below when copying bytes, so a block landing between the two is
+	 * rejected by the write rather than mapped.
+	 */
+	if (load_bias + ph->p_vaddr + ph->p_memsz +
+	    (ph->p_align ? ph->p_align : 1) - 1 >=
+	    VMM_KERNEL_BASE)
 				return -ENOEXEC;
 			/*
 			 * p_align of zero is not a power of two and ALIGN_UP
@@ -428,6 +412,11 @@ int elf_load(struct address_space *mm, const void *image, size_t size,
 		if (ph->p_filesz && ph->p_offset + ph->p_vaddr < ph->p_offset)
 			return -ENOEXEC;
 		if (load_bias + ph->p_vaddr < load_bias)
+			return -ENOEXEC;
+		if (load_bias + ph->p_vaddr + ph->p_memsz <
+		    load_bias + ph->p_vaddr)
+			return -ENOEXEC;
+		if (load_bias + ph->p_vaddr + ph->p_memsz >= VMM_KERNEL_BASE)
 			return -ENOEXEC;
 		if (ph->p_align > PAGE_SIZE && (ph->p_align & (ph->p_align - 1)))
 			return -ENOEXEC;

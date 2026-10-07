@@ -7,7 +7,7 @@ A kernel panic is a non-recoverable error condition where the kernel determines 
 1. Emits a diagnostic message with the error description, location, and register state.
 2. Dumps the call stack (backtrace).
 3. Optionally dumps additional diagnostic data (memory map, scheduler state).
-4. Halts all CPUs.
+4. Halts the current CPU.
 
 ## Panic Entry Points
 
@@ -26,8 +26,7 @@ void kpanic(const char *fmt, ...) __attribute__((noreturn));
 ## Panic Sequence
 
 1. **Disable interrupts** on the current CPU (`cli`).
-2. **Broadcast IPI** to all other CPUs (vector 242, CPU halt IPI). Each CPU halts on receipt.
-3. **Emit panic header** to all active log sinks (serial, framebuffer):
+2. **Emit panic header** to all active log sinks (serial, framebuffer):
 
    ```
    *** KERNEL PANIC ***
@@ -40,9 +39,11 @@ void kpanic(const char *fmt, ...) __attribute__((noreturn));
    RFLAGS: <val>  CR2: <val>  CR3: <val>
    ```
 
-4. **Print backtrace**: Walk the stack using RBP frame pointer chain, resolve addresses to symbol names using the kernel symbol table embedded at build time.
-5. **Print memory zone summary**: Used/free pages per zone.
-6. **Halt**: Execute `hlt` in an infinite loop.
+3. **Print backtrace**: Walk the stack using RBP frame pointer chain, resolve addresses to symbol names using the kernel symbol table embedded at build time.
+4. **Print memory zone summary**: Used/free pages per zone.
+5. **Halt**: Execute `hlt` in an infinite loop.
+
+**Note:** There is **no IPI broadcast** to halt other CPUs, and **no per-CPU state dumps** from secondary CPUs. On multiprocessor, secondary CPUs continue running until they hit their own fault or the system is externally reset. This is a known limitation (see finding 7.10 in MEGA_AUDIT.md).
 
 ## Symbol Resolution
 
@@ -57,12 +58,6 @@ Panic output is written directly to COM1 using the raw port I/O path, bypassing 
 ## Framebuffer Output
 
 If a framebuffer was configured at boot, the panic message is also rendered to the screen in a distinctive format (white text on red background) using the kernel's emergency framebuffer write path (no driver dependency).
-
-## Multi-CPU Considerations
-
-- The panic CPU holds the panic lock (an atomic flag) to prevent multiple CPUs from entering the panic handler simultaneously.
-- Secondary CPUs that receive the halt IPI save their register state to a per-CPU panic dump buffer before halting.
-- The panic output includes a summary of each CPU's state.
 
 ## Related Documents
 
