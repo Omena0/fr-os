@@ -739,7 +739,10 @@ long sys_wait4(s64 pid, u64 wstatus, u64 options, u64 rusage)
 		 * condition and no re-check race is possible — the re-check
 		 * happens with the child list locked.
 		 */
+		klog_emit(KLOG_DEBUG, "wait4: blocking, pid=%d child_pid=%ld",
+			  pid, (long)me->pid);
 		sched_block_current();
+		klog_emit(KLOG_DEBUG, "wait4: unblocked");
 	}
 }
 
@@ -943,6 +946,7 @@ long sys_fork(void)
 	child->ppid = me->pid;
 	child->pgid = me->pgid;
 	child->sid = me->sid;
+	child->parent = me;
 
 	/* Resume where the parent was suspended. */
 	child->user_rip = fork_ctx[this_cpu_id()][0];

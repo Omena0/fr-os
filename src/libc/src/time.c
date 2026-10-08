@@ -70,7 +70,28 @@ long time(long *t)
 
 int nanosleep(const struct timespec *req, struct timespec *rem)
 {
-	return sys_nanosleep(req, rem);
+	struct timespec tmp = *req;
+	struct timespec rem_val = {0,0};
+	int ret;
+
+	/* EINTR retry pattern, matching sleep()/usleep(2). The kernel's
+	 * sys_nanosleep currently never returns -EINTR (it blocks to
+	 * completion via sched_sleep_ns), so the loop is a no-op today —
+	 * but it keeps the wrapper POSIX-compliant once the kernel grows
+	 * signal-interruptible sleeps. */
+	do {
+		ret = sys_nanosleep(&tmp, rem ? &rem_val : NULL);
+		if (ret == -1) {
+			if (__errno != EINTR)
+				return -1;
+			/* EINTR: retry with same request (kernel doesn't yet
+			 * populate remaining time, so we can't do better) */
+		}
+	} while (ret == -1);
+
+	if (rem)
+		*rem = rem_val;
+	return 0;
 }
 
 int gettimeofday(struct timeval *tv, void *tz)

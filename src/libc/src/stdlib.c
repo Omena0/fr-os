@@ -143,6 +143,7 @@ static int strtoxx(const char *nptr, char **endptr, int base, int is_unsigned,
 	const char *s = nptr;
 	unsigned long long acc = 0;
 	unsigned long long cutoff;
+	unsigned long long max_digit;
 	unsigned long long sat;
 	int neg = 0;
 	int any = 0;
@@ -197,9 +198,12 @@ static int strtoxx(const char *nptr, char **endptr, int base, int is_unsigned,
 		return 0;
 	}
 
-	/* Compute cutoff for overflow detection */
+	/* Compute cutoff for overflow detection and the maximum digit allowed
+	 * when acc == cutoff. C99 7.20.1.4: overflow is clamped to the
+	 * representable extreme (LLONG_MAX/1 + ULLONG_MAX), never wrapped. */
 	cutoff = is_unsigned ? ULLONG_MAX : (neg ? (unsigned long long)LLONG_MAX + 1 : LLONG_MAX);
 	cutoff /= base;
+	max_digit = is_unsigned ? ULLONG_MAX % base : (neg ? (LLONG_MAX + 1ULL) % base : LLONG_MAX % base);
 
 	for (;;) {
 		c = *s;
@@ -213,7 +217,7 @@ static int strtoxx(const char *nptr, char **endptr, int base, int is_unsigned,
 			break;
 		if (c >= base)
 			break;
-		if (any < 0 || acc > cutoff || (acc == cutoff && (unsigned long long)c > (is_unsigned ? ULLONG_MAX % base : (neg ? (LLONG_MAX + 1ULL) % base : LLONG_MAX % base)))) {
+		if (any < 0 || acc > cutoff || (acc == cutoff && (unsigned long long)c > max_digit)) {
 			any = -1;
 		} else {
 			any = 1;

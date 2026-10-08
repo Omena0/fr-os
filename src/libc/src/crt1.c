@@ -87,8 +87,16 @@ static unsigned long get_random_seed(void)
 		unsigned long *auxv = __libc_auxv;
 
 		while (auxv[0] != AT_NULL) {
-			if (auxv[0] == AT_RANDOM)
-				return *(unsigned long *)(uintptr_t)auxv[1];
+			if (auxv[0] == AT_RANDOM) {
+				unsigned long seed;
+
+				/* Use memcpy instead of a pointer cast:
+				 * auxv[1] is a kernel-supplied address
+				 * whose alignment isn't guaranteed for
+				 * unsigned long access. */
+				__builtin_memcpy(&seed, (void *)(uintptr_t)auxv[1], sizeof(seed));
+				return seed;
+			}
 			auxv += 2;
 		}
 	}

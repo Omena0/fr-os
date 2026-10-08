@@ -1091,14 +1091,15 @@ void sched_yield(void)
 
 void sched_block_current(void)
 {
-	struct task *t = current_task();
+    struct task *t = current_task();
 
-	if (!t)
-		return;
+    if (!t)
+        return;
 
-	t->state = TASK_BLOCKED;
-	task_set_state(t, TASK_BLOCKED);
-	schedule();
+    /* Mark ourselves as blocked and remove from runqueue. */
+    t->state = TASK_BLOCKED;
+    sched_remove(t);
+    schedule();
 }
 
 /* ---------------------------------------------------------------- tick ------ */

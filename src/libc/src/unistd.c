@@ -185,12 +185,22 @@ pid_t fork(void)
 	pid_t ret = sys_fork();
 
 	if (ret == 0) {
-		/* Child process: reset allocator state and reinitialize */
+		/* Child process: reset allocator state and reinitialize.
+		 * __malloc_fork_child() drops the parent's cached chunks so
+		 * the child does not hand out blocks the parent still owns.
+		 * A fresh arena is created by the first malloc(1) below.
+		 *
+		 * __libc_init() is NOT called here: it re-runs the full libc
+		 * startup (stack guard, atexit, etc.) which only needs to
+		 * happen once, at process creation. The allocator reset is
+		 * all the child needs. */
 		__malloc_fork_child();
-		__libc_init();
-		/* Run atexit handlers registered after fork */
-		/* Note: atexit list is copied from parent; new registrations
-		 * in child will run on child exit. This is a simplification. */
+		{
+			void *p = malloc(1);
+
+			if (p)
+				free(p);
+		}
 	}
 	return ret;
 }

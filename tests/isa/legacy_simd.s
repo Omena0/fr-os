@@ -19,8 +19,8 @@
 	divps	%xmm0, %xmm1
 	divss	%xmm0, %xmm1
 	ldmxcsr	(%rdi)
-	# maskmovd/maskmovq (0f c7) cannot be assembled by name and this
-	# objdump does not decode it; the classifier still matches the mnemonic.
+# maskmovd/maskmovq (0f c7) cannot be assembled by name and this
+# objdump does not decode it; this file does not emit them.
 	maxps	%xmm0, %xmm1
 	maxss	%xmm0, %xmm1
 	minps	%xmm0, %xmm1

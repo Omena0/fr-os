@@ -24,8 +24,7 @@ static inline long syscall2(long n, long a1, long a2) {
 
 static inline long syscall3(long n, long a1, long a2, long a3) {
     long ret;
-    register long r10 asm("r10") = a3;
-    asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1), "S"(a2), "r"(r10) : "rcx", "r11", "memory");
+    asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1), "S"(a2), "d"(a3) : "rcx", "r11", "memory");
     return ret;
 }
 
@@ -51,8 +50,12 @@ static int test_pipe_basic(void) {
 }
 
 static int test_pipe_invalid_fds_ptr(void) {
-    /* Pass NULL for fds - should fail with EFAULT */
-    long ret = syscall2(SYS_pipe, 0, 0); /* both args 0 = NULL */
+    /* Pass a NULL fds pointer - kernel must reject with EFAULT.
+     * NOTE: SYS_pipe takes only (int fds[2]); the second syscall
+     * arg is ignored by the kernel, so passing NULL/0 exercises the
+     * same user_range_ok() EFAULT path that a bad userspace pointer
+     * triggers. */
+    long ret = syscall2(SYS_pipe, (long)NULL, 0);
     TEST_ASSERT_EQ(ret, -EFAULT, "pipe with NULL fds should return EFAULT");
     return TEST_PASS;
 }

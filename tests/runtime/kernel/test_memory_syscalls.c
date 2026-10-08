@@ -39,6 +39,15 @@
 /* MAP_FAILED from Linux */
 #define MAP_FAILED ((void*)-1)
 
+/* Helper to check mmap return: if error (negative), fail the test */
+#define CHECK_MMAP(addr, msg) \
+    do { \
+        if ((long)(addr) < 0) { \
+            test_fail(__FILE__, __LINE__, #addr " >= 0", msg); \
+            return TEST_FAIL; \
+        } \
+    } while (0)
+
 /* errno values - use from errno.h included above or define locally */
 #ifndef EINVAL
 #define EINVAL 22
@@ -67,27 +76,25 @@ static inline long syscall2(long n, long a1, long a2) {
 
 static inline long syscall3(long n, long a1, long a2, long a3) {
     long ret;
-    register long r10 asm("r10") = a3;
-    asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1), "S"(a2), "r"(r10) : "rcx", "r11", "memory");
+    asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1), "S"(a2), "d"(a3) : "rcx", "r11", "memory");
     return ret;
 }
 
 static inline long syscall4(long n, long a1, long a2, long a3, long a4) {
     long ret;
-    register long r10 asm("r10") = a3;
-    register long r8 asm("r8") = a4;
-    asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1), "S"(a2), "r"(r10), "r"(r8) : "rcx", "r11", "memory");
+    register long r10 asm("r10") = a4;
+    asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1), "S"(a2), "d"(a3), "r"(r10) : "rcx", "r11", "memory");
     return ret;
 }
 
 static inline long syscall6(long n, long a1, long a2, long a3, long a4, long a5, long a6) {
     long ret;
-    register long r10 asm("r10") = a3;
-    register long r8 asm("r8") = a4;
-    register long r9 asm("r9") = a5;
-    asm volatile("push %%r10; mov %6, %%r10; syscall; pop %%r10"
+    register long r10 asm("r10") = a4;
+    register long r8 asm("r8") = a5;
+    register long r9 asm("r9") = a6;
+    asm volatile("syscall"
                  : "=a"(ret)
-                 : "a"(n), "D"(a1), "S"(a2), "r"(r10), "r"(r8), "r"(r9), "r"(a6)
+                 : "a"(n), "D"(a1), "S"(a2), "d"(a3), "r"(r10), "r"(r8), "r"(r9)
                  : "rcx", "r11", "memory");
     return ret;
 }
@@ -101,6 +108,7 @@ static int test_mmap_anonymous_basic(void) {
                                  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     TEST_ASSERT(addr != MAP_FAILED, "mmap anonymous should succeed");
     TEST_ASSERT(((uintptr_t)addr % PAGE_SIZE) == 0, "mmap should return page-aligned address");
+    CHECK_MMAP(addr, "mmap returned error, cannot dereference");
 
     /* Write to it */
     *(volatile char*)addr = 42;
@@ -116,6 +124,7 @@ static int test_mmap_multiple_pages(void) {
     void *addr = (void*)syscall6(SYS_mmap, 0, size, PROT_READ | PROT_WRITE,
                                  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     TEST_ASSERT(addr != MAP_FAILED, "mmap multiple pages should succeed");
+    CHECK_MMAP(addr, "mmap returned error, cannot dereference");
 
     /* Write to first and last page */
     *(volatile char*)addr = 1;
@@ -162,6 +171,7 @@ static int test_munmap_partial(void) {
     void *addr = (void*)syscall6(SYS_mmap, 0, 4 * PAGE_SIZE, PROT_READ | PROT_WRITE,
                                  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     TEST_ASSERT(addr != MAP_FAILED, "mmap should succeed");
+    CHECK_MMAP(addr, "mmap returned error, cannot dereference");
 
     long ret = syscall2(SYS_munmap, (long)addr, 2 * PAGE_SIZE);
     TEST_ASSERT_EQ(ret, 0, "munmap partial should succeed");
@@ -177,41 +187,43 @@ static int test_munmap_partial(void) {
 /* ===== mprotect ===== */
 
 static int test_mprotect_readonly(void) {
-	void *addr = (void*)syscall6(SYS_mmap, 0, PAGE_SIZE, PROT_READ | PROT_WRITE,
-				     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-	TEST_ASSERT(addr != MAP_FAILED, "mmap should succeed");
+    void *addr = (void*)syscall6(SYS_mmap, 0, PAGE_SIZE, PROT_READ | PROT_WRITE,
+                                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    TEST_ASSERT(addr != MAP_FAILED, "mmap should succeed");
+    CHECK_MMAP(addr, "mmap returned error, cannot dereference");
 
-	long ret = syscall3(SYS_mprotect, (long)addr, PAGE_SIZE, PROT_READ);
-	TEST_ASSERT_EQ(ret, 0, "mprotect to READ should succeed");
+    long ret = syscall3(SYS_mprotect, (long)addr, PAGE_SIZE, PROT_READ);
+    TEST_ASSERT_EQ(ret, 0, "mprotect to READ should succeed");
 
-	/*
-	 * Verifying that a write now faults would require a signal handler,
-	 * which the test framework does not provide, so the enforcement of
-	 * the new permissions is not asserted here. The mprotect call itself
-	 * returning 0 is the only thing this test can claim.
-	 */
+    /*
+     * Verifying that a write now faults would require a signal handler,
+     * which the test framework does not provide, so the enforcement of
+     * the new permissions is not asserted here. The mprotect call itself
+     * returning 0 is the only thing this test can claim.
+    */
 
-	ret = syscall2(SYS_munmap, (long)addr, PAGE_SIZE);
-	TEST_ASSERT_EQ(ret, 0, "munmap should succeed");
-	return TEST_PASS;
+    ret = syscall2(SYS_munmap, (long)addr, PAGE_SIZE);
+    TEST_ASSERT_EQ(ret, 0, "munmap should succeed");
+    return TEST_PASS;
 }
 
 static int test_mprotect_noaccess(void) {
-	void *addr = (void*)syscall6(SYS_mmap, 0, PAGE_SIZE, PROT_READ | PROT_WRITE,
-				     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-	TEST_ASSERT(addr != MAP_FAILED, "mmap should succeed");
+    void *addr = (void*)syscall6(SYS_mmap, 0, PAGE_SIZE, PROT_READ | PROT_WRITE,
+                                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    TEST_ASSERT(addr != MAP_FAILED, "mmap should succeed");
+    CHECK_MMAP(addr, "mmap returned error, cannot dereference");
 
-	long ret = syscall3(SYS_mprotect, (long)addr, PAGE_SIZE, PROT_NONE);
-	TEST_ASSERT_EQ(ret, 0, "mprotect to NONE should succeed");
+    long ret = syscall3(SYS_mprotect, (long)addr, PAGE_SIZE, PROT_NONE);
+    TEST_ASSERT_EQ(ret, 0, "mprotect to NONE should succeed");
 
-	/*
-	 * As with test_mprotect_readonly, verifying that an access now
-	 * faults requires a signal handler the framework does not provide,
-	 * so the kernel's enforcement is not asserted here.
-	 */
-	ret = syscall2(SYS_munmap, (long)addr, PAGE_SIZE);
-	TEST_ASSERT_EQ(ret, 0, "munmap should succeed");
-	return TEST_PASS;
+    /*
+     * As with test_mprotect_readonly, verifying that an access now
+     * faults requires a signal handler the framework does not provide,
+     * so the kernel's enforcement is not asserted here.
+    */
+    ret = syscall2(SYS_munmap, (long)addr, PAGE_SIZE);
+    TEST_ASSERT_EQ(ret, 0, "munmap should succeed");
+    return TEST_PASS;
 }
 
 static int test_mprotect_invalid_addr(void) {
@@ -226,11 +238,13 @@ static int test_mremap_expand(void) {
     void *addr = (void*)syscall6(SYS_mmap, 0, PAGE_SIZE, PROT_READ | PROT_WRITE,
                                  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     TEST_ASSERT(addr != MAP_FAILED, "mmap should succeed");
+    CHECK_MMAP(addr, "mmap returned error, cannot dereference");
 
     *(volatile char*)addr = 42;
 
     void *new_addr = (void*)syscall4(SYS_mremap, (long)addr, PAGE_SIZE, 2 * PAGE_SIZE, 0);
     TEST_ASSERT(new_addr != MAP_FAILED, "mremap expand should succeed");
+    CHECK_MMAP(new_addr, "mremap returned error, cannot dereference");
 
     TEST_ASSERT_EQ(*(volatile char*)new_addr, 42, "data should be preserved after mremap");
 

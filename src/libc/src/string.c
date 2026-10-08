@@ -315,45 +315,54 @@ char *strtok(char *s, const char *delim)
  */
 char *strerror(int errnum)
 {
-	switch (errnum) {
-	case 0:		return "Success";
-	case EPERM:	return "Operation not permitted";
-	case ENOENT:	return "No such file or directory";
-	case ESRCH:	return "No such process";
-	case EINTR:	return "Interrupted system call";
-	case EIO:	return "Input/output error";
-	case ENXIO:	return "No such device or address";
-	case E2BIG:	return "Argument list too long";
-	case ENOEXEC:	return "Exec format error";
-	case EBADF:	return "Bad file descriptor";
-	case ECHILD:	return "No child processes";
-	case EAGAIN:	return "Resource temporarily unavailable";
-	case ENOMEM:	return "Cannot allocate memory";
-	case EACCES:	return "Permission denied";
-	case EFAULT:	return "Bad address";
-	case ENOTBLK:	return "Block device required";
-	case EBUSY:	return "Device or resource busy";
-	case EEXIST:	return "File exists";
-	case EXDEV:	return "Invalid cross-device link";
-	case ENODEV:	return "No such device";
-	case ENOTDIR:	return "Not a directory";
-	case EISDIR:	return "Is a directory";
-	case EINVAL:	return "Invalid argument";
-	case ENFILE:	return "Too many open files in system";
-	case EMFILE:	return "Too many open files";
-	case ENOTTY:	return "Inappropriate ioctl for device";
-	case ETXTBSY:	return "Text file busy";
-	case EFBIG:	return "File too large";
-	case ENOSPC:	return "No space left on device";
-	case ESPIPE:	return "Illegal seek";
-	case EROFS:	return "Read-only file system";
-	case EMLINK:	return "Too many links";
-	case EPIPE:	return "Broken pipe";
-	case ERANGE:	return "Numerical result out of range";
-	case ENAMETOOLONG:	return "File name too long";
-	case ENOSYS:	return "Function not implemented";
-	case ENOTEMPTY:	return "Directory not empty";
-	case ELOOP:	return "Too many levels of symbolic links";
-	default:	return "Unknown error";
+	static const struct {
+		int err;
+		const char *msg;
+	} table[] = {
+		{ 0,		"Success" },
+		{ EPERM,	"Operation not permitted" },
+		{ ENOENT,	"No such file or directory" },
+		{ ESRCH,	"No such process" },
+		{ EINTR,	"Interrupted system call" },
+		{ EIO,		"Input/output error" },
+		{ ENXIO,	"No such device or address" },
+		{ E2BIG,	"Argument list too long" },
+		{ ENOEXEC,	"Exec format error" },
+		{ EBADF,	"Bad file descriptor" },
+		{ ECHILD,	"No child processes" },
+		{ EAGAIN,	"Resource temporarily unavailable" },
+		{ ENOMEM,	"Cannot allocate memory" },
+		{ EACCES,	"Permission denied" },
+		{ EFAULT,	"Bad address" },
+		{ ENOTBLK,	"Block device required" },
+		{ EBUSY,	"Device or resource busy" },
+		{ EEXIST,	"File exists" },
+		{ EXDEV,	"Invalid cross-device link" },
+		{ ENODEV,	"No such device" },
+		{ ENOTDIR,	"Not a directory" },
+		{ EISDIR,	"Is a directory" },
+		{ EINVAL,	"Invalid argument" },
+		{ ENFILE,	"Too many open files in system" },
+		{ EMFILE,	"Too many open files" },
+		{ ENOTTY,	"Inappropriate ioctl for device" },
+		{ ETXTBSY,	"Text file busy" },
+		{ EFBIG,	"File too large" },
+		{ ENOSPC,	"No space left on device" },
+		{ ESPIPE,	"Illegal seek" },
+		{ EROFS,	"Read-only file system" },
+		{ EMLINK,	"Too many links" },
+		{ EPIPE,	"Broken pipe" },
+		{ ERANGE,	"Numerical result out of range" },
+		{ ENAMETOOLONG, "File name too long" },
+		{ ENOSYS,	"Function not implemented" },
+		{ ENOTEMPTY,	"Directory not empty" },
+		{ ELOOP,	"Too many levels of symbolic links" },
+	};
+	unsigned int i;
+
+	for (i = 0; i < sizeof(table) / sizeof(table[0]); i++) {
+		if (table[i].err == errnum)
+			return (char *)table[i].msg;
 	}
+	return "Unknown error";
 }

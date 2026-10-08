@@ -53,20 +53,6 @@ static void say(const char *fmt, ...)
 }
 
 /*
- * Replay the line to the terminal after getline() has already consumed it.
- * Backspace and DEL are the two codes a serial/vga console sends for erase,
- * and rewriting with "\b \b" is the only way to actually remove a glyph from
- * a terminal — a bare backspace just moves the cursor and leaves the old
- * character behind.
- *
- * The DEL and backspace cases are not hypothetical here. There is no line
- * discipline on the input path, so the raw byte the keyboard or serial line
- * produced is what getline() sees: a user who presses Backspace really does put
- * 0x7f in the buffer, and this is the code that turns it back into a visible
- * erase. It would be unreachable only if something upstream had already
- * interpreted and consumed the key, and nothing does.
- */
-/*
  * Split in place on runs of spaces and tabs into an argv-style vector.
  *
  * A shell needs argv splitting, not strtok's token-at-a-time interface, and it
@@ -220,28 +206,38 @@ static void bench_mem(void)
 			s->p[want - 1] = (unsigned char)(i >> 8);
 			live += want;
 			ops++;
-		} else if ((rng() & 3u) == 0u) {
-			unsigned char *np = (unsigned char *)realloc(s->p, want);
-
-			if (np == NULL)
-				continue;
-			live -= s->size;
-			live += want;
-			s->p = np;
-			s->size = want;
-			s->p[0] = (unsigned char)i;
-			s->p[want - 1] = (unsigned char)(i >> 8);
-			ops++;
-		} else if ((rng() & 3u) == 0u) {
-			free(s->p);
-			live -= s->size;
-			s->p = NULL;
-			s->size = 0;
-			ops++;
 		} else {
-			/* churn the existing block without changing its size */
-			s->p[rng() % s->size] = (unsigned char)i;
-			ops++;
+			/*
+			 * One RNG call per iteration decides the operation.
+			 * Distribution: 25% realloc, 25% free, 50% churn.
+			 * Using a single call means the probabilities are
+			 * obvious and cannot drift apart.
+			 */
+			unsigned long r = rng() & 3u;
+
+			if (r == 0u) {
+				unsigned char *np = (unsigned char *)realloc(s->p, want);
+
+				if (np == NULL)
+					continue;
+				live -= s->size;
+				live += want;
+				s->p = np;
+				s->size = want;
+				s->p[0] = (unsigned char)i;
+				s->p[want - 1] = (unsigned char)(i >> 8);
+				ops++;
+			} else if (r == 1u) {
+				free(s->p);
+				live -= s->size;
+				s->p = NULL;
+				s->size = 0;
+				ops++;
+			} else {
+				/* churn the existing block without changing its size */
+				s->p[rng() % s->size] = (unsigned char)i;
+				ops++;
+			}
 		}
 
 		if (live > peak)
@@ -462,7 +458,17 @@ int main(void)
 
 		/* Read one byte at a time. The terminal is in raw mode and
 		 * sends \r for Enter, not \n, so getline() would block forever.
-		 * Byte-by-byte reading also lets us handle backspace. */
+		 * Byte-by-byte reading also lets us handle backspace.
+		 *
+		 * Backspace and DEL are the two codes a serial/vga console
+		 * sends for erase, and rewriting with "\b \b" is the only way to
+		 * actually remove a glyph from a terminal — a bare backspace
+		 * just moves the cursor and leaves the old character behind.
+		 * There is no line discipline on the input path, so the raw
+		 * byte the keyboard or serial line produces is what read()
+		 * returns: a user who presses Backspace really does put
+		 * 0x7f in the buffer, and this is the code that turns it back
+		 * into a visible erase. */
 		cap = 0;
 		for (;;) {
 			ssize_t n = read(0, &c, 1);

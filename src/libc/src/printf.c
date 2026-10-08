@@ -278,6 +278,34 @@ static void handle_unsigned(struct fmt_state *st, unsigned long long value,
 		    left_align, zero_pad, alternate);
 }
 
+static inline long long get_signed_arg(struct fmt_state *st, int longness)
+{
+	if (longness >= LEN_LLONG)
+		return va_arg(st->ap, long long);
+	else if (longness == LEN_LONG)
+		return va_arg(st->ap, long);
+	else if (longness == LEN_SHORT)
+		return (short)va_arg(st->ap, int);
+	else if (longness <= LEN_CHAR)
+		return (signed char)va_arg(st->ap, int);
+	else
+		return va_arg(st->ap, int);
+}
+
+static inline unsigned long long get_unsigned_arg(struct fmt_state *st, int longness)
+{
+	if (longness >= LEN_LLONG)
+		return va_arg(st->ap, unsigned long long);
+	else if (longness == LEN_LONG)
+		return va_arg(st->ap, unsigned long);
+	else if (longness == LEN_SHORT)
+		return (unsigned short)va_arg(st->ap, unsigned int);
+	else if (longness <= LEN_CHAR)
+		return (unsigned char)va_arg(st->ap, unsigned int);
+	else
+		return va_arg(st->ap, unsigned int);
+}
+
 /*
  * The single formatting entry point. Every printf in the library is this
  * function plus a sink: the string family counts what it dropped, the FILE
@@ -447,27 +475,8 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
 		switch (*p) {
 		case 'd':
 		case 'i': {
-			long long v;
+			long long v = get_signed_arg(&st, longness);
 
-			if (longness >= LEN_LLONG)
-				v = va_arg(st.ap, long long);
-			else if (longness == LEN_LONG)
-				v = va_arg(st.ap, long);
-			else if (longness == LEN_SHORT)
-				v = (short)va_arg(st.ap, int);
-			else if (longness <= LEN_CHAR)
-				/*
-				 * 'hh'. `longness` counts the modifiers, so
-				 * "hh" lands on -2 and a nonsense run like
-				 * "hhhh" further down; both are the same
-				 * conversion and both have to narrow to a
-				 * char. Reaching here with longness == 0 --
-				 * no modifier at all -- is the int case
-				 * above, which must not be narrowed.
-				 */
-				v = (signed char)va_arg(st.ap, int);
-			else
-				v = va_arg(st.ap, int);
 			/* d/i have no alternate form, so '#' adds nothing. */
 			handle_signed(&st, v, 10, width, left_align, zero_pad,
 				      precision, has_precision, plus, space,
@@ -479,7 +488,7 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
 		case 'X':
 		case 'o':
 		case 'b': {
-			unsigned long long v;
+			unsigned long long v = get_unsigned_arg(&st, longness);
 			unsigned base;
 			/*
 			 * "#" prefixes a '0' for o and "0x"/"0X" for x/X, and
@@ -510,16 +519,6 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
 					alt_prefix = "0b";
 			}
 
-			if (longness >= LEN_LLONG)
-				v = va_arg(st.ap, unsigned long long);
-			else if (longness == LEN_LONG)
-				v = va_arg(st.ap, unsigned long);
-			else if (longness == LEN_SHORT)
-				v = (unsigned short)va_arg(st.ap, unsigned int);
-			else if (longness <= LEN_CHAR)
-				v = (unsigned char)va_arg(st.ap, unsigned int);
-			else
-				v = va_arg(st.ap, unsigned int);
 			handle_unsigned(&st, v, base, *p == 'X', width, left_align,
 					zero_pad, precision, has_precision,
 					alt_prefix);

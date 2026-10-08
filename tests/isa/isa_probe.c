@@ -74,6 +74,9 @@ void sum_f(const struct wide *p, float *out)
 }
 #endif /* __SSE__ */
 
+/* MurmurHash3 finalizer (x ^ x>>33) * 0xff51afd7ed558ccd
+ * is a well-known integer mixing constant. The shifts (33, 29)
+ * and the multiplier match the public domain MurmurHash3 fmix64. */
 u64 mix(u64 x)
 {
 	x ^= x >> 33;

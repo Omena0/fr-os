@@ -221,6 +221,20 @@ $(BUILD)/kernel.elf: $(BUILD)/libk.a $(OBJ)/kernel/initrd.c.o \
 		$(BUILD)/libk.a $(OBJ)/kernel/initrd.c.o
 	@$(MAKE) --no-print-directory verify-isa PROFILE=kernel FILE=$@
 
+# Runtime kernel that embeds initrd-runtime.img so it can exec runtime-tests.
+# The regular kernel.elf embeds initrd.img (init + hello), but runtime tests
+# need runtime-tests in the initrd so the kernel can execve it.
+$(OBJ)/kernel/initrd-runtime.c.o: $(BUILD)/initrd-runtime.img tools/bin2c.py
+	@mkdir -p $(dir $@)
+	python3 tools/bin2c.py $< init_image > build/initrd-runtime.c
+	$(HOST_CC_64) $(KERNEL_CFLAGS) -c build/initrd-runtime.c -o $@
+$(BUILD)/kernel-runtime.elf: $(BUILD)/libk.a $(OBJ)/kernel/initrd-runtime.c.o \
+                             src/kernel/link.ld $(VERIFY_ISA_PY)
+	@mkdir -p $(dir $@)
+	$(HOST_LD_64) $(KERNEL_LDFLAGS) -o $@ \
+		$(BUILD)/libk.a $(OBJ)/kernel/initrd-runtime.c.o
+	@$(MAKE) --no-print-directory verify-isa PROFILE=kernel FILE=$@
+
 # Enforce the ISA policy in config.mk instead of trusting it.
 #
 # The -mno-sse/-mno-sse2/-mno-avx flags in KERNEL_CFLAGS are a request to the
@@ -400,17 +414,18 @@ build/test-runner: $(RUNTIME_TESTS) $(INIT_ELF) $(HELLO_ELF) $(BUILD)/libc.a
 	@mkdir -p $(dir $@)
 	$(HOST_CC_64) $(USER_CFLAGS) -I tests/runtime/framework $(USER_LDFLAGS) -o $@ \
 		$(RUNTIME_TESTS) $(BUILD)/libc.a
+	strip --strip-all --strip-debug $@
 
 $(BUILD)/initrd-runtime.img: $(INIT_ELF) build/test-runner tools/initrd.py
 	@mkdir -p $(dir $@)
 	python3 tools/initrd.py --out $@ --program init=$(INIT_ELF) --program runtime-tests=build/test-runner
 
-$(BUILD)/os-runtime.img: $(BUILD)/stage1.elf $(BUILD)/stage2.elf $(BUILD)/kernel.elf $(BUILD)/initrd-runtime.img tools/disk.py
+$(BUILD)/os-runtime.img: $(BUILD)/stage1.elf $(BUILD)/stage2.elf $(BUILD)/kernel-runtime.elf $(BUILD)/initrd-runtime.img tools/disk.py
 	@echo "--stage1 build/stage1.bin \\"
 	@echo "--stage2 build/stage2.bin \\"
 	python3 tools/disk.py --stage1 build/stage1.bin \
 		--stage2 build/stage2.bin \
-		--kernel build/kernel.elf \
+		--kernel build/kernel-runtime.elf \
 		--initrd $(BUILD)/initrd-runtime.img \
 		--out $@
 

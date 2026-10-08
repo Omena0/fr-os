@@ -28,16 +28,14 @@ static inline long syscall2(long n, long a1, long a2) {
 
 static inline long syscall3(long n, long a1, long a2, long a3) {
     long ret;
-    register long r10 asm("r10") = a3;
-    asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1), "S"(a2), "r"(r10) : "rcx", "r11", "memory");
+    asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1), "S"(a2), "d"(a3) : "rcx", "r11", "memory");
     return ret;
 }
 
 static inline long syscall4(long n, long a1, long a2, long a3, long a4) {
+    register long r10 asm("r10") = a4;
     long ret;
-    register long r10 asm("r10") = a3;
-    register long r8 asm("r8") = a4;
-    asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1), "S"(a2), "r"(r10), "r"(r8) : "rcx", "r11", "memory");
+    asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1), "S"(a2), "d"(a3), "r"(r10) : "rcx", "r11", "memory");
     return ret;
 }
 
@@ -92,10 +90,11 @@ static int test_open_nonexistent(void) {
 }
 
 static int test_open_invalid_flags(void) {
-    /* O_RDONLY | O_WRONLY is invalid - kernel should reject */
+    /* O_RDONLY | O_WRONLY is invalid - kernel must reject */
     long ret = syscall3(SYS_open, (long)"/tmp/badflags", O_RDONLY | O_WRONLY | O_CREAT, 0644);
-    TEST_ASSERT(ret == -EINVAL || ret == -EACCES || ret == -ENOENT,
-                "open with invalid flags should fail");
+    /* sc_open always returns -ENOENT (no filesystem), but invalid flags
+     * should be caught before the ENOENT path; accept both outcomes. */
+    TEST_ASSERT(ret == -EINVAL || ret == -ENOENT, "open with invalid flags should fail");
     return TEST_PASS;
 }
 

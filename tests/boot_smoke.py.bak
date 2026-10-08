@@ -510,7 +510,7 @@ def run_boot(root, image, log, errlog, timeout, allow_tcg, extra_args, command=N
                 # backstop for this loop failing, not the primary bound. Never
                 # 0 -- run.sh documents that as the unbounded interactive run,
                 # and inheriting it here would make CI able to hang forever.
-                "RUN_TIMEOUT": "",
+                "RUN_TIMEOUT": str(int(timeout) + 10),
                 "TMPDIR": scratch_dir(root)})
     if allow_tcg:
         env["FORCE_TCG"] = "1"
@@ -557,26 +557,27 @@ def run_boot(root, image, log, errlog, timeout, allow_tcg, extra_args, command=N
                             print("DEBUG: Failed to send command '%s' - broken pipe"
                                   % command, file=sys.stderr)
                             test_summary = None
+                            break
                         except Exception as e:
                             print("DEBUG: Failed to send command '%s' - %s"
                                   % (command, e), file=sys.stderr)
                             test_summary = None
+                            break
+                        # Poll for the SUMMARY line, which the test-runner prints
+                        # when it finishes running all suites.
+                        deadline = time.time() + timeout
+                        while time.time() < deadline:
+                            if proc.poll() is not None:
+                                break
+                            text = load_text(read_log(log))
+                            if "==================== SUMMARY ====================" in text:
+                                test_summary = _parse_summary(text)
+                                break
+                            time.sleep(0.05)
                         else:
-                            # Poll for the SUMMARY line, which the test-runner prints
-                            # when it finishes running all suites.
-                            deadline = time.time() + timeout
-                            while time.time() < deadline:
-                                if proc.poll() is not None:
-                                    break
-                                text = load_text(read_log(log))
-                                if "==================== SUMMARY ====================" in text:
-                                    test_summary = _parse_summary(text)
-                                    break
-                                time.sleep(0.05)
-                            else:
-                                # Timeout: the test-runner didn't produce a summary
-                                # within the allotted time.
-                                pass
+                            # Timeout: the test-runner didn't produce a summary
+                            # within the allotted time.
+                            pass
                     break
                     qemu_pid = find_qemu(proc.pid)
                 time.sleep(0.025)

@@ -16,6 +16,18 @@
 #define EPERM       1
 #define EINVAL      22
 
+static inline long syscall1(long n, long a1) {
+    long ret;
+    asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1) : "rcx", "r11", "memory");
+    return ret;
+}
+
+static inline long syscall2(long n, long a1, long a2) {
+    long ret;
+    asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1), "S"(a2) : "rcx", "r11", "memory");
+    return ret;
+}
+
 /* ===== setuid / setgid ===== */
 
 static int test_setuid_basic(void) {

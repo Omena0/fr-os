@@ -23,10 +23,9 @@ static inline long syscall2(long n, long a1, long a2) {
 }
 
 static inline long syscall4(long n, long a1, long a2, long a3, long a4) {
+    register long r10 asm("r10") = a4;
     long ret;
-    register long r10 asm("r10") = a3;
-    register long r8 asm("r8") = a4;
-    asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1), "S"(a2), "r"(r10), "r"(r8) : "rcx", "r11", "memory");
+    asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1), "S"(a2), "d"(a3), "r"(r10) : "rcx", "r11", "memory");
     return ret;
 }
 

@@ -34,25 +34,28 @@ static void put(const char *s)
 
 static void put_num(long v)
 {
-	char digits[24];
-	char buf[2];
+	char buf[24];
 	int i = 0;
+	int j = 0;
 	unsigned long mag = v < 0 ? (unsigned long)(-(v + 1)) + 1
 				  : (unsigned long)v;
 
 	if (mag == 0)
-		digits[i++] = '0';
+		buf[i++] = '0';
 	while (mag) {
-		digits[i++] = (char)('0' + (mag % 10));
+		buf[i++] = (char)('0' + (mag % 10));
 		mag /= 10;
 	}
 	if (v < 0)
-		put("-");
-	while (i--) {
-		buf[0] = digits[i];
-		buf[1] = '\0';
-		put(buf);
+		buf[i++] = '-';
+	/* Reverse the digits in place */
+	for (j = 0; j < i / 2; j++) {
+		char tmp = buf[j];
+		buf[j] = buf[i - 1 - j];
+		buf[i - 1 - j] = tmp;
 	}
+	if (i)
+		(void)sys_write(2, buf, i);
 }
 
 void __assert_fail(const char *assertion, const char *file, int line,

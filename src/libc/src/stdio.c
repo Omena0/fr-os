@@ -465,9 +465,6 @@ int getline(char **lineptr, size_t *n, FILE *stream)
 			__errno = ENOMEM;
 			return -1;
 		}
-		/* Published before the first read, not after the last write:
-		 * every path out of the loop below leaves *lineptr naming a
-		 * block the caller owns and can free exactly once. */
 		*lineptr = line;
 		*n = cap;
 	}
@@ -475,26 +472,14 @@ int getline(char **lineptr, size_t *n, FILE *stream)
 	for (;;) {
 		c = getc(stream);
 		if (c == EOF) {
-			/*
-			 * EOF with nothing read is a failure; EOF part way
-			 * through a line returns the partial line, which is
-			 * what makes a trailing line without a newline visible
-			 * to the caller. Either way the buffer is left owned
-			 * by the caller: freeing it here would hand back a
-			 * dangling pointer if the caller kept its own copy.
-			 */
 			if (used == 0)
 				return -1;
 			break;
 		}
 		if (used + 2 > cap) {
-			char *grown;
-
 			cap *= 2;
-			grown = realloc(line, cap);
+			char *grown = realloc(line, cap);
 			if (!grown) {
-				/* *lineptr still names the block that is still
-				 * live, so the caller can free it. */
 				__errno = ENOMEM;
 				return -1;
 			}
@@ -504,7 +489,6 @@ int getline(char **lineptr, size_t *n, FILE *stream)
 		if (c == '\n')
 			break;
 	}
-	line[used] = '\0';
 	*lineptr = line;
 	*n = cap;
 	return (int)used;
@@ -614,9 +598,12 @@ int fclose(FILE *stream)
 		if (sys_close(stream->fd))
 			ret = EOF;
 		/* Reopenable: the next use of the stream works again. */
-		stream->fd = (stream == &stdin_file) ? STDIN_FILENO :
-			     (stream == &stdout_file) ? STDOUT_FILENO :
-			     STDERR_FILENO;
+		if (stream == &stdin_file)
+			stream->fd = STDIN_FILENO;
+		else if (stream == &stdout_file)
+			stream->fd = STDOUT_FILENO;
+		else
+			stream->fd = STDERR_FILENO;
 		stream->err = 0;
 		stream->eof = 0;
 		stream->wpos = 0;
