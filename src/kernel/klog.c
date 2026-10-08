@@ -18,7 +18,7 @@
 #include <kstring.h>
 #include <percpu.h>
 
-klog_level_t klog_runtime_level = KLOG_INFO;
+klog_level_t klog_runtime_level = KLOG_DEBUG;
 
 static uint64_t klog_counts[5];
 static bool klog_initialised;

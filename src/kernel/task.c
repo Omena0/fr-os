@@ -433,6 +433,9 @@ __noreturn void task_exit_current(int code)
 	if (!t)
 		panic("task_exit_current with no current task");
 
+	klog_emit(KLOG_DEBUG, "task", "task_exit_current: pid=%u code=%d parent=%p",
+		  t->pid, code, (void *)t->parent);
+
 	t->exit_code = code;
 
 	/*

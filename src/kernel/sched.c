@@ -219,6 +219,7 @@ static __noreturn void idle_thread(void *arg)
 		spinlock_unlock_irqrestore(&rq->lock, flags);
 
 		if (work || global_has_runnable()) {
+			klog_emit(KLOG_DEBUG, "sched", "idle: work=%d global=%d, scheduling", work, global_has_runnable());
 			schedule();
 			continue;
 		}
@@ -787,6 +788,9 @@ void sched_wake(struct task *t)
 	if (t->state != TASK_BLOCKED && t->state != TASK_NEW)
 		return;
 
+	klog_emit(KLOG_DEBUG, "sched", "sched_wake: pid=%u state=%d on_rq=%d",
+		  t->pid, (int)t->state, (int)t->on_rq);
+
 	struct runqueue *rq = sched_runqueues[this_cpu_id()];
 	u64 flags = spinlock_irqsave(&rq->lock);
 
@@ -984,6 +988,8 @@ reschedule:
 		 * the current task here rather than leaving it off the queue
 		 * means a later wakeup finds it and does not have to know that
 		 * it was already running. */
+		klog_emit(KLOG_DEBUG, "sched", "schedule: no next, prev pid=%u state=%d on_rq=%d",
+			  prev->pid, (int)prev->state, (int)prev->on_rq);
 		if (prev->state == TASK_RUNNING && !prev->detached) {
 			prev->state = TASK_RUNNABLE;
 			prev->last_run = now_ticks();
@@ -993,6 +999,9 @@ reschedule:
 		}
 		return;
 	}
+
+	klog_emit(KLOG_DEBUG, "sched", "schedule: switching from pid=%u to pid=%u",
+		  prev->pid, next->pid);
 
 	if (prev->state == TASK_RUNNING && !prev->detached) {
 		prev->state = TASK_RUNNABLE;

@@ -684,6 +684,7 @@ long sys_wait4(s64 pid, u64 wstatus, u64 options, u64 rusage)
 
 	if (!me)
 		return -ESRCH;
+	klog_emit(KLOG_DEBUG, "process", "sys_wait4: called, pid=%d me->pid=%ld", (int)pid, (long)me->pid);
 	if (rusage != 0)
 		/* No accounting subsystem yet; claiming success would make a
 		 * caller believe it got zeros it never received. */
@@ -739,10 +740,10 @@ long sys_wait4(s64 pid, u64 wstatus, u64 options, u64 rusage)
 		 * condition and no re-check race is possible — the re-check
 		 * happens with the child list locked.
 		 */
-		klog_emit(KLOG_DEBUG, "wait4: blocking, pid=%d child_pid=%ld",
+		klog_emit(KLOG_DEBUG, "process", "wait4: blocking, pid=%d child_pid=%ld",
 			  pid, (long)me->pid);
 		sched_block_current();
-		klog_emit(KLOG_DEBUG, "wait4: unblocked");
+		klog_emit(KLOG_DEBUG, "process", "wait4: unblocked");
 	}
 }
 
@@ -848,13 +849,16 @@ static int clone_vmas(struct address_space *dst, struct address_space *src)
 }
 
 /* Where the parent was suspended, for the child to resume at. */
-static u64 fork_ctx[MAX_CPUS][3];
+u64 fork_ctx[MAX_CPUS][3];
 
 void process_set_fork_context(u64 rip, u64 rsp, u64 rflags)
 {
-	fork_ctx[this_cpu_id()][0] = rip;
-	fork_ctx[this_cpu_id()][1] = rsp;
-	fork_ctx[this_cpu_id()][2] = rflags;
+	u32 cpu = this_cpu_id();
+	fork_ctx[cpu][0] = rip;
+	fork_ctx[cpu][1] = rsp;
+	fork_ctx[cpu][2] = rflags;
+	klog_emit(KLOG_DEBUG, "process", "fork_ctx: cpu=%u rip=%p rsp=%p rflags=%p",
+		  cpu, (void *)(intptr_t)rip, (void *)(intptr_t)rsp, (void *)(intptr_t)rflags);
 }
 
 /*
@@ -864,6 +868,9 @@ void process_set_fork_context(u64 rip, u64 rsp, u64 rflags)
 static __noreturn void fork_child_start(void *arg)
 {
 	struct task *t = arg;
+
+	klog_emit(KLOG_DEBUG, "process", "fork_child_start: pid=%u rip=%p rsp=%p",
+		  t->pid, (void *)(intptr_t)t->user_rip, (void *)(intptr_t)t->user_rsp);
 
 	/*
 	 * RAX = 0 is the entire contract of fork's return value in the child.
@@ -882,6 +889,8 @@ long sys_fork(void)
 	struct address_space *child_mm;
 	struct address_space *parent_mm;
 	struct task *child;
+
+	klog_emit(KLOG_DEBUG, "process", "sys_fork: called, current pid=%u", (int)me->pid);
 
 	if (!me || !me->mm)
 		return -EFAULT;
