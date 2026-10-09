@@ -967,6 +967,8 @@ long sys_fork(void)
     u64 flags = spinlock_irqsave(&task_all_lock);
 
     list_add_tail(&child->sibling, &me->children);
+    /* Take a reference for the parent's children list. */
+    refcount_inc(&child->refs);
     spinlock_unlock_irqrestore(&task_all_lock, flags);
 
     /* The child does not run until the parent blocks or is preempted, so

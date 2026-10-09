@@ -387,11 +387,15 @@ void task_release_resources(struct task *t)
         t->fpu_state = NULL;
     }
 
-    if (t->kernel_stack) {
-        kstack_free(t->kernel_stack);
-        t->kernel_stack = NULL;
-        t->context_rsp = 0;
-    }
+    /*
+     * The kernel stack is deliberately NOT freed here. A task that has
+     * exited is still running on its own stack — task_exit_current() calls
+     * this function and then continues to sched_stop_current(), which
+     * switches away. Freeing the stack before the switch would hand the
+     * CPU a freed page. The parent reaps the zombie through task_put(),
+     * whose refcount-zero path calls this function again and frees the
+     * stack then, when it is safe.
+     */
 }
 
 void task_put(struct task *t)
@@ -404,6 +408,15 @@ void task_put(struct task *t)
         list_del(&t->all_node);
         spinlock_unlock_irqrestore(&task_all_lock, flags);
         task_release_resources(t);
+        /* Free the kernel stack last. task_release_resources() deliberately
+         * does not free it: a task that has exited is still running on its
+         * own stack until sched_stop_current() switches away, and freeing it
+         * earlier would hand the CPU a freed page. Here the task is gone, so
+         * it is safe. */
+        if (t->kernel_stack) {
+            kstack_free(t->kernel_stack);
+            t->kernel_stack = NULL;
+        }
         kfree(t, sizeof(*t));
     }
 }
@@ -473,8 +486,10 @@ __noreturn void task_exit_current(int code)
      * after it, the code that would set the flag belongs to a task this CPU
      * is no longer running.
      */
+    klog_emit(KLOG_DEBUG, "task", "task %u about to abandon frame", t->pid);
     syscall_abandon_frame();
 
+    klog_emit(KLOG_DEBUG, "task", "task %u about to stop current", t->pid);
     /* Hands the CPU to someone else and never comes back. */
     sched_stop_current();
 }

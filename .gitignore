@@ -8,3 +8,4 @@ __pycache__/
 .highlight_cache
 docs/site/
 prompt.txt
+docs.index

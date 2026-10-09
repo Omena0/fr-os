@@ -803,7 +803,7 @@ void sched_wake(struct task *t)
 	/* A task that is already runnable does not need waking: it is on a
 	 * queue and will be picked when its turn comes. Only a task that was
 	 * asleep or brand new needs to be moved onto a queue. */
-	if (t->state != TASK_BLOCKED && t->state != TASK_NEW)
+	if (t->state != TASK_BLOCKED && t->state != TASK_NEW && t->state != TASK_RUNNABLE)
 		return;
 
     klog_emit(KLOG_DEBUG, "sched", "sched_wake: pid=%u state=%d on_rq=%d",
@@ -971,14 +971,15 @@ void schedule(void)
         return;
 
 reschedule:
-    /*
-     * Recomputed on every pass, including the pass taken on resumption:
-     * the only input that is still authoritative at this point is the
-     * per-CPU state, because the caller-saved half of this frame belongs to
-     * whichever task happened to run last.
-     */
-    rq = sched_runqueues[this_cpu_id()];
-    prev = current_task();
+	/*
+	 * Recomputed on every pass, including the pass taken on resumption:
+	 * the only input that is still authoritative at this point is the
+	 * per-CPU state, because the caller-saved half of this frame belongs to
+	 * whichever task happened to run last.
+	 */
+	klog_emit(KLOG_DEBUG, "sched", "schedule: reschedule, current pid=%u", current_task() ? current_task()->pid : 0);
+	rq = sched_runqueues[this_cpu_id()];
+	prev = current_task();
 
     if (!rq || !prev)
         panic("schedule() before the scheduler was initialised");
@@ -1016,20 +1017,18 @@ if (!next) {
 		 * it was already running. */
 		klog_emit(KLOG_DEBUG, "sched", "schedule: no next, prev pid=%u state=%d on_rq=%d det=%d",
 			  prev->pid, (int)prev->state, (int)prev->on_rq, (int)prev->detached);
-		/* Requeue unless the task is dead (zombie) or detached. A task
-		 * that was dequeued as `next` and resumed here is TASK_RUNNABLE,
-		 * not TASK_RUNNING, so the old `TASK_RUNNING` test dropped it. */
-		if (!prev->detached && prev->state != TASK_ZOMBIE) {
+		/* Only requeue a task that was already running and found nothing
+		 * else to do (the idle task, or a task that called schedule()
+		 * directly). A task that resumed here after being dequeued as
+		 * `next` is TASK_RUNNABLE, not TASK_RUNNING: it is already on
+		 * the CPU and must not be requeued, or it spins in a
+		 * schedule() loop forever. */
+		if (prev->state == TASK_RUNNING && !prev->detached) {
 			prev->state = TASK_RUNNABLE;
 			prev->last_run = now_ticks();
 			flags = spinlock_irqsave(&rq->lock);
 			rq_enqueue_locked(rq, prev, false);
 			spinlock_unlock_irqrestore(&rq->lock, flags);
-			klog_emit(KLOG_DEBUG, "sched", "schedule: requeued prev pid=%u on_rq=%d",
-				  prev->pid, (int)prev->on_rq);
-		} else {
-			klog_emit(KLOG_DEBUG, "sched", "schedule: NOT requeuing prev pid=%u det=%d state=%d",
-				  prev->pid, (int)prev->detached, (int)prev->state);
 		}
 		return;
 	}
@@ -1107,18 +1106,27 @@ klog_emit(KLOG_DEBUG, "sched", "sched_stop_current: pid=%u switching to idle=%p 
 	klog_emit(KLOG_DEBUG, "sched", "sched_stop_current: idle_stack_top=%p idle_mm=%p",
 		  idle_stack_top, (void *)(rq->idle->mm ? rq->idle->mm->pgd : 0));
 	syscall_set_kernel_stack(idle_stack_top);
+	klog_emit(KLOG_DEBUG, "sched", "sched_stop_current: after syscall_set_kernel_stack");
 	tss_set_kernel_stack(idle_stack_top);
+	klog_emit(KLOG_DEBUG, "sched", "sched_stop_current: after tss_set_kernel_stack");
 
 	if (rq->idle->mm)
 		write_cr3(rq->idle->mm->pgd);
 	else
 		vmm_switch_to_kernel_pgd();
+	klog_emit(KLOG_DEBUG, "sched", "sched_stop_current: after cr3 switch");
+	klog_emit(KLOG_DEBUG, "sched", "sched_stop_current: after cr3 switch");
+	klog_emit(KLOG_DEBUG, "sched", "sched_stop_current: after cr3 switch");
 
 	if (rq->idle->fpu_state)
 		fpu_restore(rq->idle->fpu_state);
+	klog_emit(KLOG_DEBUG, "sched", "sched_stop_current: after fpu_restore");
 
 	klog_emit(KLOG_DEBUG, "sched", "sched_stop_current: about to context_restore idle");
 	context_restore(rq->idle->context_rsp);
+	/* context_restore() never returns: it pops the idle task's frame and
+	 * ret's into idle_thread(). If it ever does, the switch is broken. */
+	klog_emit(KLOG_DEBUG, "sched", "sched_stop_current: AFTER context_restore (BUG: should not reach)");
 }
 
 void sched_yield(void)
