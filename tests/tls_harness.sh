@@ -29,12 +29,12 @@ trap 'rm -rf "$work"' EXIT
 fail=0
 
 gen() {
-	name=$1
-	cat > "$work/$name.c" || return 1
-	gcc -m64 -ffreestanding -fno-pic -fno-pie -c \
-	    -o "$work/$name.o" "$work/$name.c" || return 1
-	ld -static -no-pie -Ttext=0x400000 -e _start \
-	    -o "$work/$name.elf" "$work/$name.o" || return 1
+    name=$1
+    cat > "$work/$name.c" || return 1
+    gcc -m64 -ffreestanding -fno-pic -fno-pie -c \
+        -o "$work/$name.o" "$work/$name.c" || return 1
+    ld -static -no-pie -Ttext=0x400000 -e _start \
+        -o "$work/$name.elf" "$work/$name.o" || return 1
 }
 
 shapes="byte char5 int u64 u64_int u64_2int two_u64 four_u64 mix bigalign"
@@ -89,34 +89,34 @@ EOF
 
 echo "== synthetic shapes =="
 for s in $shapes; do
-	if [ -f "$work/$s.elf" ]; then
-		python3 "$here/tls_check.py" "$work/$s.elf" "$s" || fail=1
-	fi
+    if [ -f "$work/$s.elf" ]; then
+        python3 "$here/tls_check.py" "$work/$s.elf" "$s" || fail=1
+    fi
 done
 
 if [ $# -gt 0 ]; then
-	images=$*
+    images=$*
 else
-	images="build/init.elf build/hello.elf"
+    images="build/init.elf build/hello.elf"
 fi
 
 echo
 echo "== linked images =="
 found=0
 for img in $images; do
-	if [ -f "$img" ]; then
-		found=1
-		python3 "$here/tls_check.py" "$img" "$img" || fail=1
-	else
-		echo "$img: absent (build it first)"
-	fi
+    if [ -f "$img" ]; then
+        found=1
+        python3 "$here/tls_check.py" "$img" "$img" || fail=1
+    else
+        echo "$img: absent (build it first)"
+    fi
 done
 [ $found -eq 0 ] && echo "(no images built; only synthetic shapes were checked)"
 
 echo
 if [ $fail -eq 0 ]; then
-	echo "TLS harness: PASS"
+    echo "TLS harness: PASS"
 else
-	echo "TLS harness: FAIL"
+    echo "TLS harness: FAIL"
 fi
 exit $fail

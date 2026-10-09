@@ -95,11 +95,11 @@ The kernel extracts the initrd at boot time and mounts it as a temporary root fi
 ```makefile
 # Install a userspace binary into the sysroot:
 $(SYSROOT)/usr/bin/%: $(BUILDDIR)/userspace/%
-	install -Dm755 $< $@
+    install -Dm755 $< $@
 
 # Build the initrd:
 $(BUILDDIR)/initrd.tar: $(SYSROOT)
-	tar -C $(SYSROOT) -cf $@ .
+    tar -C $(SYSROOT) -cf $@ .
 ```
 
 ## Related Documents

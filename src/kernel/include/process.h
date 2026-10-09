@@ -24,20 +24,20 @@
 struct task;
 
 struct file_ops {
-	ssize_t (*read)(struct file *f, void *buf, size_t count);
-	ssize_t (*write)(struct file *f, const void *buf, size_t count);
-	long (*ioctl)(struct file *f, unsigned long request, void *arg);
-	int (*release)(struct file *f);
+    ssize_t (*read)(struct file *f, void *buf, size_t count);
+    ssize_t (*write)(struct file *f, const void *buf, size_t count);
+    long (*ioctl)(struct file *f, unsigned long request, void *arg);
+    int (*release)(struct file *f);
 };
 
 struct file {
-	u64 f_pos;
-	u32 f_flags;
-	refcount_t refs;
-	const struct file_ops *ops;
-	void *private;        /* the backing object: console, pipe, inode */
-	struct list_head all_node;   /* on the global open-file list */
-	u32 ino;
+    u64 f_pos;
+    u32 f_flags;
+    refcount_t refs;
+    const struct file_ops *ops;
+    void *private;        /* the backing object: console, pipe, inode */
+    struct list_head all_node;   /* on the global open-file list */
+    u32 ino;
 };
 
 struct file *file_alloc(const struct file_ops *ops, void *private, u32 flags);
@@ -94,23 +94,23 @@ extern unsigned long init_image_size;
  * pointer to a struct would silently depend on the kernel's alignment. */
 static inline uint16_t initrd_le16(const uint8_t *p)
 {
-	return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
+    return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
 }
 
 static inline uint32_t initrd_le32(const uint8_t *p)
 {
-	return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
-	       ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
 static inline uint64_t initrd_le64(const uint8_t *p)
 {
-	uint64_t v = 0;
-	int i;
+    uint64_t v = 0;
+    int i;
 
-	for (i = 7; i >= 0; i--)
-		v = (v << 8) | p[i];
-	return v;
+    for (i = 7; i >= 0; i--)
+        v = (v << 8) | p[i];
+    return v;
 }
 
 struct task *process_create_init(void);
@@ -161,7 +161,7 @@ long copy_string_from_user(char *dst, u64 src, size_t max);
  * dereferenced, because every page is translated before it is touched.
  */
 long user_memory_write(struct address_space *mm, virt_addr_t addr,
-		       const void *src, size_t len, uint32_t prot);
+               const void *src, size_t len, uint32_t prot);
 
 /* Map one anonymous zeroed page into a user address space. */
 long user_map_zero_page(struct address_space *mm, virt_addr_t addr, uint32_t prot);
@@ -174,14 +174,14 @@ u64 user_range_end(u64 addr, size_t len);
 #define ELF_MAX_PHDRS 64
 
 struct elf_info {
-	u64 entry;          /* e_entry + load_bias */
-	u64 phdr_vaddr;     /* where the program headers live in the new mm */
-	u32 phdr_count;
-	u64 min_vaddr;      /* lowest and highest byte any PT_LOAD claims */
-	u64 max_vaddr;
-	u64 tls_ptr;        /* initial thread pointer: PT_TLS end, 0 if none */
-	u64 tls_size;       /* PT_TLS p_memsz, 0 if the image has no PT_TLS */
-	bool is_dyn;        /* ET_DYN: `entry` is relative to the load bias */
+    u64 entry;          /* e_entry + load_bias */
+    u64 phdr_vaddr;     /* where the program headers live in the new mm */
+    u32 phdr_count;
+    u64 min_vaddr;      /* lowest and highest byte any PT_LOAD claims */
+    u64 max_vaddr;
+    u64 tls_ptr;        /* initial thread pointer: PT_TLS end, 0 if none */
+    u64 tls_size;       /* PT_TLS p_memsz, 0 if the image has no PT_TLS */
+    bool is_dyn;        /* ET_DYN: `entry` is relative to the load bias */
 };
 
 /*
@@ -198,7 +198,7 @@ struct elf_info {
  * why the end and not the start.
  */
 int elf_load(struct address_space *mm, const void *image, size_t size,
-	     uint64_t load_bias, struct elf_info *out);
+         uint64_t load_bias, struct elf_info *out);
 
 /*
  * Load `image` into a brand-new address space and build the initial user stack
@@ -221,7 +221,7 @@ int elf_load(struct address_space *mm, const void *image, size_t size,
  * t->mm, which is now a different address space.
  */
 int exec_load_and_run(struct task *t, const void *image, size_t size,
-		      const char *name, char *const argv[], char *const envp[]);
+              const char *name, char *const argv[], char *const envp[]);
 
 /* Set up the user-context registers for the first entry into ring 3. */
 __noreturn void process_enter_user(struct task *t, u64 entry, u64 sp);
@@ -239,6 +239,6 @@ __noreturn void process_enter_user(struct task *t, u64 entry, u64 sp);
 extern void gdt_reload(uint32_t cpu);
 extern void tss_set_kernel_stack(void *stack_top);
 extern void ret_to_user(uint64_t rip, uint64_t rsp, uint64_t rflags,
-			uint64_t rcx, uint64_t r11);
+            uint64_t rcx, uint64_t r11);
 
 #endif /* PROCESS_H */

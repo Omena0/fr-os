@@ -87,31 +87,31 @@ KLOG_SUBSYSTEM("mm");
  */
 static struct vma *vma_alloc(void)
 {
-	struct vma *v = vmalloc(sizeof(*v));
+    struct vma *v = vmalloc(sizeof(*v));
 
-	if (!v)
-		return NULL;
+    if (!v)
+        return NULL;
 
-	memset(v, 0, sizeof(*v));
-	list_init(&v->list);
-	return v;
+    memset(v, 0, sizeof(*v));
+    list_init(&v->list);
+    return v;
 }
 
 static void vma_free(struct vma *v)
 {
-	if (v)
-		vfree(v);
+    if (v)
+        vfree(v);
 }
 
 static void vma_copy(struct vma *dst, const struct vma *src)
 {
-	dst->start = src->start;
-	dst->end = src->end;
-	dst->prot = src->prot;
-	dst->flags = src->flags;
-	dst->phys_base = src->phys_base;
-	dst->file = src->file;
-	dst->file_offset = src->file_offset;
+    dst->start = src->start;
+    dst->end = src->end;
+    dst->prot = src->prot;
+    dst->flags = src->flags;
+    dst->phys_base = src->phys_base;
+    dst->file = src->file;
+    dst->file_offset = src->file_offset;
 }
 
 /*
@@ -130,67 +130,67 @@ static void vma_copy(struct vma *dst, const struct vma *src)
  * positive. `before` is the node the caller must insert after.
  */
 static void vma_insertion_point(struct address_space *mm, virt_addr_t start,
-				virt_addr_t end, struct list_head **before,
-				bool *overlap)
+                virt_addr_t end, struct list_head **before,
+                bool *overlap)
 {
-	struct list_head *pos;
+    struct list_head *pos;
 
-	*before = NULL;
-	*overlap = false;
+    *before = NULL;
+    *overlap = false;
 
-	list_for_each(pos, &mm->vma_list) {
-		struct vma *v = list_entry(pos, struct vma, list);
+    list_for_each(pos, &mm->vma_list) {
+        struct vma *v = list_entry(pos, struct vma, list);
 
-		/* Half-open: [v->start, v->end) starts at v->end at the earliest,
-		 * so a VMA beginning at `end` shares no page with the range and
-		 * neither it nor anything after it can overlap. Testing `>` here
-		 * instead of `>=` reported those as overlaps, which turned every
-		 * re-insert of a freed range into -EEXIST. */
-		if (v->start >= end)
-			break;
-		/* Both halves matter. `v->start >= start` alone misses a VMA that
-		 * begins below the range and extends up into it -- the case where a
-		 * new mapping is dropped into the middle of an existing one, which
-		 * then overlaps it and lands out of order. */
-		if (v->end > start)
-			*overlap = true;
-		*before = pos;
-	}
+        /* Half-open: [v->start, v->end) starts at v->end at the earliest,
+         * so a VMA beginning at `end` shares no page with the range and
+         * neither it nor anything after it can overlap. Testing `>` here
+         * instead of `>=` reported those as overlaps, which turned every
+         * re-insert of a freed range into -EEXIST. */
+        if (v->start >= end)
+            break;
+        /* Both halves matter. `v->start >= start` alone misses a VMA that
+         * begins below the range and extends up into it -- the case where a
+         * new mapping is dropped into the middle of an existing one, which
+         * then overlaps it and lands out of order. */
+        if (v->end > start)
+            *overlap = true;
+        *before = pos;
+    }
 
-	if (*before == NULL)
-		*before = &mm->vma_list;
+    if (*before == NULL)
+        *before = &mm->vma_list;
 }
 
 struct vma *mm_find_vma(struct address_space *mm, virt_addr_t addr)
 {
-	struct list_head *pos;
+    struct list_head *pos;
 
-	if (!mm)
-		return NULL;
+    if (!mm)
+        return NULL;
 
-	/*
-	 * The list is sorted by start and the VMAs do not overlap, so the first
-	 * entry that ends past `addr` is the only one that can contain it: every
-	 * later entry starts at or after that one's start, which is already past
-	 * `addr`. Returning on the first candidate rather than comparing the
-	 * whole list is what makes the stack, the heap and the most recent mmap
-	 * all cost a fraction of the walk.
-	 *
-	 * The caller holds mm->lock. Taking it here instead would deadlock the
-	 * fault path, which already holds the lock across the VMA lookup and
-	 * the mapping that has to happen before the VMA can be released.
-	 */
-	list_for_each(pos, &mm->vma_list) {
-		struct vma *v = list_entry(pos, struct vma, list);
+    /*
+     * The list is sorted by start and the VMAs do not overlap, so the first
+     * entry that ends past `addr` is the only one that can contain it: every
+     * later entry starts at or after that one's start, which is already past
+     * `addr`. Returning on the first candidate rather than comparing the
+     * whole list is what makes the stack, the heap and the most recent mmap
+     * all cost a fraction of the walk.
+     *
+     * The caller holds mm->lock. Taking it here instead would deadlock the
+     * fault path, which already holds the lock across the VMA lookup and
+     * the mapping that has to happen before the VMA can be released.
+     */
+    list_for_each(pos, &mm->vma_list) {
+        struct vma *v = list_entry(pos, struct vma, list);
 
-		if (v->end <= addr)
-			continue;
-		if (v->start > addr)
-			return NULL;
-		return v;
-	}
+        if (v->end <= addr)
+            continue;
+        if (v->start > addr)
+            return NULL;
+        return v;
+    }
 
-	return NULL;
+    return NULL;
 }
 
 /* ------------------------------------------------- address spaces ----------- */
@@ -214,7 +214,7 @@ struct vma *mm_find_vma(struct address_space *mm, virt_addr_t addr)
  */
 static phys_addr_t kernel_pgd_from_cr3(void)
 {
-	return read_cr3() & ~0xFFFULL;
+    return read_cr3() & ~0xFFFULL;
 }
 
 /*
@@ -239,85 +239,85 @@ static const unsigned mm_shared_pml4[] = { 256, 384, 511 };
 
 static bool pml4_is_shared(unsigned i)
 {
-	for (unsigned n = 0; n < sizeof(mm_shared_pml4) / sizeof(*mm_shared_pml4); n++)
-		if (mm_shared_pml4[n] == i)
-			return true;
-	return false;
+    for (unsigned n = 0; n < sizeof(mm_shared_pml4) / sizeof(*mm_shared_pml4); n++)
+        if (mm_shared_pml4[n] == i)
+            return true;
+    return false;
 }
 
 struct address_space *mm_create(void)
 {
-	phys_addr_t kernel_pgd = kernel_pgd_from_cr3();
-	phys_addr_t pgd;
-	struct address_space *mm;
-	uint64_t *src, *dst;
+    phys_addr_t kernel_pgd = kernel_pgd_from_cr3();
+    phys_addr_t pgd;
+    struct address_space *mm;
+    uint64_t *src, *dst;
 
-	mm = vmalloc(sizeof(*mm));
-	if (!mm)
-		return NULL;
+    mm = vmalloc(sizeof(*mm));
+    if (!mm)
+        return NULL;
 
-	pgd = pt_alloc_zeroed(1);
-	if (!pgd) {
-		vfree(mm);
-		return NULL;
-	}
+    pgd = pt_alloc_zeroed(1);
+    if (!pgd) {
+        vfree(mm);
+        return NULL;
+    }
 
-	/*
-	 * Three entries and nothing else: the direct map, vmalloc, and the
-	 * kernel's negative canonical half. Everything between them is the user
-	 * half, and a new address space must start with none of it mapped -- an
-	 * address space that inherited the parent's user mappings would make
-	 * every VMA a description of something that may or may not still be
-	 * there.
-	 *
-	 * 384 was missing, and missing it costs the kernel its own memory. Every
-	 * task struct, every kernel stack and every kmalloc() over 4096 lives
-	 * at VMALLOC_AREA, which is PML4 index 384. An address space without it
-	 * is fine right up until CR3 is switched, and then the first thing the
-	 * scheduler does -- compare prev->mm with next->mm, or push a return
-	 * address on a task's kernel stack -- lands on an unmapped page and
-	 * faults. Measured by walking the live table: the kernel PGD has exactly
-	 * three populated PML4 entries, 256/384/511, and the process PGD had two.
-	 *
-	 * Note what that failure looks like: the fault address is a perfectly
-	 * ordinary kernel stack, the page tables are valid, and nothing about the
-	 * page that faulted is unusual. The missing entry is in a fourth-level
-	 * table belonging to a different PGD than the one being walked.
-	 *
-	 * The entries are shared, not copied; see mm_shared_pml4 above, which is
-	 * also why the teardown must leave them alone.
-	 */
-	src = (uint64_t *)phys_to_virt(kernel_pgd);
-	dst = (uint64_t *)phys_to_virt(pgd);
-	for (unsigned n = 0; n < sizeof(mm_shared_pml4) / sizeof(*mm_shared_pml4); n++)
-		dst[mm_shared_pml4[n]] = src[mm_shared_pml4[n]];
+    /*
+     * Three entries and nothing else: the direct map, vmalloc, and the
+     * kernel's negative canonical half. Everything between them is the user
+     * half, and a new address space must start with none of it mapped -- an
+     * address space that inherited the parent's user mappings would make
+     * every VMA a description of something that may or may not still be
+     * there.
+     *
+     * 384 was missing, and missing it costs the kernel its own memory. Every
+     * task struct, every kernel stack and every kmalloc() over 4096 lives
+     * at VMALLOC_AREA, which is PML4 index 384. An address space without it
+     * is fine right up until CR3 is switched, and then the first thing the
+     * scheduler does -- compare prev->mm with next->mm, or push a return
+     * address on a task's kernel stack -- lands on an unmapped page and
+     * faults. Measured by walking the live table: the kernel PGD has exactly
+     * three populated PML4 entries, 256/384/511, and the process PGD had two.
+     *
+     * Note what that failure looks like: the fault address is a perfectly
+     * ordinary kernel stack, the page tables are valid, and nothing about the
+     * page that faulted is unusual. The missing entry is in a fourth-level
+     * table belonging to a different PGD than the one being walked.
+     *
+     * The entries are shared, not copied; see mm_shared_pml4 above, which is
+     * also why the teardown must leave them alone.
+     */
+    src = (uint64_t *)phys_to_virt(kernel_pgd);
+    dst = (uint64_t *)phys_to_virt(pgd);
+    for (unsigned n = 0; n < sizeof(mm_shared_pml4) / sizeof(*mm_shared_pml4); n++)
+        dst[mm_shared_pml4[n]] = src[mm_shared_pml4[n]];
 
-	memset(mm, 0, sizeof(*mm));
-	mm->pgd = pgd;
-	spinlock_init(&mm->lock);
-	list_init(&mm->vma_list);
-	mm->vma_count = 0;
+    memset(mm, 0, sizeof(*mm));
+    mm->pgd = pgd;
+    spinlock_init(&mm->lock);
+    list_init(&mm->vma_list);
+    mm->vma_count = 0;
 
-	mm->start_brk = MM_BRK_BASE;
-	mm->brk = MM_BRK_BASE;
-	mm->stack_top = MM_STACK_TOP;
-	mm->mmap_base = MM_MMAP_BASE;
-	mm->mmap_next = MM_MMAP_BASE;
-	mm->refcount = 1;
+    mm->start_brk = MM_BRK_BASE;
+    mm->brk = MM_BRK_BASE;
+    mm->stack_top = MM_STACK_TOP;
+    mm->mmap_base = MM_MMAP_BASE;
+    mm->mmap_next = MM_MMAP_BASE;
+    mm->refcount = 1;
 
-	klog(KLOG_DEBUG, "mm: address space pgd %#lx (kernel pgd %#lx)\n",
-	     (unsigned long)pgd, (unsigned long)kernel_pgd);
-	return mm;
+    klog(KLOG_DEBUG, "mm: address space pgd %#lx (kernel pgd %#lx)\n",
+         (unsigned long)pgd, (unsigned long)kernel_pgd);
+    return mm;
 }
 
 void mm_get(struct address_space *mm)
 {
-	if (!mm)
-		return;
-	/* Relaxed: the new reference protects nothing the previous holder has
-	 * not already published, and the only ordering that matters is the
-	 * release side, which is in mm_put(). */
-	__atomic_add_fetch(&mm->refcount, 1, __ATOMIC_RELAXED);
+    if (!mm)
+        return;
+    /* Relaxed: the new reference protects nothing the previous holder has
+     * not already published, and the only ordering that matters is the
+     * release side, which is in mm_put(). */
+    __atomic_add_fetch(&mm->refcount, 1, __ATOMIC_RELAXED);
 }
 
 /* ------------------------------------------------- page table teardown ------ */
@@ -340,23 +340,23 @@ void mm_get(struct address_space *mm)
  */
 static void free_page_table(phys_addr_t table, unsigned level)
 {
-	uint64_t *entries = (uint64_t *)phys_to_virt(table);
+    uint64_t *entries = (uint64_t *)phys_to_virt(table);
 
-	for (unsigned i = 0; i < 512; i++) {
-		uint64_t e = entries[i];
+    for (unsigned i = 0; i < 512; i++) {
+        uint64_t e = entries[i];
 
-		if (!(e & PTE_PRESENT))
-			continue;
-		if (level == 1) {
-			pmm_free_pages(phys_to_page(e & PTE_ADDR_MASK), 0);
-		} else if (e & PTE_PS) {
-			continue;
-		} else {
-			free_page_table(e & PTE_ADDR_MASK, level - 1);
-		}
-	}
+        if (!(e & PTE_PRESENT))
+            continue;
+        if (level == 1) {
+            pmm_free_pages(phys_to_page(e & PTE_ADDR_MASK), 0);
+        } else if (e & PTE_PS) {
+            continue;
+        } else {
+            free_page_table(e & PTE_ADDR_MASK, level - 1);
+        }
+    }
 
-	pmm_free_pages(phys_to_page(table), 0);
+    pmm_free_pages(phys_to_page(table), 0);
 }
 
 /*
@@ -370,63 +370,63 @@ static void free_page_table(phys_addr_t table, unsigned level)
  */
 static void mm_free_page_tables(phys_addr_t pgd)
 {
-	uint64_t *entries = (uint64_t *)phys_to_virt(pgd);
+    uint64_t *entries = (uint64_t *)phys_to_virt(pgd);
 
-	for (unsigned i = 0; i < 512; i++) {
-		uint64_t e = entries[i];
+    for (unsigned i = 0; i < 512; i++) {
+        uint64_t e = entries[i];
 
-		/* A shared PDPT belongs to the kernel PGD as well. Freeing it here
-		 * would unmap the direct map, vmalloc or the kernel window out from
-		 * under every other address space, including the one freeing this
-		 * one. */
-		if (pml4_is_shared(i))
-			continue;
-		if (!(e & PTE_PRESENT) || (e & PTE_PS))
-			continue;
+        /* A shared PDPT belongs to the kernel PGD as well. Freeing it here
+         * would unmap the direct map, vmalloc or the kernel window out from
+         * under every other address space, including the one freeing this
+         * one. */
+        if (pml4_is_shared(i))
+            continue;
+        if (!(e & PTE_PRESENT) || (e & PTE_PS))
+            continue;
 
-		free_page_table(e & PTE_ADDR_MASK, 3);
-		entries[i] = 0;
-	}
+        free_page_table(e & PTE_ADDR_MASK, 3);
+        entries[i] = 0;
+    }
 
-	pmm_free_pages(phys_to_page(pgd), 0);
+    pmm_free_pages(phys_to_page(pgd), 0);
 }
 
 void mm_put(struct address_space *mm)
 {
-	phys_addr_t pgd;
-	u64 flags;
+    phys_addr_t pgd;
+    u64 flags;
 
-	if (!mm)
-		return;
+    if (!mm)
+        return;
 
-	/* Acq_rel pairs with mm_get()'s relaxed increment: the releasing CPU's
-	 * writes have to be visible to whichever CPU observes the count reach
-	 * zero, or that CPU frees a VMA another CPU is still walking. */
-	if (__atomic_sub_fetch(&mm->refcount, 1, __ATOMIC_ACQ_REL) != 0)
-		return;
+    /* Acq_rel pairs with mm_get()'s relaxed increment: the releasing CPU's
+     * writes have to be visible to whichever CPU observes the count reach
+     * zero, or that CPU frees a VMA another CPU is still walking. */
+    if (__atomic_sub_fetch(&mm->refcount, 1, __ATOMIC_ACQ_REL) != 0)
+        return;
 
-	flags = spinlock_irqsave(&mm->lock);
+    flags = spinlock_irqsave(&mm->lock);
 
-	/* The page tables go before the VMAs, because freeing a table already
-	 * returns every frame the VMAs' pages occupied. Walking the VMAs
-	 * afterwards to unmap them would find nothing. */
-	pgd = mm->pgd;
-	mm->pgd = 0;
-	mm_free_page_tables(pgd);
+    /* The page tables go before the VMAs, because freeing a table already
+     * returns every frame the VMAs' pages occupied. Walking the VMAs
+     * afterwards to unmap them would find nothing. */
+    pgd = mm->pgd;
+    mm->pgd = 0;
+    mm_free_page_tables(pgd);
 
-	struct list_head *pos, *tmp;
+    struct list_head *pos, *tmp;
 
-	list_for_each_safe(pos, tmp, &mm->vma_list) {
-		struct vma *v = list_entry(pos, struct vma, list);
+    list_for_each_safe(pos, tmp, &mm->vma_list) {
+        struct vma *v = list_entry(pos, struct vma, list);
 
-		list_del(&v->list);
-		vma_free(v);
-	}
-	mm->vma_count = 0;
+        list_del(&v->list);
+        vma_free(v);
+    }
+    mm->vma_count = 0;
 
-	spinlock_unlock_irqrestore(&mm->lock, flags);
+    spinlock_unlock_irqrestore(&mm->lock, flags);
 
-	vfree(mm);
+    vfree(mm);
 }
 
 /* --------------------------------------------------------- vm manip --------- */
@@ -440,268 +440,268 @@ void mm_put(struct address_space *mm)
  */
 static int vma_punch(struct address_space *mm, virt_addr_t start, virt_addr_t end)
 {
-	struct vma *head = NULL;
-	struct vma *tail = NULL;
-	struct list_head *pos, *tmp;
-	int rc = 0;
+    struct vma *head = NULL;
+    struct vma *tail = NULL;
+    struct list_head *pos, *tmp;
+    int rc = 0;
 
-	/*
-	 * Two VMAs can need attention, and they can be the same one: the VMA
-	 * containing `start` keeps everything below it, and the VMA containing
-	 * `end` keeps everything above it. On a sorted, non-overlapping list at
-	 * most one contains each, so one pass finds both.
-	 *
-	 * The tail is allocated here, before anything is modified, which is what
-	 * makes the removal itself infallible: a caller that gets -ENOMEM here
-	 * gets an untouched address space rather than one missing a VMA it was
-	 * told still exists.
-	 *
-	 * The tail's existence is keyed on `v->end > end`, not "head straddles":
-	 * a VMA that contains `start` but ends before `end` contributes no tail,
-	 * because everything from its end to `end` is being removed anyway. The
-	 * VMA containing `end` is a separate entry that the second pass trims in
-	 * place.
-	 */
-	list_for_each(pos, &mm->vma_list) {
-		struct vma *v = list_entry(pos, struct vma, list);
+    /*
+     * Two VMAs can need attention, and they can be the same one: the VMA
+     * containing `start` keeps everything below it, and the VMA containing
+     * `end` keeps everything above it. On a sorted, non-overlapping list at
+     * most one contains each, so one pass finds both.
+     *
+     * The tail is allocated here, before anything is modified, which is what
+     * makes the removal itself infallible: a caller that gets -ENOMEM here
+     * gets an untouched address space rather than one missing a VMA it was
+     * told still exists.
+     *
+     * The tail's existence is keyed on `v->end > end`, not "head straddles":
+     * a VMA that contains `start` but ends before `end` contributes no tail,
+     * because everything from its end to `end` is being removed anyway. The
+     * VMA containing `end` is a separate entry that the second pass trims in
+     * place.
+     */
+    list_for_each(pos, &mm->vma_list) {
+        struct vma *v = list_entry(pos, struct vma, list);
 
-		if (v->end <= start)
-			continue;
-		if (v->start >= end)
-			break;
-		if (v->start < start) {
-			head = v;
-			if (v->end > end) {
-				tail = vma_alloc();
-				if (!tail) {
-					rc = -ENOMEM;
-					goto out;
-				}
-				vma_copy(tail, v);
-				tail->start = end;
-			}
-			continue;
-		}
-		/* Not the head, so there is nothing to pre-allocate: whatever this
-		 * is, the second pass either deletes it whole or moves its start. */
-		break;
-	}
+        if (v->end <= start)
+            continue;
+        if (v->start >= end)
+            break;
+        if (v->start < start) {
+            head = v;
+            if (v->end > end) {
+                tail = vma_alloc();
+                if (!tail) {
+                    rc = -ENOMEM;
+                    goto out;
+                }
+                vma_copy(tail, v);
+                tail->start = end;
+            }
+            continue;
+        }
+        /* Not the head, so there is nothing to pre-allocate: whatever this
+         * is, the second pass either deletes it whole or moves its start. */
+        break;
+    }
 
-	list_for_each_safe(pos, tmp, &mm->vma_list) {
-		struct vma *v = list_entry(pos, struct vma, list);
+    list_for_each_safe(pos, tmp, &mm->vma_list) {
+        struct vma *v = list_entry(pos, struct vma, list);
 
-		if (v->end <= start)
-			continue;
-		if (v->start >= end)
-			break;
+        if (v->end <= start)
+            continue;
+        if (v->start >= end)
+            break;
 
-		if (v->start >= start && v->end <= end) {
-			list_del(&v->list);
-			mm->vma_count--;
-			vma_free(v);
-			continue;
-		}
+        if (v->start >= start && v->end <= end) {
+            list_del(&v->list);
+            mm->vma_count--;
+            vma_free(v);
+            continue;
+        }
 
-		/* The head. Its end moves up to `start`, and the piece that
-		 * survives past `end` is re-inserted after it so the list stays
-		 * sorted in the middle.
-		 *
-		 * `continue`, not `break`: the VMA containing `end` is a later
-		 * entry when the gap between the two VMAs is smaller than the
-		 * range, which is the common case for an mmap region. Breaking
-		 * here left that entry whole and moved this one's *start* to
-		 * `end`, producing an interval with end <= start and unmapping
-		 * nothing. */
-		if (v == head) {
-			v->end = start;
-			if (tail) {
-				list_add(&tail->list, &v->list);
-				mm->vma_count++;
-				tail = NULL;
-			}
-			continue;
-		}
+        /* The head. Its end moves up to `start`, and the piece that
+         * survives past `end` is re-inserted after it so the list stays
+         * sorted in the middle.
+         *
+         * `continue`, not `break`: the VMA containing `end` is a later
+         * entry when the gap between the two VMAs is smaller than the
+         * range, which is the common case for an mmap region. Breaking
+         * here left that entry whole and moved this one's *start* to
+         * `end`, producing an interval with end <= start and unmapping
+         * nothing. */
+        if (v == head) {
+            v->end = start;
+            if (tail) {
+                list_add(&tail->list, &v->list);
+                mm->vma_count++;
+                tail = NULL;
+            }
+            continue;
+        }
 
-		/* The tail, when the removal stops inside a VMA. */
-		v->start = end;
-		break;
-	}
+        /* The tail, when the removal stops inside a VMA. */
+        v->start = end;
+        break;
+    }
 
-	/*
-	 * A range that was never mapped is not an error: POSIX has munmap()
-	 * succeed on an address range it holds no mapping for, and syscall.c
-	 * returns this value directly to userspace.
-	 */
+    /*
+     * A range that was never mapped is not an error: POSIX has munmap()
+     * succeed on an address range it holds no mapping for, and syscall.c
+     * returns this value directly to userspace.
+     */
 out:
-	if (tail)
-		vma_free(tail);
-	return rc;
+    if (tail)
+        vma_free(tail);
+    return rc;
 }
 
 int mm_add_vma(struct address_space *mm, virt_addr_t start, virt_addr_t end,
-	       uint32_t prot, uint32_t flags)
+           uint32_t prot, uint32_t flags)
 {
-	struct vma *v;
-	struct list_head *before;
-	bool overlap;
-	int rc = 0;
+    struct vma *v;
+    struct list_head *before;
+    bool overlap;
+    int rc = 0;
 
-	if (!mm)
-		return -EINVAL;
-	/* An empty range is not a VMA. Accepting one would put an entry into a
-	 * sorted list that no lookup can ever match and that every gap scan has
-	 * to step over. */
-	if (end <= start)
-		return -EINVAL;
-	/* Unaligned bounds are a caller bug rather than something to round: the
-	 * caller's idea of where its mapping ends would silently differ from the
-	 * VMA's, and the next fault on the tail page would find no VMA for an
-	 * address the caller believes it owns. */
-	if (!IS_ALIGNED(start, PAGE_SIZE) || !IS_ALIGNED(end, PAGE_SIZE))
-		return -EINVAL;
-	/* Same reasoning for the user half: a VMA above the limit describes
-	 * kernel addresses, which are mapped by the shared PML4 entries and are
-	 * not this file's to hand out. */
-	if (start >= MM_USER_LIMIT || end > MM_USER_LIMIT)
-		return -EINVAL;
+    if (!mm)
+        return -EINVAL;
+    /* An empty range is not a VMA. Accepting one would put an entry into a
+     * sorted list that no lookup can ever match and that every gap scan has
+     * to step over. */
+    if (end <= start)
+        return -EINVAL;
+    /* Unaligned bounds are a caller bug rather than something to round: the
+     * caller's idea of where its mapping ends would silently differ from the
+     * VMA's, and the next fault on the tail page would find no VMA for an
+     * address the caller believes it owns. */
+    if (!IS_ALIGNED(start, PAGE_SIZE) || !IS_ALIGNED(end, PAGE_SIZE))
+        return -EINVAL;
+    /* Same reasoning for the user half: a VMA above the limit describes
+     * kernel addresses, which are mapped by the shared PML4 entries and are
+     * not this file's to hand out. */
+    if (start >= MM_USER_LIMIT || end > MM_USER_LIMIT)
+        return -EINVAL;
 
-	/* Allocated before the lock so the critical section stays a list walk.
-	 * vfree() on the error path takes vmalloc's own lock, which is a leaf, so
-	 * doing it outside is strictly better and not merely tidier. */
-	v = vma_alloc();
-	if (!v)
-		return -ENOMEM;
+    /* Allocated before the lock so the critical section stays a list walk.
+     * vfree() on the error path takes vmalloc's own lock, which is a leaf, so
+     * doing it outside is strictly better and not merely tidier. */
+    v = vma_alloc();
+    if (!v)
+        return -ENOMEM;
 
-	u64 irqflags = spinlock_irqsave(&mm->lock);
+    u64 irqflags = spinlock_irqsave(&mm->lock);
 
-	vma_insertion_point(mm, start, end, &before, &overlap);
+    vma_insertion_point(mm, start, end, &before, &overlap);
 
-	if (overlap && !(flags & VM_FIXED)) {
-		rc = -EEXIST;
-		goto out;
-	}
+    if (overlap && !(flags & VM_FIXED)) {
+        rc = -EEXIST;
+        goto out;
+    }
 
-	if (overlap) {
-		/*
-		 * VM_FIXED: the new mapping replaces whatever is there, exactly as
-		 * MAP_FIXED replaces rather than merges. Punching the range first
-		 * is what keeps the list a set of non-overlapping intervals —
-		 * unlinking only the last overlapping VMA would leave the new entry
-		 * overlapping the ones before it, and every gap scan and every
-		 * lookup would then be walking a list it cannot reason about.
-		 *
-		 * The overlap may need a VMA to be split, which is why this can
-		 * fail at all; on failure nothing has been changed.
-		 */
-		rc = vma_punch(mm, start, end);
-		if (rc < 0)
-			goto out;
-		vma_insertion_point(mm, start, end, &before, &overlap);
-	}
+    if (overlap) {
+        /*
+         * VM_FIXED: the new mapping replaces whatever is there, exactly as
+         * MAP_FIXED replaces rather than merges. Punching the range first
+         * is what keeps the list a set of non-overlapping intervals —
+         * unlinking only the last overlapping VMA would leave the new entry
+         * overlapping the ones before it, and every gap scan and every
+         * lookup would then be walking a list it cannot reason about.
+         *
+         * The overlap may need a VMA to be split, which is why this can
+         * fail at all; on failure nothing has been changed.
+         */
+        rc = vma_punch(mm, start, end);
+        if (rc < 0)
+            goto out;
+        vma_insertion_point(mm, start, end, &before, &overlap);
+    }
 
-	v->start = start;
-	v->end = end;
-	v->prot = prot;
-	v->flags = flags;
-	/*
-	 * list_add(), not list_add_tail(). vma_insertion_point() returns the
-	 * node the new VMA belongs *after* -- the last one that starts below
-	 * `end` -- and list_add() is "insert immediately after pos".
-	 * list_add_tail() splices in at pos->prev, so it put every VMA but the
-	 * first one position too early, and the first insertion into a
-	 * non-empty list landed at the head: the list came out reversed, and
-	 * mm_find_vma() then returned NULL for an address the process owns,
-	 * because it early-returns on the first entry that starts above addr.
-	 * On the empty list both forms agree, which is why one VMA looked fine.
-	 */
-	list_add(&v->list, before);
-	mm->vma_count++;
+    v->start = start;
+    v->end = end;
+    v->prot = prot;
+    v->flags = flags;
+    /*
+     * list_add(), not list_add_tail(). vma_insertion_point() returns the
+     * node the new VMA belongs *after* -- the last one that starts below
+     * `end` -- and list_add() is "insert immediately after pos".
+     * list_add_tail() splices in at pos->prev, so it put every VMA but the
+     * first one position too early, and the first insertion into a
+     * non-empty list landed at the head: the list came out reversed, and
+     * mm_find_vma() then returned NULL for an address the process owns,
+     * because it early-returns on the first entry that starts above addr.
+     * On the empty list both forms agree, which is why one VMA looked fine.
+     */
+    list_add(&v->list, before);
+    mm->vma_count++;
 
 out:
-	spinlock_unlock_irqrestore(&mm->lock, irqflags);
-	if (rc < 0)
-		vma_free(v);
-	return rc;
+    spinlock_unlock_irqrestore(&mm->lock, irqflags);
+    if (rc < 0)
+        vma_free(v);
+    return rc;
 }
 
 int mm_remove_vma(struct address_space *mm, virt_addr_t start, virt_addr_t end)
 {
-	u64 flags;
-	int rc;
+    u64 flags;
+    int rc;
 
-	if (!mm)
-		return -EINVAL;
-	if (end <= start)
-		return -EINVAL;
-	if (!IS_ALIGNED(start, PAGE_SIZE) || !IS_ALIGNED(end, PAGE_SIZE))
-		return -EINVAL;
-	/* The same user-half bound mm_add_vma() applies. syscall.c's
-	 * mmap(MAP_FIXED) punches the range and *then* adds, discarding this
-	 * function's return value, so a request above the limit used to destroy
-	 * the process's own mappings there and fail the add afterwards. Symmetry
-	 * with the insert is what makes the pair refuse instead. */
-	if (start >= MM_USER_LIMIT || end > MM_USER_LIMIT)
-		return -EINVAL;
+    if (!mm)
+        return -EINVAL;
+    if (end <= start)
+        return -EINVAL;
+    if (!IS_ALIGNED(start, PAGE_SIZE) || !IS_ALIGNED(end, PAGE_SIZE))
+        return -EINVAL;
+    /* The same user-half bound mm_add_vma() applies. syscall.c's
+     * mmap(MAP_FIXED) punches the range and *then* adds, discarding this
+     * function's return value, so a request above the limit used to destroy
+     * the process's own mappings there and fail the add afterwards. Symmetry
+     * with the insert is what makes the pair refuse instead. */
+    if (start >= MM_USER_LIMIT || end > MM_USER_LIMIT)
+        return -EINVAL;
 
-	flags = spinlock_irqsave(&mm->lock);
-	rc = vma_punch(mm, start, end);
-	spinlock_unlock_irqrestore(&mm->lock, flags);
-	return rc;
+    flags = spinlock_irqsave(&mm->lock);
+    rc = vma_punch(mm, start, end);
+    spinlock_unlock_irqrestore(&mm->lock, flags);
+    return rc;
 }
 
 virt_addr_t mm_find_free(struct address_space *mm, size_t len, size_t align)
 {
-	struct list_head *pos;
-	virt_addr_t cand, limit;
+    struct list_head *pos;
+    virt_addr_t cand, limit;
 
-	if (!mm || !len)
-		return 0;
+    if (!mm || !len)
+        return 0;
 
-	if (align < PAGE_SIZE)
-		align = PAGE_SIZE;
-	/* An alignment that is not a power of two cannot be satisfied by the
-	 * mask arithmetic below, and asking for one is a caller bug rather than
-	 * something to round to the nearest power of two. */
-	if (align & (align - 1))
-		return 0;
+    if (align < PAGE_SIZE)
+        align = PAGE_SIZE;
+    /* An alignment that is not a power of two cannot be satisfied by the
+     * mask arithmetic below, and asking for one is a caller bug rather than
+     * something to round to the nearest power of two. */
+    if (align & (align - 1))
+        return 0;
 
-	len = ALIGN_UP(len, PAGE_SIZE);
-	if (len > MM_MMAP_LIMIT)
-		return 0;
+    len = ALIGN_UP(len, PAGE_SIZE);
+    if (len > MM_MMAP_LIMIT)
+        return 0;
 
-	u64 flags = spinlock_irqsave(&mm->lock);
+    u64 flags = spinlock_irqsave(&mm->lock);
 
-	/* Start above everything handed out so far rather than at mmap_base:
-	 * re-scanning the low holes on every call is what turns a fragmented
-	 * address space into an O(n^2) mmap loop. */
-	virt_addr_t start = mm->mmap_next > mm->mmap_base ? mm->mmap_next
-							  : mm->mmap_base;
+    /* Start above everything handed out so far rather than at mmap_base:
+     * re-scanning the low holes on every call is what turns a fragmented
+     * address space into an O(n^2) mmap loop. */
+    virt_addr_t start = mm->mmap_next > mm->mmap_base ? mm->mmap_next
+                              : mm->mmap_base;
 
-	cand = ALIGN_UP(start, align);
-	limit = MM_MMAP_LIMIT - len;
+    cand = ALIGN_UP(start, align);
+    limit = MM_MMAP_LIMIT - len;
 
-	list_for_each(pos, &mm->vma_list) {
-		struct vma *v = list_entry(pos, struct vma, list);
+    list_for_each(pos, &mm->vma_list) {
+        struct vma *v = list_entry(pos, struct vma, list);
 
-		if (v->end <= cand)
-			continue;
-		if (v->start >= cand + len)
-			break;          /* the whole run fits below this VMA */
-		cand = ALIGN_UP(v->end, align);
-	}
+        if (v->end <= cand)
+            continue;
+        if (v->start >= cand + len)
+            break;          /* the whole run fits below this VMA */
+        cand = ALIGN_UP(v->end, align);
+    }
 
-	if (cand <= limit) {
-		virt_addr_t got = cand;
+    if (cand <= limit) {
+        virt_addr_t got = cand;
 
-		mm->mmap_next = cand + len;
-		spinlock_unlock_irqrestore(&mm->lock, flags);
-		return got;
-	}
+        mm->mmap_next = cand + len;
+        spinlock_unlock_irqrestore(&mm->lock, flags);
+        return got;
+    }
 
-	spinlock_unlock_irqrestore(&mm->lock, flags);
-	klog(KLOG_DEBUG, "mm: no free range of %#zx bytes below %#lx\n",
-	     (size_t)len, (unsigned long)MM_MMAP_LIMIT);
-	return 0;
+    spinlock_unlock_irqrestore(&mm->lock, flags);
+    klog(KLOG_DEBUG, "mm: no free range of %#zx bytes below %#lx\n",
+         (size_t)len, (unsigned long)MM_MMAP_LIMIT);
+    return 0;
 }
 
 /* ------------------------------------------------------- page faults -------- */
@@ -717,13 +717,13 @@ virt_addr_t mm_find_free(struct address_space *mm, size_t len, size_t align)
  */
 struct address_space *current_mm(void)
 {
-	struct task *t = current_task();
+    struct task *t = current_task();
 
-	if (!t || !t->mm)
-		return NULL;
-	if ((read_cr3() & ~0xFFFULL) != t->mm->pgd)
-		return NULL;
-	return t->mm;
+    if (!t || !t->mm)
+        return NULL;
+    if ((read_cr3() & ~0xFFFULL) != t->mm->pgd)
+        return NULL;
+    return t->mm;
 }
 
 /*
@@ -737,140 +737,140 @@ struct address_space *current_mm(void)
  */
 static bool vma_allows(const struct vma *vma, uint64_t error_code)
 {
-	if ((error_code & PF_WRITE) && !(vma->prot & VM_WRITE))
-		return false;
-	if ((error_code & PF_FETCH) && !(vma->prot & VM_EXEC))
-		return false;
-	if ((error_code & PF_USER) && !(vma->prot & VM_USER))
-		return false;
-	return true;
+    if ((error_code & PF_WRITE) && !(vma->prot & VM_WRITE))
+        return false;
+    if ((error_code & PF_FETCH) && !(vma->prot & VM_EXEC))
+        return false;
+    if ((error_code & PF_USER) && !(vma->prot & VM_USER))
+        return false;
+    return true;
 }
 
 long vmm_handle_page_fault(struct address_space *mm, virt_addr_t addr,
-			   uint64_t error_code)
+               uint64_t error_code)
 {
-	struct vma *vma;
-	struct page *page;
-	virt_addr_t virt;
-	u64 flags;
-	long rc = -EFAULT;
+    struct vma *vma;
+    struct page *page;
+    virt_addr_t virt;
+    u64 flags;
+    long rc = -EFAULT;
 
-	virt = addr & PAGE_MASK;
+    virt = addr & PAGE_MASK;
 
-	/* The kernel half is described by the shared PML4 entries, never by a
-	 * VMA. Rejecting it here rather than after a list walk keeps a kernel
-	 * fault from resolving against a user VMA that happens to be nearby. */
-	if (virt >= MM_USER_LIMIT)
-		return -EFAULT;
+    /* The kernel half is described by the shared PML4 entries, never by a
+     * VMA. Rejecting it here rather than after a list walk keeps a kernel
+     * fault from resolving against a user VMA that happens to be nearby. */
+    if (virt >= MM_USER_LIMIT)
+        return -EFAULT;
 
-	if (!mm)
-		return -EFAULT;
+    if (!mm)
+        return -EFAULT;
 
-	/*
-	 * The demand decision belongs to the VMA, not to bit 0 of the error
-	 * code.
-	 *
-	 * This used to read `if (!(error_code & PF_PRESENT)) return -EACCES;`
-	 * first, on the reasoning that bit 0 clear means "the page is present and
-	 * the access was refused". That is the SDM's meaning of the bit, and the
-	 * check is right for a *kernel* fault, where a refused access really is a
-	 * bug in the kernel.
-	 *
-	 * It is the wrong gate for a *user* fault, for two reasons.
-	 *
-	 * First, the VMA is the authority. Linux's handle_mm_fault() does not
-	 * consult the P bit either: it looks the address up, and the vma's
-	 * vm_flags decide whether the access is legitimate. "The page is present"
-	 * and "this process may write here" are different questions, and only the
-	 * second one belongs in a permission decision.
-	 *
-	 * Second, and concretely: the .bss tail of init's last PT_LOAD is
-	 * deliberately left unmapped -- elf.c says so, and the fault path is
-	 * supposed to fill it -- and the page genuinely is not present in the
-	 * tables. Yet the CPU reported error code 0x6, bit 0 *clear*. Measured
-	 * live, same boot: the PTE for the faulting page read zero, while both
-	 * QEMU's -d int and the kernel's own frame said 0x6. Whichever way that
-	 * discrepancy is explained, gating on the bit means a page that is
-	 * provably absent gets refused for being "present", and userspace never
-	 * starts. A VMA lookup plus a prot check answers the question the caller
-	 * actually has, and is correct whichever way the bit reads.
-	 *
-	 * The kernel-side refusal is kept, below, for faults at or above
-	 * MM_USER_LIMIT and for reserved-bit violations.
-	 */
-	if (error_code & PF_RESERVED)
-		return -EFAULT;
+    /*
+     * The demand decision belongs to the VMA, not to bit 0 of the error
+     * code.
+     *
+     * This used to read `if (!(error_code & PF_PRESENT)) return -EACCES;`
+     * first, on the reasoning that bit 0 clear means "the page is present and
+     * the access was refused". That is the SDM's meaning of the bit, and the
+     * check is right for a *kernel* fault, where a refused access really is a
+     * bug in the kernel.
+     *
+     * It is the wrong gate for a *user* fault, for two reasons.
+     *
+     * First, the VMA is the authority. Linux's handle_mm_fault() does not
+     * consult the P bit either: it looks the address up, and the vma's
+     * vm_flags decide whether the access is legitimate. "The page is present"
+     * and "this process may write here" are different questions, and only the
+     * second one belongs in a permission decision.
+     *
+     * Second, and concretely: the .bss tail of init's last PT_LOAD is
+     * deliberately left unmapped -- elf.c says so, and the fault path is
+     * supposed to fill it -- and the page genuinely is not present in the
+     * tables. Yet the CPU reported error code 0x6, bit 0 *clear*. Measured
+     * live, same boot: the PTE for the faulting page read zero, while both
+     * QEMU's -d int and the kernel's own frame said 0x6. Whichever way that
+     * discrepancy is explained, gating on the bit means a page that is
+     * provably absent gets refused for being "present", and userspace never
+     * starts. A VMA lookup plus a prot check answers the question the caller
+     * actually has, and is correct whichever way the bit reads.
+     *
+     * The kernel-side refusal is kept, below, for faults at or above
+     * MM_USER_LIMIT and for reserved-bit violations.
+     */
+    if (error_code & PF_RESERVED)
+        return -EFAULT;
 
-	/* Held across the whole fault, not just the lookup: the page allocated
-	 * below has to be mapped while the address space cannot be torn down, and
-	 * the VMA cannot be released while its page is being installed. */
-	flags = spinlock_irqsave(&mm->lock);
+    /* Held across the whole fault, not just the lookup: the page allocated
+     * below has to be mapped while the address space cannot be torn down, and
+     * the VMA cannot be released while its page is being installed. */
+    flags = spinlock_irqsave(&mm->lock);
 
-	vma = mm_find_vma(mm, virt);
-	if (!vma) {
-		klog(KLOG_DEBUG, "mm: fault %#lx, no VMA (err %#lx)\n",
-		     (unsigned long)virt, (unsigned long)error_code);
-		goto out;
-	}
+    vma = mm_find_vma(mm, virt);
+    if (!vma) {
+        klog(KLOG_DEBUG, "mm: fault %#lx, no VMA (err %#lx)\n",
+             (unsigned long)virt, (unsigned long)error_code);
+        goto out;
+    }
 
-	/*
-	 * File-backed mappings are not implementable yet. There is no page
-	 * cache, no read path from a struct file, and no offset convention
-	 * between a VMA's file_offset and anything on disk, so mapping a
-	 * zero-filled page here would hand the process a file it never read:
-	 * correct enough to pass a test that only checks the address is mapped,
-	 * wrong in every way that matters. The caller turns this into SIGSEGV,
-	 * which is the correct outcome for a mapping the kernel cannot honour.
-	 */
-	if (vma->file) {
-		klog(KLOG_DEBUG, "mm: fault %#lx, file-backed VMA unsupported\n",
-		     (unsigned long)virt);
-		goto out;
-	}
+    /*
+     * File-backed mappings are not implementable yet. There is no page
+     * cache, no read path from a struct file, and no offset convention
+     * between a VMA's file_offset and anything on disk, so mapping a
+     * zero-filled page here would hand the process a file it never read:
+     * correct enough to pass a test that only checks the address is mapped,
+     * wrong in every way that matters. The caller turns this into SIGSEGV,
+     * which is the correct outcome for a mapping the kernel cannot honour.
+     */
+    if (vma->file) {
+        klog(KLOG_DEBUG, "mm: fault %#lx, file-backed VMA unsupported\n",
+             (unsigned long)virt);
+        goto out;
+    }
 
-	if (!vma_allows(vma, error_code)) {
-		klog(KLOG_DEBUG,
-		     "mm: fault %#lx denied by VMA prot %#x (err %#lx)\n",
-		     (unsigned long)virt, vma->prot, (unsigned long)error_code);
-		rc = -EACCES;
-		goto out;
-	}
+    if (!vma_allows(vma, error_code)) {
+        klog(KLOG_DEBUG,
+             "mm: fault %#lx denied by VMA prot %#x (err %#lx)\n",
+             (unsigned long)virt, vma->prot, (unsigned long)error_code);
+        rc = -EACCES;
+        goto out;
+    }
 
-	/* Another CPU faulting the same address, or a caller that pre-faulted
-	 * through user_memory_write(), left the page present already. Handing
-	 * back the frame here rather than mapping it is what stops the retry
-	 * from turning into an allocation leak. */
-	{
-		/* Presence, not "non-zero physical address" -- see vmm_lookup_page(). */
-		phys_addr_t have = 0;
+    /* Another CPU faulting the same address, or a caller that pre-faulted
+     * through user_memory_write(), left the page present already. Handing
+     * back the frame here rather than mapping it is what stops the retry
+     * from turning into an allocation leak. */
+    {
+        /* Presence, not "non-zero physical address" -- see vmm_lookup_page(). */
+        phys_addr_t have = 0;
 
-		if (vmm_lookup_page(mm->pgd, virt, &have, NULL)) {
-			rc = 0;
-			goto out;
-		}
-	}
+        if (vmm_lookup_page(mm->pgd, virt, &have, NULL)) {
+            rc = 0;
+            goto out;
+        }
+    }
 
-	/* Zeroed because an anonymous page must read as zero, and pmm's PG_ZEROED
-	 * is a hint the caller cannot see: a page recycled from a previous
-	 * process, or from a page freed with contents still in it, is not zero.
-	 * The 4 KiB of stores per fault is cheaper than a process observing
-	 * another process's memory. */
-	page = pmm_alloc_page(0);
-	if (!page) {
-		rc = -ENOMEM;
-		goto out;
-	}
-	memset(phys_to_virt(page_to_phys(page)), 0, PAGE_SIZE);
+    /* Zeroed because an anonymous page must read as zero, and pmm's PG_ZEROED
+     * is a hint the caller cannot see: a page recycled from a previous
+     * process, or from a page freed with contents still in it, is not zero.
+     * The 4 KiB of stores per fault is cheaper than a process observing
+     * another process's memory. */
+    page = pmm_alloc_page(0);
+    if (!page) {
+        rc = -ENOMEM;
+        goto out;
+    }
+    memset(phys_to_virt(page_to_phys(page)), 0, PAGE_SIZE);
 
-	if (vmm_map_page(mm->pgd, virt, page_to_phys(page), vma->prot | VM_USER)) {
-		pmm_free_pages(page, 0);
-		rc = -ENOMEM;
-		goto out;
-	}
+    if (vmm_map_page(mm->pgd, virt, page_to_phys(page), vma->prot | VM_USER)) {
+        pmm_free_pages(page, 0);
+        rc = -ENOMEM;
+        goto out;
+    }
 
-	rc = 0;
+    rc = 0;
 
 out:
-	spinlock_unlock_irqrestore(&mm->lock, flags);
-	return rc;
+    spinlock_unlock_irqrestore(&mm->lock, flags);
+    return rc;
 }

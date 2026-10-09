@@ -17,38 +17,38 @@
 
 static inline void outb(uint16_t port, uint8_t val)
 {
-	__asm__ volatile("outb %0, %1" :: "a"(val), "Nd"(port) : "memory");
+    __asm__ volatile("outb %0, %1" :: "a"(val), "Nd"(port) : "memory");
 }
 
 static inline void outw(uint16_t port, uint16_t val)
 {
-	__asm__ volatile("outw %0, %1" :: "a"(val), "Nd"(port) : "memory");
+    __asm__ volatile("outw %0, %1" :: "a"(val), "Nd"(port) : "memory");
 }
 
 static inline void outl(uint16_t port, uint32_t val)
 {
-	__asm__ volatile("outl %0, %1" :: "a"(val), "Nd"(port) : "memory");
+    __asm__ volatile("outl %0, %1" :: "a"(val), "Nd"(port) : "memory");
 }
 
 static inline uint8_t inb(uint16_t port)
 {
-	uint8_t val;
-	__asm__ volatile("inb %1, %0" : "=a"(val) : "Nd"(port) : "memory");
-	return val;
+    uint8_t val;
+    __asm__ volatile("inb %1, %0" : "=a"(val) : "Nd"(port) : "memory");
+    return val;
 }
 
 static inline uint16_t inw(uint16_t port)
 {
-	uint16_t val;
-	__asm__ volatile("inw %1, %0" : "=a"(val) : "Nd"(port) : "memory");
-	return val;
+    uint16_t val;
+    __asm__ volatile("inw %1, %0" : "=a"(val) : "Nd"(port) : "memory");
+    return val;
 }
 
 static inline uint32_t inl(uint16_t port)
 {
-	uint32_t val;
-	__asm__ volatile("inl %1, %0" : "=a"(val) : "Nd"(port) : "memory");
-	return val;
+    uint32_t val;
+    __asm__ volatile("inl %1, %0" : "=a"(val) : "Nd"(port) : "memory");
+    return val;
 }
 
 /*
@@ -58,7 +58,7 @@ static inline uint32_t inl(uint16_t port)
  */
 static inline void io_wait(void)
 {
-	outb(0x80, 0);
+    outb(0x80, 0);
 }
 
 /* ---------------------------------------------------- interrupts ----------- */
@@ -72,119 +72,119 @@ static inline void io_wait(void)
  */
 static inline void cli(void)
 {
-	__asm__ volatile("cli" ::: "memory");
+    __asm__ volatile("cli" ::: "memory");
 }
 
 static inline void sti(void)
 {
-	__asm__ volatile("sti" ::: "memory");
+    __asm__ volatile("sti" ::: "memory");
 }
 
 static inline bool irqs_enabled(void)
 {
-	uint64_t flags;
-	__asm__ volatile("pushfq\n\tpopq %0" : "=r"(flags) :: "memory");
-	return (flags & (1 << 9)) != 0;
+    uint64_t flags;
+    __asm__ volatile("pushfq\n\tpopq %0" : "=r"(flags) :: "memory");
+    return (flags & (1 << 9)) != 0;
 }
 
 /* Save the current interrupt state and disable interrupts, returning the old
  * state. This is the correct way to take a short critical section. */
 static inline u64 irq_save(void)
 {
-	u64 flags;
+    u64 flags;
 
-	__asm__ volatile(
-		"pushfq\n\t"
-		"popq %0\n\t"
-		"cli"
-		: "=r"(flags)
-		:
-		: "memory");
-	return flags;
+    __asm__ volatile(
+        "pushfq\n\t"
+        "popq %0\n\t"
+        "cli"
+        : "=r"(flags)
+        :
+        : "memory");
+    return flags;
 }
 
 static inline void irq_restore(u64 flags)
 {
-	if (flags & (1 << 9))
-		__asm__ volatile("sti" ::: "memory");
+    if (flags & (1 << 9))
+        __asm__ volatile("sti" ::: "memory");
 }
 
 /* Halt until the next interrupt. Used by idle threads and panic paths. */
 static inline void hlt(void)
 {
-	__asm__ volatile("hlt");
+    __asm__ volatile("hlt");
 }
 
 /* Full memory barrier. x86 loads and stores are already ordered, so this only
  * has to keep the compiler from reordering. */
 static inline void cpu_barrier(void)
 {
-	__asm__ volatile("" ::: "memory");
+    __asm__ volatile("" ::: "memory");
 }
 
 /* Serialising fence: also waits for the instruction stream to drain, which is
  * required before writing timestamp counters whose reads must be ordered. */
 static inline void cpu_serialize(void)
 {
-	__asm__ volatile("mfence" ::: "memory");
+    __asm__ volatile("mfence" ::: "memory");
 }
 
 static inline void pause_cpu(void)
 {
-	/* PAUSE hints to the CPU that the thread is in a spin-wait loop, letting
-	 * it back off memory-order violation penalties and yield SMT resources. */
-	__asm__ volatile("pause");
+    /* PAUSE hints to the CPU that the thread is in a spin-wait loop, letting
+     * it back off memory-order violation penalties and yield SMT resources. */
+    __asm__ volatile("pause");
 }
 
 /* ------------------------------------------------------ control registers --- */
 
 static inline u64 read_cr0(void)
 {
-	u64 v;
-	__asm__ volatile("movq %%cr0, %0" : "=r"(v));
-	return v;
+    u64 v;
+    __asm__ volatile("movq %%cr0, %0" : "=r"(v));
+    return v;
 }
 
 static inline u64 read_cr2(void)
 {
-	u64 v;
-	__asm__ volatile("movq %%cr2, %0" : "=r"(v));
-	return v;
+    u64 v;
+    __asm__ volatile("movq %%cr2, %0" : "=r"(v));
+    return v;
 }
 
 static inline u64 read_cr3(void)
 {
-	u64 v;
-	__asm__ volatile("movq %%cr3, %0" : "=r"(v));
-	return v;
+    u64 v;
+    __asm__ volatile("movq %%cr3, %0" : "=r"(v));
+    return v;
 }
 
 static inline u64 read_cr4(void)
 {
-	u64 v;
-	__asm__ volatile("movq %%cr4, %0" : "=r"(v));
-	return v;
+    u64 v;
+    __asm__ volatile("movq %%cr4, %0" : "=r"(v));
+    return v;
 }
 
 static inline void write_cr0(u64 v)
 {
-	__asm__ volatile("movq %0, %%cr0" :: "r"(v) : "memory");
+    __asm__ volatile("movq %0, %%cr0" :: "r"(v) : "memory");
 }
 
 static inline void write_cr3(u64 v)
 {
-	__asm__ volatile("movq %0, %%cr3" :: "r"(v) : "memory");
+    __asm__ volatile("movq %0, %%cr3" :: "r"(v) : "memory");
 }
 
 static inline void write_cr4(u64 v)
 {
-	__asm__ volatile("movq %0, %%cr4" :: "r"(v) : "memory");
+    __asm__ volatile("movq %0, %%cr4" :: "r"(v) : "memory");
 }
 
 /* Invalidates the TLB entry for one virtual address. */
 static inline void invlpg(virt_addr_t addr)
 {
-	__asm__ volatile("invlpg (%0)" :: "r"(addr) : "memory");
+    __asm__ volatile("invlpg (%0)" :: "r"(addr) : "memory");
 }
 
 /*
@@ -197,7 +197,7 @@ static inline void invlpg(virt_addr_t addr)
  */
 static inline void flush_tlb(void)
 {
-	write_cr3(read_cr3());
+    write_cr3(read_cr3());
 }
 
 /* ---------------------------------------------------------------- MSRs ----- */
@@ -219,27 +219,27 @@ static inline void flush_tlb(void)
  */
 static inline u64 rdtsc(void)
 {
-	u32 lo, hi;
+    u32 lo, hi;
 
-	__asm__ volatile("lfence\n\trdtsc"
-			 : "=a"(lo), "=d"(hi)
-			 :
-			 : "memory");
-	return ((u64)hi << 32) | lo;
+    __asm__ volatile("lfence\n\trdtsc"
+             : "=a"(lo), "=d"(hi)
+             :
+             : "memory");
+    return ((u64)hi << 32) | lo;
 }
 
 /* Read the TSC as it appears on another CPU, for skew measurement. */
 static inline u64 rdtscp(u32 *aux)
 {
-	u32 lo, hi, a;
+    u32 lo, hi, a;
 
-	__asm__ volatile("rdtscp"
-			 : "=a"(lo), "=d"(hi), "=c"(a)
-			 :
-			 : "memory");
-	if (aux)
-		*aux = a;
-	return ((u64)hi << 32) | lo;
+    __asm__ volatile("rdtscp"
+             : "=a"(lo), "=d"(hi), "=c"(a)
+             :
+             : "memory");
+    if (aux)
+        *aux = a;
+    return ((u64)hi << 32) | lo;
 }
 
 /*
@@ -278,16 +278,16 @@ static inline u64 rdtscp(u32 *aux)
 
 static inline u64 rdmsr(uint32_t msr)
 {
-	u32 lo, hi;
+    u32 lo, hi;
 
-	__asm__ volatile("rdmsr" : "=a"(lo), "=d"(hi) : "c"(msr));
-	return ((u64)hi << 32) | lo;
+    __asm__ volatile("rdmsr" : "=a"(lo), "=d"(hi) : "c"(msr));
+    return ((u64)hi << 32) | lo;
 }
 
 static inline void wrmsr(uint32_t msr, u64 val)
 {
-	__asm__ volatile("wrmsr" :: "c"(msr), "a"((uint32_t)val),
-			 "d"((uint32_t)(val >> 32)));
+    __asm__ volatile("wrmsr" :: "c"(msr), "a"((uint32_t)val),
+             "d"((uint32_t)(val >> 32)));
 }
 
 /* --------------------------------------------------------------- CPUID ----- */
@@ -301,11 +301,11 @@ static inline void wrmsr(uint32_t msr, u64 val)
  * struct return.
  */
 static inline void cpuid(uint32_t leaf, uint32_t subleaf,
-			 uint32_t *a, uint32_t *b, uint32_t *c, uint32_t *d)
+             uint32_t *a, uint32_t *b, uint32_t *c, uint32_t *d)
 {
-	__asm__ volatile("cpuid"
-			 : "=a"(*a), "=b"(*b), "=c"(*c), "=d"(*d)
-			 : "a"(leaf), "c"(subleaf));
+    __asm__ volatile("cpuid"
+             : "=a"(*a), "=b"(*b), "=c"(*c), "=d"(*d)
+             : "a"(leaf), "c"(subleaf));
 }
 
 #define CPUID_MAX_LEAF        0x00000000u

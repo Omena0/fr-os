@@ -15,18 +15,18 @@ ENTRY(_start)
 
 SECTIONS
 {
-	. = 0x7C00;
+    . = 0x7C00;
 
-	.boot : {
-		*(.text)
-		*(.rodata)
-		*(.data)
-		*(.bss)
-	}
+    .boot : {
+        *(.text)
+        *(.rodata)
+        *(.data)
+        *(.bss)
+    }
 
-	/DISCARD/ : {
-		*(.comment)
-		*(.note*)
-		*(.eh_frame*)
-	}
+    /DISCARD/ : {
+        *(.comment)
+        *(.note*)
+        *(.eh_frame*)
+    }
 }

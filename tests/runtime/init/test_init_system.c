@@ -235,42 +235,42 @@ static int test_strncat_basic(void) {
 /* ===== File operations ===== */
 
 static int test_fread_basic(void) {
-	/* read() cannot be exercised without a real file descriptor in
-	 * this test context; skip rather than claim it passed. */
-	return TEST_SKIP;
+    /* read() cannot be exercised without a real file descriptor in
+     * this test context; skip rather than claim it passed. */
+    return TEST_SKIP;
 }
 
 static int test_fwrite_basic(void) {
-	/* write() - can test with stdout */
-	const char *msg = "test\n";
-	ssize_t ret = write(STDOUT_FILENO, msg, 5);
-	TEST_ASSERT_EQ(ret, 5, "write to stdout should succeed");
-	return TEST_PASS;
+    /* write() - can test with stdout */
+    const char *msg = "test\n";
+    ssize_t ret = write(STDOUT_FILENO, msg, 5);
+    TEST_ASSERT_EQ(ret, 5, "write to stdout should succeed");
+    return TEST_PASS;
 }
 
 static int test_fread_line_basic(void) {
-	/* readline() cannot be exercised without a real file descriptor;
-	 * skip rather than claim it passed. */
-	return TEST_SKIP;
+    /* readline() cannot be exercised without a real file descriptor;
+     * skip rather than claim it passed. */
+    return TEST_SKIP;
 }
 
 static int test_fputs_basic(void) {
-	const char *msg = "test\n";
-	int ret = puts(msg);
-	TEST_ASSERT(ret == 4, "puts should return length without newline");
-	return TEST_PASS;
+    const char *msg = "test\n";
+    int ret = puts(msg);
+    TEST_ASSERT(ret == 4, "puts should return length without newline");
+    return TEST_PASS;
 }
 
 static int test_getchar_basic(void) {
-	/* getchar() returns EOF when there is no input; that is not a
-	 * meaningful test of the function, so skip it. */
-	return TEST_SKIP;
+    /* getchar() returns EOF when there is no input; that is not a
+     * meaningful test of the function, so skip it. */
+    return TEST_SKIP;
 }
 
 static int test_getline_basic(void) {
-	/* getline() returns -1 on EOF when there is no input; that is not
-	 * a meaningful test of the function, so skip it. */
-	return TEST_SKIP;
+    /* getline() returns -1 on EOF when there is no input; that is not
+     * a meaningful test of the function, so skip it. */
+    return TEST_SKIP;
 }
 
 /* ===== Time functions ===== */
@@ -307,17 +307,17 @@ static int test_getppid_basic(void) {
 }
 
 static int test_exit_basic(void) {
-	/* exit() cannot be tested directly - it would terminate the
-	 * process and the test harness with it. Skip rather than claim
-	 * it passed. */
-	return TEST_SKIP;
+    /* exit() cannot be tested directly - it would terminate the
+     * process and the test harness with it. Skip rather than claim
+     * it passed. */
+    return TEST_SKIP;
 }
 
 static int test_abort_basic(void) {
-	/* abort() cannot be tested directly - it would terminate the
-	 * process and the test harness with it. Skip rather than claim
-	 * it passed. */
-	return TEST_SKIP;
+    /* abort() cannot be tested directly - it would terminate the
+     * process and the test harness with it. Skip rather than claim
+     * it passed. */
+    return TEST_SKIP;
 }
 
 /* ===== Test Suite Registration ===== */

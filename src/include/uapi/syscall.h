@@ -167,45 +167,45 @@
 /* ------------------------------------------------------------- structures -- */
 
 struct timespec {
-	int64_t tv_sec;
-	int64_t tv_nsec;
+    int64_t tv_sec;
+    int64_t tv_nsec;
 };
 
 struct timeval {
-	int64_t tv_sec;
-	int64_t tv_usec;
+    int64_t tv_sec;
+    int64_t tv_usec;
 };
 
 /* Enough for the stat fields this kernel actually maintains, with `size` so a
  * future libc can pass a larger struct and have the kernel fill what it knows
  * without a new syscall number. */
 struct kstat {
-	uint64_t size;        /* total size in bytes */
-	uint64_t blksize;     /* preferred I/O block size */
-	uint64_t blocks;      /* blocks occupied (512-byte units) */
-	uint64_t ino;         /* inode number */
-	uint32_t mode;        /* file type and permission bits */
-	uint32_t nlink;       /* hard link count */
-	uint32_t uid;         /* owning user */
-	uint32_t gid;         /* owning group */
-	int64_t  atime_sec;
-	uint64_t atime_nsec;
-	int64_t  mtime_sec;
-	uint64_t mtime_nsec;
-	int64_t  ctime_sec;
-	uint64_t ctime_nsec;
+    uint64_t size;        /* total size in bytes */
+    uint64_t blksize;     /* preferred I/O block size */
+    uint64_t blocks;      /* blocks occupied (512-byte units) */
+    uint64_t ino;         /* inode number */
+    uint32_t mode;        /* file type and permission bits */
+    uint32_t nlink;       /* hard link count */
+    uint32_t uid;         /* owning user */
+    uint32_t gid;         /* owning group */
+    int64_t  atime_sec;
+    uint64_t atime_nsec;
+    int64_t  mtime_sec;
+    uint64_t mtime_nsec;
+    int64_t  ctime_sec;
+    uint64_t ctime_nsec;
 };
 
 /* Directory entry returned by SYS_getdents. `d_off` is the cookie to pass back
  * to resume iteration, matching the POSIX readdir contract rather than
  * requiring a cursor object. */
 struct kdirent {
-	uint64_t d_ino;
-	int64_t  d_off;
-	uint16_t d_reclen;
-	uint8_t  d_type;
-	uint8_t  d_namlen;
-	char     d_name[];
+    uint64_t d_ino;
+    int64_t  d_off;
+    uint16_t d_reclen;
+    uint8_t  d_type;
+    uint8_t  d_namlen;
+    char     d_name[];
 };
 
 /* clone(2) flags. Kept compatible with the widely-deployed Linux values so
@@ -265,8 +265,8 @@ struct kdirent {
 #define IOC_READ  2U
 
 #define _IOC(dir, type, nr, size) \
-	(((dir) << IOC_DIRSHIFT) | ((type) << IOC_TYPESHIFT) | \
-	 ((nr) << IOC_NRSHIFT) | ((size) << IOC_SIZESHIFT))
+    (((dir) << IOC_DIRSHIFT) | ((type) << IOC_TYPESHIFT) | \
+     ((nr) << IOC_NRSHIFT) | ((size) << IOC_SIZESHIFT))
 
 #define _IOR(type, nr, size) _IOC(IOC_READ,  type, nr, sizeof(size))
 #define _IOW(type, nr, size) _IOC(IOC_WRITE, type, nr, sizeof(size))
@@ -279,14 +279,14 @@ struct kdirent {
 #define TCGETS       _IOR('t', 16, struct termios)
 
 struct winsize {
-	uint16_t ws_row, ws_col;
-	uint16_t ws_xpixel, ws_ypixel;
+    uint16_t ws_row, ws_col;
+    uint16_t ws_xpixel, ws_ypixel;
 };
 
 struct termios {
-	uint32_t c_iflag, c_oflag, c_cflag, c_lflag;
-	uint8_t  c_line;
-	uint8_t  c_cc[32];
+    uint32_t c_iflag, c_oflag, c_cflag, c_lflag;
+    uint8_t  c_line;
+    uint8_t  c_cc[32];
 };
 
 /* futex operations. */

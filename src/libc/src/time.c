@@ -28,79 +28,79 @@ extern int sys_nanosleep(const struct timespec *req, struct timespec *rem);
 
 int clock_gettime(clockid_t clk_id, struct timespec *tp)
 {
-	switch (clk_id) {
-	case CLOCK_REALTIME:
-	case CLOCK_MONOTONIC:
-		return sys_clock_gettime(clk_id, tp);
-	case CLOCK_PROCESS_CPUTIME_ID:
-		/* Approximate: map to monotonic since we don't track per-process CPU time */
-		return sys_clock_gettime(CLOCK_MONOTONIC, tp);
-	default:
-		__errno = EINVAL;
-		return -1;
-	}
+    switch (clk_id) {
+    case CLOCK_REALTIME:
+    case CLOCK_MONOTONIC:
+        return sys_clock_gettime(clk_id, tp);
+    case CLOCK_PROCESS_CPUTIME_ID:
+        /* Approximate: map to monotonic since we don't track per-process CPU time */
+        return sys_clock_gettime(CLOCK_MONOTONIC, tp);
+    default:
+        __errno = EINVAL;
+        return -1;
+    }
 }
 
 int clock_getres(clockid_t clk_id, struct timespec *res)
 {
-	switch (clk_id) {
-	case CLOCK_REALTIME:
-	case CLOCK_MONOTONIC:
-	case CLOCK_PROCESS_CPUTIME_ID:
-		if (res) {
-			res->tv_sec = 0;
-			res->tv_nsec = 1;  /* 1ns resolution */
-		}
-		return 0;
-	default:
-		__errno = EINVAL;
-		return -1;
-	}
+    switch (clk_id) {
+    case CLOCK_REALTIME:
+    case CLOCK_MONOTONIC:
+    case CLOCK_PROCESS_CPUTIME_ID:
+        if (res) {
+            res->tv_sec = 0;
+            res->tv_nsec = 1;  /* 1ns resolution */
+        }
+        return 0;
+    default:
+        __errno = EINVAL;
+        return -1;
+    }
 }
 
 long time(long *t)
 {
-	struct timespec ts;
-	if (clock_gettime(CLOCK_REALTIME, &ts) == -1)
-		return -1;
-	if (t)
-		*t = ts.tv_sec;
-	return ts.tv_sec;
+    struct timespec ts;
+    if (clock_gettime(CLOCK_REALTIME, &ts) == -1)
+        return -1;
+    if (t)
+        *t = ts.tv_sec;
+    return ts.tv_sec;
 }
 
 int nanosleep(const struct timespec *req, struct timespec *rem)
 {
-	struct timespec tmp = *req;
-	struct timespec rem_val = {0,0};
-	int ret;
+    struct timespec tmp = *req;
+    struct timespec rem_val = {0,0};
+    int ret;
 
-	/* EINTR retry pattern, matching sleep()/usleep(2). The kernel's
-	 * sys_nanosleep currently never returns -EINTR (it blocks to
-	 * completion via sched_sleep_ns), so the loop is a no-op today —
-	 * but it keeps the wrapper POSIX-compliant once the kernel grows
-	 * signal-interruptible sleeps. */
-	do {
-		ret = sys_nanosleep(&tmp, rem ? &rem_val : NULL);
-		if (ret == -1) {
-			if (__errno != EINTR)
-				return -1;
-			/* EINTR: retry with same request (kernel doesn't yet
-			 * populate remaining time, so we can't do better) */
-		}
-	} while (ret == -1);
+    /* EINTR retry pattern, matching sleep()/usleep(2). The kernel's
+     * sys_nanosleep currently never returns -EINTR (it blocks to
+     * completion via sched_sleep_ns), so the loop is a no-op today —
+     * but it keeps the wrapper POSIX-compliant once the kernel grows
+     * signal-interruptible sleeps. */
+    do {
+        ret = sys_nanosleep(&tmp, rem ? &rem_val : NULL);
+        if (ret == -1) {
+            if (__errno != EINTR)
+                return -1;
+            /* EINTR: retry with same request (kernel doesn't yet
+             * populate remaining time, so we can't do better) */
+        }
+    } while (ret == -1);
 
-	if (rem)
-		*rem = rem_val;
-	return 0;
+    if (rem)
+        *rem = rem_val;
+    return 0;
 }
 
 int gettimeofday(struct timeval *tv, void *tz)
 {
-	(void)tz;  /* timezone not supported */
-	struct timespec ts;
-	if (clock_gettime(CLOCK_REALTIME, &ts) == -1)
-		return -1;
-	tv->tv_sec = ts.tv_sec;
-	tv->tv_usec = ts.tv_nsec / 1000;
-	return 0;
+    (void)tz;  /* timezone not supported */
+    struct timespec ts;
+    if (clock_gettime(CLOCK_REALTIME, &ts) == -1)
+        return -1;
+    tv->tv_sec = ts.tv_sec;
+    tv->tv_usec = ts.tv_nsec / 1000;
+    return 0;
 }

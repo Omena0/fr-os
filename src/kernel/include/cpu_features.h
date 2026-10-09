@@ -249,16 +249,16 @@
 
 /* The minimum XCR0 for an AVX-512 encoding (EVEX) to execute. */
 #define XCR0_REQUIRED_AVX512 \
-	(XCR0_SSE | XCR0_AVX | XCR0_OPMASK | XCR0_ZMM_HI256 | XCR0_HI16_ZMM)
+    (XCR0_SSE | XCR0_AVX | XCR0_OPMASK | XCR0_ZMM_HI256 | XCR0_HI16_ZMM)
 
 /* Read CR0. 64-bit operand: in long mode CR0 is the full 64-bit register, and
  * the upper half reads as zero on every part that has a 64-bit CR0. */
 static inline uint64_t cpu_read_cr0(void)
 {
-	uint64_t v;
+    uint64_t v;
 
-	__asm__ volatile("mov %%cr0, %0" : "=r"(v));
-	return v;
+    __asm__ volatile("mov %%cr0, %0" : "=r"(v));
+    return v;
 }
 
 /*
@@ -289,57 +289,57 @@ static inline uint64_t cpu_read_xcr0(void);
 static inline bool cpu_can_use_ymm(void);
 
 struct cpu_features {
-	char     vendor[13];
-	uint32_t max_leaf;           /* highest basic CPUID leaf */
-	uint32_t max_ext_leaf;       /* highest extended CPUID leaf */
-	uint32_t family, model, stepping;
+    char     vendor[13];
+    uint32_t max_leaf;           /* highest basic CPUID leaf */
+    uint32_t max_ext_leaf;       /* highest extended CPUID leaf */
+    uint32_t family, model, stepping;
 
-	/*
-	 * The raw leaf registers, kept verbatim. Every CPU_FEATURE_* constant
-	 * above is defined as a specific bit of one of these, so anything not
-	 * given a feature ID is still reachable here rather than invisible.
-	 */
-	uint32_t basic_edx;          /* CPUID leaf 1 EDX */
-	uint32_t basic_ecx;          /* CPUID leaf 1 ECX */
-	uint32_t extended_ecx;       /* CPUID 0x80000001 ECX */
-	uint32_t extended_edx;       /* CPUID 0x80000001 EDX */
-	uint32_t leaf7_ebx;          /* CPUID leaf 7.0 EBX */
-	uint32_t leaf7_ecx;          /* CPUID leaf 7.0 ECX */
-	uint32_t leaf7_edx;          /* CPUID leaf 7.0 EDX */
+    /*
+     * The raw leaf registers, kept verbatim. Every CPU_FEATURE_* constant
+     * above is defined as a specific bit of one of these, so anything not
+     * given a feature ID is still reachable here rather than invisible.
+     */
+    uint32_t basic_edx;          /* CPUID leaf 1 EDX */
+    uint32_t basic_ecx;          /* CPUID leaf 1 ECX */
+    uint32_t extended_ecx;       /* CPUID 0x80000001 ECX */
+    uint32_t extended_edx;       /* CPUID 0x80000001 EDX */
+    uint32_t leaf7_ebx;          /* CPUID leaf 7.0 EBX */
+    uint32_t leaf7_ecx;          /* CPUID leaf 7.0 ECX */
+    uint32_t leaf7_edx;          /* CPUID leaf 7.0 EDX */
 
-	/* Cached answers, computed once in cpu_features_init(). */
-	/*
-	 * One bit per feature ID from the block above — NOT one bit per CPUID
-	 * bit. `features 0x%016llx` in the boot log is therefore a statement
-	 * that can be read back against the ID table, which it could not be
-	 * while the IDs were CPUID bit numbers: nine bit positions carried two or
-	 * three different meanings each.
-	 */
-	uint64_t feature_mask;
-	uint32_t numa_nodes;         /* from CPUID leaf 0xB */
-	/*
-	 * From CPUID leaf 1 EBX[23:16], which is only defined when the
-	 * hyper-threading bit (1:EDX 28) is set. Normalised to at least 1 in
-	 * cpu_features_init(), so this field is never the "0 logical CPUs" that
-	 * main.c used to print against cpu_features.c's own `?: 1`.
-	 */
-	uint32_t logical_cpus;
-	uint64_t tsc_khz;            /* TSC frequency; 0 if it could not be measured */
-	/*
-	 * How tsc_khz was obtained, so the log can say so. A measured frequency
-	 * presented as if it came from a crystal ratio is worse than no number:
-	 * a reader has no way to know how much to trust it. 0 = not measured,
-	 * 1 = CPUID 0x15 crystal ratio, 2 = timed against PIT channel 2.
-	 */
-	uint8_t tsc_source;
-	/* CPUID 0x80000007 EDX bit 8. Not 0x80000001 EDX bit 8, which is
-	 * reserved — the old read could never report a constant TSC. */
-	bool     invariant_tsc;
-	bool     tsc_deadline_timer; /* CPUID 1:ECX 24 */
-	bool     hypervisor;         /* CPUID 1:ECX 31 */
-	bool     apic;               /* CPUID 1:EDX 9 */
-	bool     has_1gb_pages;      /* CPUID 0x80000001 EDX 26 (PDPE1GB) */
-	bool     has_5level_paging;  /* CPUID 0x80000008 ECX 16 */
+    /* Cached answers, computed once in cpu_features_init(). */
+    /*
+     * One bit per feature ID from the block above — NOT one bit per CPUID
+     * bit. `features 0x%016llx` in the boot log is therefore a statement
+     * that can be read back against the ID table, which it could not be
+     * while the IDs were CPUID bit numbers: nine bit positions carried two or
+     * three different meanings each.
+     */
+    uint64_t feature_mask;
+    uint32_t numa_nodes;         /* from CPUID leaf 0xB */
+    /*
+     * From CPUID leaf 1 EBX[23:16], which is only defined when the
+     * hyper-threading bit (1:EDX 28) is set. Normalised to at least 1 in
+     * cpu_features_init(), so this field is never the "0 logical CPUs" that
+     * main.c used to print against cpu_features.c's own `?: 1`.
+     */
+    uint32_t logical_cpus;
+    uint64_t tsc_khz;            /* TSC frequency; 0 if it could not be measured */
+    /*
+     * How tsc_khz was obtained, so the log can say so. A measured frequency
+     * presented as if it came from a crystal ratio is worse than no number:
+     * a reader has no way to know how much to trust it. 0 = not measured,
+     * 1 = CPUID 0x15 crystal ratio, 2 = timed against PIT channel 2.
+     */
+    uint8_t tsc_source;
+    /* CPUID 0x80000007 EDX bit 8. Not 0x80000001 EDX bit 8, which is
+     * reserved — the old read could never report a constant TSC. */
+    bool     invariant_tsc;
+    bool     tsc_deadline_timer; /* CPUID 1:ECX 24 */
+    bool     hypervisor;         /* CPUID 1:ECX 31 */
+    bool     apic;               /* CPUID 1:EDX 9 */
+    bool     has_1gb_pages;      /* CPUID 0x80000001 EDX 26 (PDPE1GB) */
+    bool     has_5level_paging;  /* CPUID 0x80000008 ECX 16 */
 };
 
 extern struct cpu_features cpu_features;
@@ -349,7 +349,7 @@ void cpu_features_init(void);
 /* Test one CPU_FEATURE_* bit. */
 static inline bool cpu_has(uint64_t feature)
 {
-	return (cpu_features.feature_mask & feature) != 0;
+    return (cpu_features.feature_mask & feature) != 0;
 }
 
 /*
@@ -362,17 +362,17 @@ static inline bool cpu_has(uint64_t feature)
  */
 static inline bool cpu_has_avx(void)
 {
-	return (cpu_features.basic_ecx & (1u << 27)) != 0;  /* AVX     */
+    return (cpu_features.basic_ecx & (1u << 27)) != 0;  /* AVX     */
 }
 
 static inline bool cpu_has_osxsave(void)
 {
-	return (cpu_features.basic_ecx & (1u << 28)) != 0;  /* OSXSAVE */
+    return (cpu_features.basic_ecx & (1u << 28)) != 0;  /* OSXSAVE */
 }
 
 static inline bool cpu_has_xsave(void)
 {
-	return (cpu_features.basic_ecx & (1u << 26)) != 0;  /* XSAVE   */
+    return (cpu_features.basic_ecx & (1u << 26)) != 0;  /* XSAVE   */
 }
 
 /*
@@ -382,29 +382,29 @@ static inline bool cpu_has_xsave(void)
  */
 static inline uint64_t cpu_read_cr4(void)
 {
-	uint64_t v;
+    uint64_t v;
 
-	__asm__ volatile("mov %%cr4, %0" : "=r"(v));
-	return v;
+    __asm__ volatile("mov %%cr4, %0" : "=r"(v));
+    return v;
 }
 
 static inline uint64_t cpu_read_xcr0(void)
 {
-	uint32_t lo, hi;
+    uint32_t lo, hi;
 
-	if (!cpu_has_osxsave() || !(cpu_read_cr4() & CR4_OSXSAVE))
-		return 0;
-	__asm__ volatile("xgetbv" : "=a"(lo), "=d"(hi) : "c"(0));
-	return ((uint64_t)hi << 32) | lo;
+    if (!cpu_has_osxsave() || !(cpu_read_cr4() & CR4_OSXSAVE))
+        return 0;
+    __asm__ volatile("xgetbv" : "=a"(lo), "=d"(hi) : "c"(0));
+    return ((uint64_t)hi << 32) | lo;
 }
 
 static inline bool cpu_can_use_ymm(void)
 {
-	if (!cpu_has_avx() || !cpu_has_osxsave())
-		return false;
-	if (cpu_read_cr0() & CR0_TS)
-		return false;  /* #NM on the first SSE or x87 instruction */
-	return (cpu_read_xcr0() & XCR0_REQUIRED_AVX) == XCR0_REQUIRED_AVX;
+    if (!cpu_has_avx() || !cpu_has_osxsave())
+        return false;
+    if (cpu_read_cr0() & CR0_TS)
+        return false;  /* #NM on the first SSE or x87 instruction */
+    return (cpu_read_xcr0() & XCR0_REQUIRED_AVX) == XCR0_REQUIRED_AVX;
 }
 
 /* Read the vendor string. */

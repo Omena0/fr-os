@@ -21,12 +21,12 @@ BUILDDIR := build
 all: $(BUILDDIR)/disk.img
 
 clean:
-	rm -rf $(BUILDDIR)
+    rm -rf $(BUILDDIR)
 
 run: all
-	$(QEMU) -enable-kvm -cpu host -smp 18 -m 4G \
-	    -drive format=raw,file=$(BUILDDIR)/disk.img \
-	    -serial stdio -display gtk -no-reboot
+    $(QEMU) -enable-kvm -cpu host -smp 18 -m 4G \
+        -drive format=raw,file=$(BUILDDIR)/disk.img \
+        -serial stdio -display gtk -no-reboot
 
 iso: $(BUILDDIR)/os.iso
 
@@ -52,11 +52,11 @@ BOOT_STAGE1_SRC := src/boot/stage1.asm
 BOOT_STAGE2_SRC := $(wildcard src/boot/stage2/*.c src/boot/stage2/*.asm)
 
 $(BUILDDIR)/stage1.bin: $(BOOT_STAGE1_SRC)
-	$(NASM) -f bin -o $@ $<
+    $(NASM) -f bin -o $@ $<
 
 $(BUILDDIR)/stage2.elf: $(BOOT_STAGE2_SRC)
-	i686-elf-gcc -m32 -ffreestanding -nostdlib -o $@ $^ \
-	    -T src/boot/stage2/link.ld
+    i686-elf-gcc -m32 -ffreestanding -nostdlib -o $@ $^ \
+        -T src/boot/stage2/link.ld
 ```
 
 ### `src/kernel/Makefile.inc`
@@ -68,8 +68,8 @@ KERNEL_CFLAGS := -ffreestanding -nostdlib -mno-red-zone -mno-mmx -mno-sse \
     -mno-implicit-float
 
 $(BUILDDIR)/kernel.elf: $(KERNEL_SRCS)
-	$(CC) $(KERNEL_CFLAGS) -o $@ $^ -T src/kernel/link.ld
-	$(OBJCOPY) --strip-debug -O binary $@ $(BUILDDIR)/kernel.bin
+    $(CC) $(KERNEL_CFLAGS) -o $@ $^ -T src/kernel/link.ld
+    $(OBJCOPY) --strip-debug -O binary $@ $(BUILDDIR)/kernel.bin
 ```
 
 ## Key Compiler Flags

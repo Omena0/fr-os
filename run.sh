@@ -48,10 +48,10 @@ DEBUG="${DEBUG:-0}"
 # `set -e` a false test on the left of && makes the whole list return non-zero,
 # and the shell exits on a statement that looks like it should be harmless.
 note() {
-	if [ "$DEBUG" = "1" ]; then
-		echo "run.sh: $*" >&2
-	fi
-	return 0
+    if [ "$DEBUG" = "1" ]; then
+        echo "run.sh: $*" >&2
+    fi
+    return 0
 }
 
 IMAGE="${IMAGE:-build/os.img}"
@@ -103,11 +103,11 @@ RUN_TIMEOUT="${RUN_TIMEOUT:-}"
 # cannot yet handle. QEMU has no standalone -no-acpi option; it is a property
 # of the machine type, which is why it appears on -machine rather than here.
 QEMU_ARGS=(
-	-drive "file=${IMAGE},format=raw,if=ide,index=0,media=disk"
-	-m "$MEM"
-	-smp "$SMP"
-	-machine "${MACHINE:-pc,acpi=off}"
-	-no-reboot
+    -drive "file=${IMAGE},format=raw,if=ide,index=0,media=disk"
+    -m "$MEM"
+    -smp "$SMP"
+    -machine "${MACHINE:-pc,acpi=off}"
+    -no-reboot
 )
 
 # Accelerator.
@@ -127,14 +127,14 @@ QEMU_ARGS=(
 # while the GS bug was live came from TCG, so a difference between the two is
 # more likely to be a real difference than a configuration artefact.
 if [ -n "${FORCE_TCG:-}" ]; then
-	QEMU_ARGS+=(-cpu max)
-	note "FORCE_TCG=1, using TCG emulation"
+    QEMU_ARGS+=(-cpu max)
+    note "FORCE_TCG=1, using TCG emulation"
 elif [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
-	QEMU_ARGS+=(-enable-kvm -cpu host)
-	note "using KVM (-cpu host); FORCE_TCG=1 to compare under emulation"
+    QEMU_ARGS+=(-enable-kvm -cpu host)
+    note "using KVM (-cpu host); FORCE_TCG=1 to compare under emulation"
 else
-	QEMU_ARGS+=(-cpu max)
-	note "/dev/kvm not usable, falling back to TCG emulation"
+    QEMU_ARGS+=(-cpu max)
+    note "/dev/kvm not usable, falling back to TCG emulation"
 fi
 
 # Serial to the terminal and to a log file. The log is what a test or a bug
@@ -168,14 +168,14 @@ fi
 # mux=on makes the stdio chardev bidirectional so input from the terminal
 # reaches the guest's COM1 receive interrupt.
 QEMU_ARGS+=(
-	-chardev stdio,id=ser0,signal=off,logfile=$LOG
-	-serial chardev:ser0
+    -chardev stdio,id=ser0,signal=off,logfile=$LOG
+    -serial chardev:ser0
 )
 
 # Debug console for port 0xE9 output (kernel markers)
 DEBUG_LOG="${LOG%.log}.debug"
 QEMU_ARGS+=(
-	-debugcon "file:$DEBUG_LOG"
+    -debugcon "file:$DEBUG_LOG"
 )
 
 # A graphical display only when there is somewhere to put it. The kernel drives
@@ -194,19 +194,19 @@ QEMU_ARGS+=(-device VGA)
 # serial log -- the framebuffer is the same bytes, arriving later and over the top
 # of everything else.
 if [ -n "${HEADLESS:-}" ]; then
-	QEMU_ARGS+=(-display none)
-	note "HEADLESS=1, no display"
+    QEMU_ARGS+=(-display none)
+    note "HEADLESS=1, no display"
 elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
-	QEMU_ARGS+=(-display gtk)
+    QEMU_ARGS+=(-display gtk)
 else
-	QEMU_ARGS+=(-display none)
+    QEMU_ARGS+=(-display none)
 fi
 
 if [ "${1:-}" = "--gdb" ]; then
-	note "GDB stub listening on 127.0.0.1:1234"
-	note "in another shell, run: gdb build/kernel.elf"
-	QEMU_ARGS+=(-s -S)
-	shift
+    note "GDB stub listening on 127.0.0.1:1234"
+    note "in another shell, run: gdb build/kernel.elf"
+    QEMU_ARGS+=(-s -S)
+    shift
 fi
 
 mkdir -p build
@@ -233,24 +233,24 @@ qemu_pid=""
 watchdog_pid=""
 
 stop_qemu() {
-	[ -n "$qemu_pid" ] || return 0
-	kill -0 "$qemu_pid" 2>/dev/null || return 0
-	kill -TERM "$qemu_pid" 2>/dev/null || true
+    [ -n "$qemu_pid" ] || return 0
+    kill -0 "$qemu_pid" 2>/dev/null || return 0
+    kill -TERM "$qemu_pid" 2>/dev/null || true
 }
 
 cleanup() {
-	# Every step here is `|| true`, and that is load-bearing rather than
-	# stylistic. Under `set -e`, `[ -n "$x" ] && kill "$x"` is a statement whose
-	# exit status is the status of the whole list: when the variable is empty,
-	# or the process is already gone, the list returns non-zero and the shell
-	# exits -- from inside a trap, on the way to reporting what happened. That
-	# is why a perfectly good bounded run exited 1 with `timed_out=1` already
-	# decided and the "stopped after Ns" message two lines away: the script died
-	# in cleanup, silently, before reaching it.
-	[ -n "$watchdog_pid" ] && kill "$watchdog_pid" 2>/dev/null || true
-	watchdog_pid=""
-	stop_qemu
-	return 0
+    # Every step here is `|| true`, and that is load-bearing rather than
+    # stylistic. Under `set -e`, `[ -n "$x" ] && kill "$x"` is a statement whose
+    # exit status is the status of the whole list: when the variable is empty,
+    # or the process is already gone, the list returns non-zero and the shell
+    # exits -- from inside a trap, on the way to reporting what happened. That
+    # is why a perfectly good bounded run exited 1 with `timed_out=1` already
+    # decided and the "stopped after Ns" message two lines away: the script died
+    # in cleanup, silently, before reaching it.
+    [ -n "$watchdog_pid" ] && kill "$watchdog_pid" 2>/dev/null || true
+    watchdog_pid=""
+    stop_qemu
+    return 0
 }
 trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM
@@ -260,7 +260,7 @@ trap cleanup EXIT
 # receives terminal input. Agents and CI can opt into background mode with
 # RUN_TIMEOUT=N, which still logs to $LOG but does not accept interactive input.
 if [ -z "$RUN_TIMEOUT" ] || [ "$RUN_TIMEOUT" = "0" ]; then
-	exec qemu-system-x86_64 "${QEMU_ARGS[@]}" "$@"
+    exec qemu-system-x86_64 "${QEMU_ARGS[@]}" "$@"
 fi
 
 qemu-system-x86_64 "${QEMU_ARGS[@]}" "$@" &
@@ -285,37 +285,37 @@ qemu_pid=$!
 watchdog_marker="${LOG}.watchdog"
 rm -f "$watchdog_marker"
 if [ "$RUN_TIMEOUT" -gt 0 ] 2>/dev/null; then
-	( sleep "$RUN_TIMEOUT"
-	  : > "$watchdog_marker"
-	  kill -TERM "$qemu_pid" 2>/dev/null || true ) &
-	watchdog_pid=$!
+    ( sleep "$RUN_TIMEOUT"
+      : > "$watchdog_marker"
+      kill -TERM "$qemu_pid" 2>/dev/null || true ) &
+    watchdog_pid=$!
 fi
 
 timed_out=0
 while :; do
-	if wait "$qemu_pid"; then
-		status=0
-	else
-		status=$?
-	fi
+    if wait "$qemu_pid"; then
+        status=0
+    else
+        status=$?
+    fi
 
-	# A watchdog stop and a clean shutdown are indistinguishable by exit code
-	# alone, because QEMU handles SIGTERM itself and reports a non-zero status
-	# for it. The marker is what distinguishes them.
-	if [ -e "$watchdog_marker" ]; then
-		timed_out=1
-	fi
+    # A watchdog stop and a clean shutdown are indistinguishable by exit code
+    # alone, because QEMU handles SIGTERM itself and reports a non-zero status
+    # for it. The marker is what distinguishes them.
+    if [ -e "$watchdog_marker" ]; then
+        timed_out=1
+    fi
 
-	# Whether QEMU exited on its own or was asked to stop, give it a bounded
-	# window to flush the chardev before the log is read. Reading immediately
-	# after `wait` returns is what truncates a serial log.
-	for _ in $(seq 1 50); do
-		kill -0 "$qemu_pid" 2>/dev/null || break
-		sleep 0.1
-	done
-	stop_qemu
-	wait "$qemu_pid" 2>/dev/null || true
-	break
+    # Whether QEMU exited on its own or was asked to stop, give it a bounded
+    # window to flush the chardev before the log is read. Reading immediately
+    # after `wait` returns is what truncates a serial log.
+    for _ in $(seq 1 50); do
+        kill -0 "$qemu_pid" 2>/dev/null || break
+        sleep 0.1
+    done
+    stop_qemu
+    wait "$qemu_pid" 2>/dev/null || true
+    break
 done
 
 cleanup
@@ -327,20 +327,20 @@ qemu_pid=""
 # to read. A non-empty log needs no commentary -- it has already gone to the
 # terminal live.
 if [ ! -s "$LOG" ]; then
-	echo "run.sh: $LOG is empty -- the guest produced no serial output at all," >&2
-	echo "        which usually means it died before stage2's first print" >&2
-	echo "        (check that the image is the one you just built)" >&2
+    echo "run.sh: $LOG is empty -- the guest produced no serial output at all," >&2
+    echo "        which usually means it died before stage2's first print" >&2
+    echo "        (check that the image is the one you just built)" >&2
 elif [ "$DEBUG" = "1" ]; then
-	note "---- $LOG (last 40 lines) ----"
-	tail -n 40 "$LOG" >&2
-	note "---- end of log, $(wc -l < "$LOG") lines total ----"
+    note "---- $LOG (last 40 lines) ----"
+    tail -n 40 "$LOG" >&2
+    note "---- end of log, $(wc -l < "$LOG") lines total ----"
 fi
 
 if [ "$timed_out" -eq 1 ]; then
-	# Worth keeping even without DEBUG: a bounded run that ends on the
-	# watchdog is indistinguishable from one that ended on its own, and
-	# "it just stopped" is the more alarming of the two readings.
-	echo "run.sh: stopped after ${RUN_TIMEOUT}s" >&2
-	exit 0
+    # Worth keeping even without DEBUG: a bounded run that ends on the
+    # watchdog is indistinguishable from one that ended on its own, and
+    # "it just stopped" is the more alarming of the two readings.
+    echo "run.sh: stopped after ${RUN_TIMEOUT}s" >&2
+    exit 0
 fi
 exit "$status"

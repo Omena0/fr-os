@@ -26,15 +26,15 @@ $CC $CFLAGS -c src/kernel/context.S -o "$TMPDIR/context.host.o"
 $CC $CFLAGS -c tests/resume_stub.S -o "$TMPDIR/resume_stub.host.o"
 $CC $CFLAGS -c tests/context_switch_harness.c -o "$TMPDIR/harness.o"
 $CC $CFLAGS -o "$OUT" "$TMPDIR/context.host.o" "$TMPDIR/resume_stub.host.o" \
-	"$TMPDIR/harness.o"
+    "$TMPDIR/harness.o"
 
 rc=0
 "$OUT" || rc=$?
 "$OUT" --restore-only || rc=$?
 
 if [ "$rc" -eq 0 ]; then
-	echo "PASS: context switch frame contract holds"
+    echo "PASS: context switch frame contract holds"
 else
-	echo "FAIL: context switch harness exited $rc"
+    echo "FAIL: context switch harness exited $rc"
 fi
 exit "$rc"

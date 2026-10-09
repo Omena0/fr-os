@@ -86,7 +86,7 @@ typedef uint64_t u64;
  * setjmp and swapcontext, for the same reason.
  */
 extern void context_switch(u64 *save_rsp, u64 new_rsp)
-	__attribute__((returns_twice));
+    __attribute__((returns_twice));
 
 /* The two assembly resume points; see tests/resume_stub.S. */
 extern void resume_stub_asm(void);
@@ -103,13 +103,13 @@ extern u64 resume_offs_ok, resume_offs_bad;
  * return address `ret` consumes is at +48.
  */
 struct task_frame {
-	u64 r15;
-	u64 r14;
-	u64 r13;
-	u64 r12;
-	u64 rbx;
-	u64 rbp;
-	u64 ret;
+    u64 r15;
+    u64 r14;
+    u64 r13;
+    u64 r12;
+    u64 rbx;
+    u64 rbp;
+    u64 ret;
 };
 
 _Static_assert(sizeof(struct task_frame) == FRAME_BYTES, "frame is 56 bytes");
@@ -122,14 +122,14 @@ _Static_assert(offsetof(struct task_frame, rbp) == 40, "rbp at +40");
 _Static_assert(offsetof(struct task_frame, ret) == 48, "return address at +48");
 
 struct task {
-	u64 *stack;			/* 16-byte aligned, STACK_BYTES long */
-	struct task_frame *frame;	/* bootstrap frame */
-	u64 context_rsp;		/* what context_switch published */
-	u64 handed;			/* the frame most recently handed in */
-	int id;
-	int entered;		/* has task_body been entered at all */
-	int resumptions;		/* how many times control arrived here */
-	int rounds_done;
+    u64 *stack;            /* 16-byte aligned, STACK_BYTES long */
+    struct task_frame *frame;    /* bootstrap frame */
+    u64 context_rsp;        /* what context_switch published */
+    u64 handed;            /* the frame most recently handed in */
+    int id;
+    int entered;        /* has task_body been entered at all */
+    int resumptions;        /* how many times control arrived here */
+    int rounds_done;
 };
 
 static struct task tasks[NTASKS];
@@ -147,14 +147,14 @@ static void report(void);
 /* ----------------------------------------------------------------- harness -- */
 
 #define CHECK(cond, ...)                                                       \
-	do {                                                                   \
-		if (!(cond)) {                                                 \
-			failures++;                                            \
-			printf("  FAIL (line %d): ", __LINE__);                 \
-			printf(__VA_ARGS__);                                   \
-			printf("\n");                                          \
-		}                                                              \
-	} while (0)
+    do {                                                                   \
+        if (!(cond)) {                                                 \
+            failures++;                                            \
+            printf("  FAIL (line %d): ", __LINE__);                 \
+            printf(__VA_ARGS__);                                   \
+            printf("\n");                                          \
+        }                                                              \
+    } while (0)
 
 /*
  * The harness never returns to a caller holding live callee-saved state: a
@@ -163,20 +163,20 @@ static void report(void);
  */
 static void die(int code)
 {
-	fflush(stdout);
-	_exit(code);
+    fflush(stdout);
+    _exit(code);
 }
 
 /* Slots 0..5 are rbx rbp r12 r13 r14 r15, in the order they are captured. */
 static u64 sent(struct task *t, int slot)
 {
-	static const int reg[6] = { 5, 6, 12, 13, 14, 15 };
-	return SENTINEL(t->id * 16 + reg[slot]);
+    static const int reg[6] = { 5, 6, 12, 13, 14, 15 };
+    return SENTINEL(t->id * 16 + reg[slot]);
 }
 
 static int on_own_stack(struct task *t, u64 v)
 {
-	return v >= (u64)t->stack && v < (u64)t->stack + STACK_BYTES;
+    return v >= (u64)t->stack && v < (u64)t->stack + STACK_BYTES;
 }
 
 /*
@@ -185,51 +185,51 @@ static int on_own_stack(struct task *t, u64 v)
  */
 static struct task_frame *build_frame(struct task *t, u64 resume_at)
 {
-	t->stack = aligned_alloc(16, STACK_BYTES);
-	if (!t->stack)
-		die(2);
+    t->stack = aligned_alloc(16, STACK_BYTES);
+    if (!t->stack)
+        die(2);
 
-	/* Leave headroom below the frame so an overrun faults instead of
-	 * silently producing a plausible-looking frame. */
-	u64 top = ((u64)t->stack + STACK_BYTES - 256) & ~15ULL;
+    /* Leave headroom below the frame so an overrun faults instead of
+     * silently producing a plausible-looking frame. */
+    u64 top = ((u64)t->stack + STACK_BYTES - 256) & ~15ULL;
 
-	struct task_frame *f = (struct task_frame *)top;
-	f->r15 = sent(t, 5);
-	f->r14 = sent(t, 4);
-	f->r13 = sent(t, 3);
-	f->r12 = sent(t, 2);
-	f->rbx = sent(t, 0);
-	f->rbp = sent(t, 1);
-	f->ret = resume_at;
-	return f;
+    struct task_frame *f = (struct task_frame *)top;
+    f->r15 = sent(t, 5);
+    f->r14 = sent(t, 4);
+    f->r13 = sent(t, 3);
+    f->r12 = sent(t, 2);
+    f->rbx = sent(t, 0);
+    f->rbp = sent(t, 1);
+    f->ret = resume_at;
+    return f;
 }
 
 /* Everything checkable only at the instant control first arrives. */
 static void check_first_resume(struct task *t)
 {
-	/* A. The frame offset, seen by the naked stub before any C runs. */
-	CHECK(resume_sp == (u64)t->frame + FRAME_BYTES,
-	      "task %d first resume rsp=%lx, expected frame+%d=%lx", t->id,
-	      resume_sp, FRAME_BYTES, (u64)t->frame + FRAME_BYTES);
+    /* A. The frame offset, seen by the naked stub before any C runs. */
+    CHECK(resume_sp == (u64)t->frame + FRAME_BYTES,
+          "task %d first resume rsp=%lx, expected frame+%d=%lx", t->id,
+          resume_sp, FRAME_BYTES, (u64)t->frame + FRAME_BYTES);
 
-	/* C. That frame is at the top of this task's own stack, aligned the way
-	 * the frame contract requires. */
-	CHECK(on_own_stack(t, (u64)t->frame),
-	      "task %d bootstrap frame %lx is outside its own stack [%lx,%lx)",
-	      t->id, (u64)t->frame, (u64)t->stack,
-	      (u64)t->stack + STACK_BYTES);
-	CHECK((u64)t->frame % 16 == 0,
-	      "task %d bootstrap frame %lx is not 16-byte aligned", t->id,
-	      (u64)t->frame);
+    /* C. That frame is at the top of this task's own stack, aligned the way
+     * the frame contract requires. */
+    CHECK(on_own_stack(t, (u64)t->frame),
+          "task %d bootstrap frame %lx is outside its own stack [%lx,%lx)",
+          t->id, (u64)t->frame, (u64)t->stack,
+          (u64)t->stack + STACK_BYTES);
+    CHECK((u64)t->frame % 16 == 0,
+          "task %d bootstrap frame %lx is not 16-byte aligned", t->id,
+          (u64)t->frame);
 
-	/* B. The register contract. */
-	static const char *nm[6] = { "rbx", "rbp", "r12", "r13", "r14", "r15" };
-	u64 got[6] = { resume_rbx, resume_rbp, resume_r12,
-		       resume_r13, resume_r14, resume_r15 };
-	for (int i = 0; i < 6; i++)
-		CHECK(got[i] == sent(t, i),
-		      "task %d resumed with %s=%lx, expected %lx", t->id, nm[i],
-		      got[i], sent(t, i));
+    /* B. The register contract. */
+    static const char *nm[6] = { "rbx", "rbp", "r12", "r13", "r14", "r15" };
+    u64 got[6] = { resume_rbx, resume_rbp, resume_r12,
+               resume_r13, resume_r14, resume_r15 };
+    for (int i = 0; i < 6; i++)
+        CHECK(got[i] == sent(t, i),
+              "task %d resumed with %s=%lx, expected %lx", t->id, nm[i],
+              got[i], sent(t, i));
 }
 
 /*
@@ -249,40 +249,40 @@ static void check_first_resume(struct task *t)
  */
 __attribute__((noinline)) static void sched_yield(void)
 {
-	struct task *p, *n;
+    struct task *p, *n;
 
-	/* Runaway guard: the pre-fix resume path called back into the switch, so
-	 * two runnable tasks ping-ponged forever. That must be a failure, not a
-	 * hang. */
-	if (switches > (u64)NTASKS * ROUNDS * 4) {
-		printf("  FAIL (line %d): runaway switch loop, %lu switches for "
-		       "%d tasks x %d rounds\n",
-		       __LINE__, switches, NTASKS, ROUNDS);
-		die(1);
-	}
+    /* Runaway guard: the pre-fix resume path called back into the switch, so
+     * two runnable tasks ping-ponged forever. That must be a failure, not a
+     * hang. */
+    if (switches > (u64)NTASKS * ROUNDS * 4) {
+        printf("  FAIL (line %d): runaway switch loop, %lu switches for "
+               "%d tasks x %d rounds\n",
+               __LINE__, switches, NTASKS, ROUNDS);
+        die(1);
+    }
 
-	p = ring[head];
-	head = (head + 1) % NTASKS;
-	n = ring[head];
+    p = ring[head];
+    head = (head + 1) % NTASKS;
+    n = ring[head];
 
-	/* current_task() must already report the incoming task by the time
-	 * control reaches it, because a resumed task's first act is to ask who
-	 * it is. The kernel does this in sched_switch_frame(), before the
-	 * switch; afterwards, the resumed task would spend its first
-	 * instruction identifying itself as somebody else. */
-	cur = n;
+    /* current_task() must already report the incoming task by the time
+     * control reaches it, because a resumed task's first act is to ask who
+     * it is. The kernel does this in sched_switch_frame(), before the
+     * switch; afterwards, the resumed task would spend its first
+     * instruction identifying itself as somebody else. */
+    cur = n;
 
-	/* A task that has never been switched out has no published frame yet;
-	 * it starts from its bootstrap frame. */
-	n->handed = n->context_rsp ? n->context_rsp : (u64)n->frame;
+    /* A task that has never been switched out has no published frame yet;
+     * it starts from its bootstrap frame. */
+    n->handed = n->context_rsp ? n->context_rsp : (u64)n->frame;
 
-	/* Counted before the switch, not after: a switch that suspends this task
-	 * does not run the increment below until the task comes back, which
-	 * would make the count lag by exactly one and hide a resumed-everywhere
-	 * schedule. Counting on the way in makes the invariant plain: one
-	 * resumption per switch, plus one for the boot. */
-	switches++;
-	switch_check_asm(&p->context_rsp, n->handed, &n->handed);
+    /* Counted before the switch, not after: a switch that suspends this task
+     * does not run the increment below until the task comes back, which
+     * would make the count lag by exactly one and hide a resumed-everywhere
+     * schedule. Counting on the way in makes the invariant plain: one
+     * resumption per switch, plus one for the boot. */
+    switches++;
+    switch_check_asm(&p->context_rsp, n->handed, &n->handed);
 }
 
 /*
@@ -292,167 +292,167 @@ __attribute__((noinline)) static void sched_yield(void)
  */
 void task_body(void)
 {
-	struct task *t = cur;
-	int first = !t->entered;
+    struct task *t = cur;
+    int first = !t->entered;
 
-	t->entered = 1;
+    t->entered = 1;
 
-	if (first) {
-		check_first_resume(t);
-		if (e_mode) {
-			printf("E. context_restore: task %d resumed once at rsp=%lx "
-			       "(bootstrap frame %lx + %d)\n",
-			       t->id, resume_sp, (u64)t->frame, FRAME_BYTES);
-			die(failures ? 1 : 0);
-		}
-	}
+    if (first) {
+        check_first_resume(t);
+        if (e_mode) {
+            printf("E. context_restore: task %d resumed once at rsp=%lx "
+                   "(bootstrap frame %lx + %d)\n",
+                   t->id, resume_sp, (u64)t->frame, FRAME_BYTES);
+            die(failures ? 1 : 0);
+        }
+    }
 
-	for (int round = 0; round < ROUNDS; round++) {
-		/* Reaching this task at all — from the stub on the first
-		 * resumption, or from sched_yield() on every one after — is a
-		 * resumption. Counting here rather than at function entry is
-		 * what makes the count match the switch count. */
-		t->resumptions++;
+    for (int round = 0; round < ROUNDS; round++) {
+        /* Reaching this task at all — from the stub on the first
+         * resumption, or from sched_yield() on every one after — is a
+         * resumption. Counting here rather than at function entry is
+         * what makes the count match the switch count. */
+        t->resumptions++;
 
-		/* C. Whatever brought us here, we must be running on our own
-		 * stack. The address of a local is on the stack by definition,
-		 * so this is a direct check rather than a proxy for one. */
-		struct task *probe = t;
-		CHECK(on_own_stack(t, (u64)&probe),
-		      "task %d round %d is running on a foreign stack: local at "
-		      "%lx not in [%lx,%lx)",
-		      t->id, round, (u64)&probe, (u64)t->stack,
-		      (u64)t->stack + STACK_BYTES);
+        /* C. Whatever brought us here, we must be running on our own
+         * stack. The address of a local is on the stack by definition,
+         * so this is a direct check rather than a proxy for one. */
+        struct task *probe = t;
+        CHECK(on_own_stack(t, (u64)&probe),
+              "task %d round %d is running on a foreign stack: local at "
+              "%lx not in [%lx,%lx)",
+              t->id, round, (u64)&probe, (u64)t->stack,
+              (u64)t->stack + STACK_BYTES);
 
-		t->rounds_done++;
+        t->rounds_done++;
 
-		if (t->rounds_done >= ROUNDS) {
-			int done = 1;
-			for (int i = 0; i < NTASKS; i++)
-				if (tasks[i].rounds_done < ROUNDS)
-					done = 0;
-			if (done)
-				report();
-		}
+        if (t->rounds_done >= ROUNDS) {
+            int done = 1;
+            for (int i = 0; i < NTASKS; i++)
+                if (tasks[i].rounds_done < ROUNDS)
+                    done = 0;
+            if (done)
+                report();
+        }
 
-		/* Switch away. Control comes back to the instruction after this
-		 * call, on this task's own stack, for the next iteration. */
-		sched_yield();
-	}
+        /* Switch away. Control comes back to the instruction after this
+         * call, on this task's own stack, for the next iteration. */
+        sched_yield();
+    }
 
-	/* Falling out of the loop means the task was resumed once more after
-	 * report() should already have ended the run, i.e. an extra resumption
-	 * that the switch count below would also catch. */
-	CHECK(false, "task %d completed %d rounds without the run ending", t->id,
-	      ROUNDS);
-	die(3);
+    /* Falling out of the loop means the task was resumed once more after
+     * report() should already have ended the run, i.e. an extra resumption
+     * that the switch count below would also catch. */
+    CHECK(false, "task %d completed %d rounds without the run ending", t->id,
+          ROUNDS);
+    die(3);
 }
 
 static void report(void)
 {
-	/*
-	 * One resumption per task per round, less the one that booted task 0
-	 * onto its own stack. Every switch must produce exactly one resumption
-	 * and nothing may re-enter the switch.
-	 */
-	u64 expect = (u64)NTASKS * ROUNDS - 1;	  /* one per resumption but the boot */
-	u64 expect_resumes = (u64)NTASKS * ROUNDS;	  /* one per task per round */
-	/*
-	 * Each task's first resumption arrives through its bootstrap frame,
-	 * whose return address is resume_stub_asm, so those NTASKS arrivals are
-	 * checked by check_first_resume() instead of by switch_check_asm(). Every
-	 * other resumption comes back through the switch, and those are the ones
-	 * switch_check_asm() measures.
-	 */
-	u64 expect_offs = expect_resumes - NTASKS;
+    /*
+     * One resumption per task per round, less the one that booted task 0
+     * onto its own stack. Every switch must produce exactly one resumption
+     * and nothing may re-enter the switch.
+     */
+    u64 expect = (u64)NTASKS * ROUNDS - 1;      /* one per resumption but the boot */
+    u64 expect_resumes = (u64)NTASKS * ROUNDS;      /* one per task per round */
+    /*
+     * Each task's first resumption arrives through its bootstrap frame,
+     * whose return address is resume_stub_asm, so those NTASKS arrivals are
+     * checked by check_first_resume() instead of by switch_check_asm(). Every
+     * other resumption comes back through the switch, and those are the ones
+     * switch_check_asm() measures.
+     */
+    u64 expect_offs = expect_resumes - NTASKS;
 
-	printf("A. frame contract: 56-byte frame, return address at +48\n");
-	printf("   switch_check_asm: %lu resumes landed at exactly frame+56, "
-	       "%lu did not\n",
-	       resume_offs_ok, resume_offs_bad);
-	CHECK(resume_offs_bad == 0, "%lu resumes landed at the wrong offset",
-	      resume_offs_bad);
-	CHECK(resume_offs_ok == expect_offs, "%lu offset checks, expected %lu",
-	      resume_offs_ok, expect_offs);
+    printf("A. frame contract: 56-byte frame, return address at +48\n");
+    printf("   switch_check_asm: %lu resumes landed at exactly frame+56, "
+           "%lu did not\n",
+           resume_offs_ok, resume_offs_bad);
+    CHECK(resume_offs_bad == 0, "%lu resumes landed at the wrong offset",
+          resume_offs_bad);
+    CHECK(resume_offs_ok == expect_offs, "%lu offset checks, expected %lu",
+          resume_offs_ok, expect_offs);
 
-	u64 total = 0;
-	for (int i = 0; i < NTASKS; i++)
-		total += (u64)tasks[i].resumptions;
-	CHECK(total == expect_resumes,
-	      "%lu resumptions in total, expected %lu — a resumption is either "
-	      "lost or duplicated",
-	      total, expect_resumes);
+    u64 total = 0;
+    for (int i = 0; i < NTASKS; i++)
+        total += (u64)tasks[i].resumptions;
+    CHECK(total == expect_resumes,
+          "%lu resumptions in total, expected %lu — a resumption is either "
+          "lost or duplicated",
+          total, expect_resumes);
 
-	printf("B. registers: each bootstrap frame restores its own rbx/rbp/"
-	       "r12-r15\n");
+    printf("B. registers: each bootstrap frame restores its own rbx/rbp/"
+           "r12-r15\n");
 
-	printf("C. stack: every resume on the resuming task's own stack\n");
-	printf("   resumptions:");
-	for (int i = 0; i < NTASKS; i++)
-		printf(" task%d=%d", i, tasks[i].resumptions);
-	printf("\n");
+    printf("C. stack: every resume on the resuming task's own stack\n");
+    printf("   resumptions:");
+    for (int i = 0; i < NTASKS; i++)
+        printf(" task%d=%d", i, tasks[i].resumptions);
+    printf("\n");
 
-	printf("D. progress: %lu switches (expected %lu)\n", switches, expect);
-	CHECK(switches == expect,
-	      "switch count %lu != %lu — the resume path is re-entering the "
-	      "switch",
-	      switches, expect);
+    printf("D. progress: %lu switches (expected %lu)\n", switches, expect);
+    CHECK(switches == expect,
+          "switch count %lu != %lu — the resume path is re-entering the "
+          "switch",
+          switches, expect);
 
-	for (int i = 0; i < NTASKS; i++) {
-		CHECK(tasks[i].resumptions == ROUNDS,
-		      "task %d resumed %d times, expected %d", i,
-		      tasks[i].resumptions, ROUNDS);
-		CHECK(tasks[i].rounds_done == ROUNDS,
-		      "task %d completed %d rounds, expected %d", i,
-		      tasks[i].rounds_done, ROUNDS);
-		/* The frame context_switch published for a task lives on that
-		 * task's own stack: it is where the task was suspended, which is
-		 * inside sched_yield(), not at the top of the stack. What has to
-		 * hold is that it is on the right stack, and that resuming lands
-		 * 56 bytes above it — the latter checked on every resume above. */
-		CHECK(on_own_stack(&tasks[i], tasks[i].context_rsp),
-		      "task %d published its frame at %lx, outside its own stack "
-		      "[%lx,%lx)",
-		      i, tasks[i].context_rsp, (u64)tasks[i].stack,
-		      (u64)tasks[i].stack + STACK_BYTES);
-	}
+    for (int i = 0; i < NTASKS; i++) {
+        CHECK(tasks[i].resumptions == ROUNDS,
+              "task %d resumed %d times, expected %d", i,
+              tasks[i].resumptions, ROUNDS);
+        CHECK(tasks[i].rounds_done == ROUNDS,
+              "task %d completed %d rounds, expected %d", i,
+              tasks[i].rounds_done, ROUNDS);
+        /* The frame context_switch published for a task lives on that
+         * task's own stack: it is where the task was suspended, which is
+         * inside sched_yield(), not at the top of the stack. What has to
+         * hold is that it is on the right stack, and that resuming lands
+         * 56 bytes above it — the latter checked on every resume above. */
+        CHECK(on_own_stack(&tasks[i], tasks[i].context_rsp),
+              "task %d published its frame at %lx, outside its own stack "
+              "[%lx,%lx)",
+              i, tasks[i].context_rsp, (u64)tasks[i].stack,
+              (u64)tasks[i].stack + STACK_BYTES);
+    }
 
-	printf("%s: context switch frame contract holds\n",
-	       failures ? "FAIL" : "PASS");
-	die(failures ? 1 : 0);
+    printf("%s: context switch frame contract holds\n",
+           failures ? "FAIL" : "PASS");
+    die(failures ? 1 : 0);
 }
 
 static void setup(void)
 {
-	for (int i = 0; i < NTASKS; i++) {
-		tasks[i].id = i;
-		tasks[i].frame = build_frame(&tasks[i], (u64)resume_stub_asm);
-		ring[i] = &tasks[i];
-	}
-	head = 0;
+    for (int i = 0; i < NTASKS; i++) {
+        tasks[i].id = i;
+        tasks[i].frame = build_frame(&tasks[i], (u64)resume_stub_asm);
+        ring[i] = &tasks[i];
+    }
+    head = 0;
 }
 
 int main(int argc, char **argv)
 {
-	printf("== context switch frame contract (host harness) ==\n");
+    printf("== context switch frame contract (host harness) ==\n");
 
-	/* E: a single hand-off with no outgoing frame published, which is how
-	 * a new task is started and how sched_stop_current() hands off. */
-	if (argc > 1 && strcmp(argv[1], "--restore-only") == 0)
-		e_mode = 1;
+    /* E: a single hand-off with no outgoing frame published, which is how
+     * a new task is started and how sched_stop_current() hands off. */
+    if (argc > 1 && strcmp(argv[1], "--restore-only") == 0)
+        e_mode = 1;
 
-	setup();
+    setup();
 
-	/*
-	 * Boot task 0 onto its own stack, the way a new task is started.
-	 * Without this the first switch out of main() would publish main's stack
-	 * as task 0's frame, and every later resume of task 0 would legitimately
-	 * land there — correct behaviour, but it would mean the "resumes on its
-	 * own stack" assertion is checking the wrong thing for exactly one of
-	 * the three tasks.
-	 */
-	cur = &tasks[0];
-	context_switch(&discard_slot, (u64)tasks[0].frame);
-	printf("  FAIL: context_switch returned where it could not\n");
-	die(3);
+    /*
+     * Boot task 0 onto its own stack, the way a new task is started.
+     * Without this the first switch out of main() would publish main's stack
+     * as task 0's frame, and every later resume of task 0 would legitimately
+     * land there — correct behaviour, but it would mean the "resumes on its
+     * own stack" assertion is checking the wrong thing for exactly one of
+     * the three tasks.
+     */
+    cur = &tasks[0];
+    context_switch(&discard_slot, (u64)tasks[0].frame);
+    printf("  FAIL: context_switch returned where it could not\n");
+    die(3);
 }

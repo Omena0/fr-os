@@ -33,53 +33,53 @@
  *   is 56 bytes, and the frame base must be 16-byte aligned for the callee to
  *   see the 8 mod 16 the SysV ABI requires at function entry.
  */
-	.text
+    .text
 
 /* void context_switch(u64 *save_rsp, u64 new_rsp) */
-	.globl	context_switch
-	.type	context_switch, @function
+    .globl    context_switch
+    .type    context_switch, @function
 context_switch:
-	/* Push order is the reverse of the pop order below, which leaves r15 at
-	 * the lowest address of the frame. */
-	pushq	%rbp
-	pushq	%rbx
-	pushq	%r12
-	pushq	%r13
-	pushq	%r14
-	pushq	%r15
+    /* Push order is the reverse of the pop order below, which leaves r15 at
+     * the lowest address of the frame. */
+    pushq    %rbp
+    pushq    %rbx
+    pushq    %r12
+    pushq    %r13
+    pushq    %r14
+    pushq    %r15
 
-	/* Publish the outgoing frame. */
-	movq	%rsp, (%rdi)
+    /* Publish the outgoing frame. */
+    movq    %rsp, (%rdi)
 
-	/* Adopt the incoming frame. Everything below this point runs on the new
-	 * task's kernel stack; nothing may touch the old one. */
-	movq	%rsi, %rsp
-	popq	%r15
-	popq	%r14
-	popq	%r13
-	popq	%r12
-	popq	%rbx
-	popq	%rbp
+    /* Adopt the incoming frame. Everything below this point runs on the new
+     * task's kernel stack; nothing may touch the old one. */
+    movq    %rsi, %rsp
+    popq    %r15
+    popq    %r14
+    popq    %r13
+    popq    %r12
+    popq    %rbx
+    popq    %rbp
 
-	/* Control transfers to the address the frame was built with. The kernel
-	 * is compiled with -fomit-frame-pointer, so the frame we are abandoning
-	 * has no rbp chain: the return address is the only link back. */
-	ret
-	.size	context_switch, .-context_switch
+    /* Control transfers to the address the frame was built with. The kernel
+     * is compiled with -fomit-frame-pointer, so the frame we are abandoning
+     * has no rbp chain: the return address is the only link back. */
+    ret
+    .size    context_switch, .-context_switch
 
 /* void context_restore(u64 rsp) — the restore half on its own. */
-	.globl	context_restore
-	.type	context_restore, @function
+    .globl    context_restore
+    .type    context_restore, @function
 context_restore:
-	movq	%rdi, %rsp
-	popq	%r15
-	popq	%r14
-	popq	%r13
-	popq	%r12
-	popq	%rbx
-	popq	%rbp
-	ret
-	.size	context_restore, .-context_restore
+    movq    %rdi, %rsp
+    popq    %r15
+    popq    %r14
+    popq    %r13
+    popq    %r12
+    popq    %rbx
+    popq    %rbp
+    ret
+    .size    context_restore, .-context_restore
 
 /*
  * void fpu_save(void *state)
@@ -90,22 +90,22 @@ context_restore:
  * function is to be called while TS is clear, at the instant a task that was
  * executing SSE is being switched out.
  */
-	.globl	fpu_save
-	.type	fpu_save, @function
+    .globl    fpu_save
+    .type    fpu_save, @function
 fpu_save:
-	/* RDI holds the destination. fxsave64 needs a plain memory operand, so
-	 * the pointer is forced out of the operand encoding with AT&T syntax. */
-	fxsave	(%rdi)
-	ret
-	.size	fpu_save, .-fpu_save
+    /* RDI holds the destination. fxsave64 needs a plain memory operand, so
+     * the pointer is forced out of the operand encoding with AT&T syntax. */
+    fxsave    (%rdi)
+    ret
+    .size    fpu_save, .-fpu_save
 
 /* void fpu_restore(const void *state) */
-	.globl	fpu_restore
-	.type	fpu_restore, @function
+    .globl    fpu_restore
+    .type    fpu_restore, @function
 fpu_restore:
-	fxrstor	(%rdi)
-	ret
-	.size	fpu_restore, .-fpu_restore
+    fxrstor    (%rdi)
+    ret
+    .size    fpu_restore, .-fpu_restore
 
 /*
  * u64 tsc_read(void)
@@ -117,18 +117,18 @@ fpu_restore:
  * Callers that need a globally ordered timestamp use cpu_serialize() around
  * this instead.
  */
-	.globl	tsc_read
-	.type	tsc_read, @function
+    .globl    tsc_read
+    .type    tsc_read, @function
 tsc_read:
-	lfence
-	rdtsc
-	/* RDTSC writes EDX:EAX. Shifting the high half down by 32 turns the pair
-	 * into the single 64-bit value the SysV return register pair would have
-	 * produced, so the caller can treat it like any other integer. */
-	shlq	$32, %rdx
-	orq	%rdx, %rax
-	ret
-	.size	tsc_read, .-tsc_read
+    lfence
+    rdtsc
+    /* RDTSC writes EDX:EAX. Shifting the high half down by 32 turns the pair
+     * into the single 64-bit value the SysV return register pair would have
+     * produced, so the caller can treat it like any other integer. */
+    shlq    $32, %rdx
+    orq    %rdx, %rax
+    ret
+    .size    tsc_read, .-tsc_read
 
 /* Mark the stack non-executable. */
-	.section .note.GNU-stack,"",@progbits
+    .section .note.GNU-stack,"",@progbits

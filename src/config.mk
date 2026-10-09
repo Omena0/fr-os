@@ -126,17 +126,17 @@ OBJ             := $(BUILD)/obj
 # the sense that no other vector state exists to lose. Both halves of that
 # sentence are load-bearing and neither is enforced.
 KERNEL_CFLAGS := \
-	-std=gnu11 -ffreestanding -nostdlib -fno-builtin -fno-stack-protector \
-	-fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables \
-	-fno-strict-aliasing -fno-common -fomit-frame-pointer \
-	-m64 -mcmodel=kernel -mno-red-zone \
-	-mbmi -mbmi2 -madx -mrdrnd -mclwb -mclflushopt \
-	-mpopcnt \
-	-O2 -g3 -Wall -Wextra -Werror=implicit-function-declaration \
-	-Werror=return-type -Wno-unused-parameter -Wno-address-of-packed-member \
-	-I src/include -I src/kernel/include -I src/kernel \
-	-mno-sse -mno-sse2 -mno-avx -mno-avx2 -mno-fma -mno-f16c \
-	-mno-mmx -mno-80387 -msoft-float -mno-red-zone
+    -std=gnu11 -ffreestanding -nostdlib -fno-builtin -fno-stack-protector \
+    -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables \
+    -fno-strict-aliasing -fno-common -fomit-frame-pointer \
+    -m64 -mcmodel=kernel -mno-red-zone \
+    -mbmi -mbmi2 -madx -mrdrnd -mclwb -mclflushopt \
+    -mpopcnt \
+    -O2 -g3 -Wall -Wextra -Werror=implicit-function-declaration \
+    -Werror=return-type -Wno-unused-parameter -Wno-address-of-packed-member \
+    -I src/include -I src/kernel/include -I src/kernel \
+    -mno-sse -mno-sse2 -mno-avx -mno-avx2 -mno-fma -mno-f16c \
+    -mno-mmx -mno-80387 -msoft-float -mno-red-zone
 
 # The kernel is loaded by stage2 at a fixed physical address, so the link
 # script pins the physical placement too.
@@ -150,12 +150,12 @@ KERNEL_LDFLAGS := -T src/kernel/link.ld -z max-page-size=4096 --no-dynamic-linke
 
 # ------------------------------------------------------------- bootloader ----
 BOOT_CFLAGS := \
-	-std=gnu11 -ffreestanding -nostdlib -fno-builtin -fno-stack-protector \
-	-fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables \
-	-fno-strict-aliasing -fno-common -fomit-frame-pointer \
-	-m32 -mno-red-zone -mno-sse -mno-mmx -mno-80387 -msoft-float \
-	-O2 -g3 -Wall -Wextra -Wno-unused-parameter \
-	-I src/include -I src/boot
+    -std=gnu11 -ffreestanding -nostdlib -fno-builtin -fno-stack-protector \
+    -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables \
+    -fno-strict-aliasing -fno-common -fomit-frame-pointer \
+    -m32 -mno-red-zone -mno-sse -mno-mmx -mno-80387 -msoft-float \
+    -O2 -g3 -Wall -Wextra -Wno-unused-parameter \
+    -I src/include -I src/boot
 
 BOOT_ASFLAGS := -m32 -I src/include/ -I src/boot/
 
@@ -209,13 +209,13 @@ BOOT_ASFLAGS := -m32 -I src/include/ -I src/boot/
 # archive would be silently pulled into both. This list is therefore the
 # only thing standing between a future -march= and silent YMM corruption.
 USER_CFLAGS := \
-	-std=gnu11 -ffreestanding -nostdlib -fno-builtin -fno-stack-protector \
-	-fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables \
-	-fno-strict-aliasing -fno-common -m64 -mno-red-zone -mcmodel=small \
-	-O2 -g3 -Wall -Wextra -Wno-unused-parameter \
-	-mbmi -mbmi2 -mpopcnt \
-	-I src/include -I src/libc/include \
-	-mno-avx -mno-avx2 -mno-fma -mno-f16c
+    -std=gnu11 -ffreestanding -nostdlib -fno-builtin -fno-stack-protector \
+    -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables \
+    -fno-strict-aliasing -fno-common -m64 -mno-red-zone -mcmodel=small \
+    -O2 -g3 -Wall -Wextra -Wno-unused-parameter \
+    -mbmi -mbmi2 -mpopcnt \
+    -I src/include -I src/libc/include \
+    -mno-avx -mno-avx2 -mno-fma -mno-f16c
 
 # -static keeps the user image free of an interpreter: the kernel's ELF loader
 # maps PT_LOAD segments and jumps to e_entry. There is no dynamic linker yet.

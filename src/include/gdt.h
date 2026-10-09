@@ -65,38 +65,38 @@
  * frame was never the problem.
  */
 #define GDT_ENTRY(access, flags, base, limit) \
-	(((unsigned long long)(limit) & 0xFFFFULL) \
-	 | (((unsigned long long)(base) & 0xFFFFFFULL) << 16) \
-	 | (((unsigned long long)(access) & 0xFFULL) << 40) \
-	 | ((((unsigned long long)(limit) >> 16) & 0xFULL) << 48) \
-	 | (((unsigned long long)(flags) & 0xFULL) << 52) \
-	 | ((((unsigned long long)(base) >> 24) & 0xFFULL) << 56))
+    (((unsigned long long)(limit) & 0xFFFFULL) \
+     | (((unsigned long long)(base) & 0xFFFFFFULL) << 16) \
+     | (((unsigned long long)(access) & 0xFFULL) << 40) \
+     | ((((unsigned long long)(limit) >> 16) & 0xFULL) << 48) \
+     | (((unsigned long long)(flags) & 0xFULL) << 52) \
+     | ((((unsigned long long)(base) >> 24) & 0xFFULL) << 56))
 
 /* The canonical flat segments used by both stages. A limit of 0xFFFFF with a
  * 4 KiB granularity gives exactly 2^47 bytes, which is every canonical address
  * on a 48-bit virtual machine. */
 #define GDT_CODE64_FLAGS \
-	GDT_ACCESS_PRESENT | GDT_ACCESS_RING0 | GDT_ACCESS_SEGMENT | GDT_ACCESS_CODE | GDT_ACCESS_EXEC | GDT_ACCESS_ACCESSED
+    GDT_ACCESS_PRESENT | GDT_ACCESS_RING0 | GDT_ACCESS_SEGMENT | GDT_ACCESS_CODE | GDT_ACCESS_EXEC | GDT_ACCESS_ACCESSED
 
 
 #define GDT_DATA_FLAGS \
-	GDT_ACCESS_PRESENT | GDT_ACCESS_RING0 | GDT_ACCESS_SEGMENT | GDT_ACCESS_DATA | GDT_ACCESS_RW | GDT_ACCESS_ACCESSED
+    GDT_ACCESS_PRESENT | GDT_ACCESS_RING0 | GDT_ACCESS_SEGMENT | GDT_ACCESS_DATA | GDT_ACCESS_RW | GDT_ACCESS_ACCESSED
 
 
 #define GDT_CODE32_FLAGS \
-	GDT_ACCESS_PRESENT | GDT_ACCESS_RING0 | GDT_ACCESS_SEGMENT | GDT_ACCESS_CODE | GDT_ACCESS_EXEC | GDT_ACCESS_ACCESSED
+    GDT_ACCESS_PRESENT | GDT_ACCESS_RING0 | GDT_ACCESS_SEGMENT | GDT_ACCESS_CODE | GDT_ACCESS_EXEC | GDT_ACCESS_ACCESSED
 
 
 #define GDT_USER_CODE64_FLAGS \
-	GDT_ACCESS_PRESENT | GDT_ACCESS_RING3 | GDT_ACCESS_SEGMENT | GDT_ACCESS_CODE | GDT_ACCESS_EXEC | GDT_ACCESS_ACCESSED
+    GDT_ACCESS_PRESENT | GDT_ACCESS_RING3 | GDT_ACCESS_SEGMENT | GDT_ACCESS_CODE | GDT_ACCESS_EXEC | GDT_ACCESS_ACCESSED
 
 
 #define GDT_USER_DATA_FLAGS \
-	GDT_ACCESS_PRESENT | GDT_ACCESS_RING3 | GDT_ACCESS_SEGMENT | GDT_ACCESS_DATA | GDT_ACCESS_RW | GDT_ACCESS_ACCESSED
+    GDT_ACCESS_PRESENT | GDT_ACCESS_RING3 | GDT_ACCESS_SEGMENT | GDT_ACCESS_DATA | GDT_ACCESS_RW | GDT_ACCESS_ACCESSED
 
 
 #define GDT_USER_CODE32_FLAGS \
-	GDT_ACCESS_PRESENT | GDT_ACCESS_RING3 | GDT_ACCESS_SEGMENT | GDT_ACCESS_CODE | GDT_ACCESS_EXEC | GDT_ACCESS_ACCESSED
+    GDT_ACCESS_PRESENT | GDT_ACCESS_RING3 | GDT_ACCESS_SEGMENT | GDT_ACCESS_CODE | GDT_ACCESS_EXEC | GDT_ACCESS_ACCESSED
 
 
 #define GDT_LCODE64  GDT_ENTRY(GDT_CODE64_FLAGS, GDT_FLAG_GRANULARITY | GDT_FLAG_LONG_MODE, 0, 0xFFFFF)
@@ -186,12 +186,12 @@
  * at an `ltr` with no further detail.
  */
 #define GDT_TSS_DESC64_LOW(base, limit) \
-	(((unsigned long long)((limit) & 0xFFFFULL)) \
-	 | (((unsigned long long)(base) & 0xFFFFULL) << 16) \
-	 | (((unsigned long long)(base) & 0xFF0000ULL) << 16) \
-	 | ((unsigned long long)GDT_TSS_ACCESS64 << 40) \
-	 | ((((unsigned long long)(limit) >> 16) & 0xFULL) << 48) \
-	 | ((((unsigned long long)(base) >> 24) & 0xFFULL) << 56))
+    (((unsigned long long)((limit) & 0xFFFFULL)) \
+     | (((unsigned long long)(base) & 0xFFFFULL) << 16) \
+     | (((unsigned long long)(base) & 0xFF0000ULL) << 16) \
+     | ((unsigned long long)GDT_TSS_ACCESS64 << 40) \
+     | ((((unsigned long long)(limit) >> 16) & 0xFULL) << 48) \
+     | ((((unsigned long long)(base) >> 24) & 0xFFULL) << 56))
 
 /*
  * High half of a 64-bit TSS descriptor: base[63:32], and nothing else.
@@ -203,7 +203,7 @@
  * what produced a TSS base the CPU could not canonicalise.
  */
 #define GDT_TSS_DESC64_HIGH(base) \
-	(((unsigned long long)(base) >> 32) & 0xFFFFFFFFULL)
+    (((unsigned long long)(base) >> 32) & 0xFFFFFFFFULL)
 
 #ifndef __ASSEMBLER__
 /*
@@ -221,17 +221,17 @@
  * would be read as two arguments to a one-argument macro.
  */
 #define GDT_TSS_BASE_OF(b) \
-	(((GDT_TSS_DESC64_LOW(b, 107) >> 16) & 0xFFFFFFULL) \
-	| (((GDT_TSS_DESC64_LOW(b, 107) >> 56) & 0xFFULL) << 24) \
-	| (GDT_TSS_DESC64_HIGH(b) << 32))
+    (((GDT_TSS_DESC64_LOW(b, 107) >> 16) & 0xFFFFFFULL) \
+    | (((GDT_TSS_DESC64_LOW(b, 107) >> 56) & 0xFFULL) << 24) \
+    | (GDT_TSS_DESC64_HIGH(b) << 32))
 
 #define GDT_TSS_ACCESS_OF(b, l) \
-	((GDT_TSS_DESC64_LOW(b, l) >> 40) & 0xFFULL)
+    ((GDT_TSS_DESC64_LOW(b, l) >> 40) & 0xFFULL)
 
 _Static_assert(GDT_TSS_BASE_OF(0xffffffff80000000ULL) == 0xffffffff80000000ULL,
-	       "64-bit TSS descriptor does not round-trip its base");
+           "64-bit TSS descriptor does not round-trip its base");
 _Static_assert(GDT_TSS_ACCESS_OF(0xffffffff80000000ULL, 107) == 0x89,
-	       "64-bit TSS descriptor must be type 9, an available 64-bit TSS");
+           "64-bit TSS descriptor must be type 9, an available 64-bit TSS");
 #endif /* !__ASSEMBLER__ */
 
 

@@ -30,37 +30,37 @@
 
 void serial_init(void)
 {
-	outb(COM1 + 1, 0x00);      /* interrupts disabled */
-	outb(COM1 + 3, 0x80);      /* DLAB on: divisor latch accessible */
-	outb(COM1 + 0, 0x01);      /* divisor low  = 1 (115200 baud) */
-	outb(COM1 + 1, 0x00);      /* divisor high = 0 */
-	outb(COM1 + 3, 0x03);      /* 8 data bits, no parity, 1 stop bit */
-	outb(COM1 + 2, 0xC7);      /* FIFO on, cleared, 14-byte receive trigger */
-	outb(COM1 + 4, 0x03);      /* DTR | RTS: receiver and transmitter enabled */
+    outb(COM1 + 1, 0x00);      /* interrupts disabled */
+    outb(COM1 + 3, 0x80);      /* DLAB on: divisor latch accessible */
+    outb(COM1 + 0, 0x01);      /* divisor low  = 1 (115200 baud) */
+    outb(COM1 + 1, 0x00);      /* divisor high = 0 */
+    outb(COM1 + 3, 0x03);      /* 8 data bits, no parity, 1 stop bit */
+    outb(COM1 + 2, 0xC7);      /* FIFO on, cleared, 14-byte receive trigger */
+    outb(COM1 + 4, 0x03);      /* DTR | RTS: receiver and transmitter enabled */
 }
 
 void serial_putc_blocking(char c)
 {
-	unsigned int spin = TX_SPIN_LIMIT;
+    unsigned int spin = TX_SPIN_LIMIT;
 
-	while ((inb(COM1 + 5) & UART_LSR_TX_EMPTY) == 0) {
-		if (--spin == 0)
-			return;    /* UART absent or wedged: drop the byte */
-		io_wait();
-	}
-	outb(COM1, (uint8_t)c);
+    while ((inb(COM1 + 5) & UART_LSR_TX_EMPTY) == 0) {
+        if (--spin == 0)
+            return;    /* UART absent or wedged: drop the byte */
+        io_wait();
+    }
+    outb(COM1, (uint8_t)c);
 }
 
 void serial_puts(const char *s)
 {
-	for (; *s; s++)
-		serial_putc_blocking(*s);
+    for (; *s; s++)
+        serial_putc_blocking(*s);
 }
 
 bool serial_getc(char *out)
 {
-	if ((inb(COM1 + 5) & UART_LSR_DATA_READY) == 0)
-		return false;
-	*out = (char)inb(COM1);
-	return true;
+    if ((inb(COM1 + 5) & UART_LSR_DATA_READY) == 0)
+        return false;
+    *out = (char)inb(COM1);
+    return true;
 }

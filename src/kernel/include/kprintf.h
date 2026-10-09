@@ -52,9 +52,9 @@ void kvprintf(kvprintf_sink_t sink, void *arg, const char *fmt, va_list ap);
 /* Same, but varargs. */
 void kvsnprintf(char *buf, size_t size, const char *fmt, va_list ap);
 ksize_t ksnprintf(char *buf, size_t size, const char *fmt, ...)
-	__attribute__((format(printf, 3, 4)));
+    __attribute__((format(printf, 3, 4)));
 
 /* Convenience formatting for small fixed fields (register dumps, panic output). */
 ksize_t kformat(char *buf, size_t size, const char *fmt, ...)
-	__attribute__((format(printf, 3, 4)));
+    __attribute__((format(printf, 3, 4)));
 #endif /* KPRINTF_H */

@@ -31,47 +31,47 @@ static inline long syscall2(long n, long a1, long a2) {
 /* ===== setuid / setgid ===== */
 
 static int test_setuid_basic(void) {
-	/* setuid/setgid are not implemented in this kernel yet; the syscall
-	 * numbers below are placeholders. Skip rather than probe an ABI that
-	 * does not exist, which would only ever test the kernel's -ENOSYS
-	 * fallback. */
-	return TEST_SKIP;
+    /* setuid/setgid are not implemented in this kernel yet; the syscall
+     * numbers below are placeholders. Skip rather than probe an ABI that
+     * does not exist, which would only ever test the kernel's -ENOSYS
+     * fallback. */
+    return TEST_SKIP;
 }
 
 static int test_setgid_basic(void) {
-	return TEST_SKIP;
+    return TEST_SKIP;
 }
 
 static int test_setuid_invalid_user(void) {
-	return TEST_SKIP;
+    return TEST_SKIP;
 }
 
 static int test_setgid_invalid_group(void) {
-	return TEST_SKIP;
+    return TEST_SKIP;
 }
 
 /* ===== arch_prctl ===== */
 
 static int test_arch_prctl_get_fs_basic(void) {
-	uint64_t addr = 0;
-	long ret = syscall2(SYS_arch_prctl, ARCH_GET_FS, (long)&addr);
-	/* ARCH_GET_FS should return current FS base or -EINVAL */
-	TEST_ASSERT(ret == 0 || ret == -EINVAL, "ARCH_GET_FS should work or return -EINVAL");
-	return TEST_PASS;
+    uint64_t addr = 0;
+    long ret = syscall2(SYS_arch_prctl, ARCH_GET_FS, (long)&addr);
+    /* ARCH_GET_FS should return current FS base or -EINVAL */
+    TEST_ASSERT(ret == 0 || ret == -EINVAL, "ARCH_GET_FS should work or return -EINVAL");
+    return TEST_PASS;
 }
 
 static int test_arch_prctl_get_gs_basic(void) {
-	uint64_t addr = 0;
-	long ret = syscall2(SYS_arch_prctl, ARCH_GET_GS, (long)&addr);
-	TEST_ASSERT(ret == 0 || ret == -EINVAL, "ARCH_GET_GS should work or return -EINVAL");
-	return TEST_PASS;
+    uint64_t addr = 0;
+    long ret = syscall2(SYS_arch_prctl, ARCH_GET_GS, (long)&addr);
+    TEST_ASSERT(ret == 0 || ret == -EINVAL, "ARCH_GET_GS should work or return -EINVAL");
+    return TEST_PASS;
 }
 
 static int test_arch_prctl_invalid_code(void) {
-	uint64_t addr = 0;
-	long ret = syscall2(SYS_arch_prctl, 999 /* invalid code */, (long)&addr);
-	TEST_ASSERT(ret == -EINVAL, "invalid arch_prctl code should return -EINVAL");
-	return TEST_PASS;
+    uint64_t addr = 0;
+    long ret = syscall2(SYS_arch_prctl, 999 /* invalid code */, (long)&addr);
+    TEST_ASSERT(ret == -EINVAL, "invalid arch_prctl code should return -EINVAL");
+    return TEST_PASS;
 }
 
 /* ===== Test Suite Registration ===== */

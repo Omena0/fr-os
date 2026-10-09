@@ -147,15 +147,15 @@ static int test_write_zero_length(void) {
 }
 
 static int test_write_null_buffer(void) {
-	/* The kernel must reject an unmapped user pointer without crashing.
-	 * Address 1 is never mapped, so the kernel's user_range_ok() check
-	 * must catch it before any copy is attempted. (Passing literal NULL
-	 * to a syscall is undefined behaviour in C, so use an invalid
-	 * pointer that exercises the same kernel path.) */
-	long ret = syscall3(SYS_write, 1, (long)1, 10);
-	TEST_ASSERT(ret == -EFAULT || ret == -EBADF,
-		    "write with unmapped buffer should fail");
-	return TEST_PASS;
+    /* The kernel must reject an unmapped user pointer without crashing.
+     * Address 1 is never mapped, so the kernel's user_range_ok() check
+     * must catch it before any copy is attempted. (Passing literal NULL
+     * to a syscall is undefined behaviour in C, so use an invalid
+     * pointer that exercises the same kernel path.) */
+    long ret = syscall3(SYS_write, 1, (long)1, 10);
+    TEST_ASSERT(ret == -EFAULT || ret == -EBADF,
+            "write with unmapped buffer should fail");
+    return TEST_PASS;
 }
 
 static int test_read_stdin(void) {
@@ -178,15 +178,15 @@ static int test_read_zero_length(void) {
 }
 
 static int test_read_null_buffer(void) {
-	/* The kernel must reject an unmapped user pointer without crashing.
-	 * Address 1 is never mapped, so the kernel's user_range_ok() check
-	 * must catch it before any copy is attempted. (Passing literal NULL
-	 * to a syscall is undefined behaviour in C, so use an invalid
-	 * pointer that exercises the same kernel path.) */
-	long ret = syscall3(SYS_read, 0, (long)1, 10);
-	TEST_ASSERT(ret == -EFAULT || ret == -EBADF,
-		    "read with unmapped buffer should fail");
-	return TEST_PASS;
+    /* The kernel must reject an unmapped user pointer without crashing.
+     * Address 1 is never mapped, so the kernel's user_range_ok() check
+     * must catch it before any copy is attempted. (Passing literal NULL
+     * to a syscall is undefined behaviour in C, so use an invalid
+     * pointer that exercises the same kernel path.) */
+    long ret = syscall3(SYS_read, 0, (long)1, 10);
+    TEST_ASSERT(ret == -EFAULT || ret == -EBADF,
+            "read with unmapped buffer should fail");
+    return TEST_PASS;
 }
 
 /* ===== lseek ===== */

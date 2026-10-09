@@ -50,10 +50,10 @@
 #define PG_DIRTY       (1u << 8)
 
 typedef enum {
-	ZONE_DMA = 0,
-	ZONE_NORMAL = 1,
-	ZONE_HIGH = 2,
-	ZONE_COUNT = 3,
+    ZONE_DMA = 0,
+    ZONE_NORMAL = 1,
+    ZONE_HIGH = 2,
+    ZONE_COUNT = 3,
 } zone_t;
 
 /*
@@ -66,19 +66,19 @@ typedef enum {
  * so the struct is a single 32 bytes.
  */
 struct page {
-	uint32_t flags;
-	uint8_t  order;         /* buddy order, valid when PG_BUDDY is set */
-	uint8_t  zone;
-	uint16_t numa_node;
-	uint32_t refcount;
+    uint32_t flags;
+    uint8_t  order;         /* buddy order, valid when PG_BUDDY is set */
+    uint8_t  zone;
+    uint16_t numa_node;
+    uint32_t refcount;
 
-	/* Free: link in the zone's free list for `order`.
-	 * Allocated: slab pointer, or page cache index. */
-	union {
-		struct list_head list;
-		void *slab;
-		uint64_t index;
-	};
+    /* Free: link in the zone's free list for `order`.
+     * Allocated: slab pointer, or page cache index. */
+    union {
+        struct list_head list;
+        void *slab;
+        uint64_t index;
+    };
 } __packed;
 
 STATIC_ASSERT(sizeof(struct page) <= 32, "struct page must stay within 32 bytes");
@@ -106,25 +106,25 @@ STATIC_ASSERT(sizeof(struct page) <= 32, "struct page must stay within 32 bytes"
  * entirely.
  */
 struct pmm_zone {
-	const char *name;
-	phys_addr_t base;          /* first physical address in the zone */
-	phys_addr_t end;           /* one past the last */
-	phys_addr_t free_pages;
-	phys_addr_t total_pages;
+    const char *name;
+    phys_addr_t base;          /* first physical address in the zone */
+    phys_addr_t end;           /* one past the last */
+    phys_addr_t free_pages;
+    phys_addr_t total_pages;
 
-	/* One free list per order. Index 0 holds single pages. */
-	struct list_head free_list[BUDDY_MAX_ORDER + 1];
+    /* One free list per order. Index 0 holds single pages. */
+    struct list_head free_list[BUDDY_MAX_ORDER + 1];
 
-	/*
-	 * Bitmap of non-empty orders. Finding the smallest order >= the request
-	 * is a single tzcnt on the masked value rather than a walk over up to 11
-	 * empty lists. With CPuid-confirmed BMI1 the compiler emits TZCNT, whose
-	 * encoding of zero is defined, so a miss is detected without a branch on
-	 * undefined behaviour.
-	 */
-	uint16_t free_bitmap;
+    /*
+     * Bitmap of non-empty orders. Finding the smallest order >= the request
+     * is a single tzcnt on the masked value rather than a walk over up to 11
+     * empty lists. With CPuid-confirmed BMI1 the compiler emits TZCNT, whose
+     * encoding of zero is defined, so a miss is detected without a branch on
+     * undefined behaviour.
+     */
+    uint16_t free_bitmap;
 
-	spinlock_t lock;
+    spinlock_t lock;
 };
 
 /*
@@ -142,12 +142,12 @@ extern phys_addr_t pmm_free_page_count;
 
 /* Statistics for the memory subsystem's observability interface. */
 struct pmm_stats {
-	uint64_t allocs;
-	uint64_t frees;
-	uint64_t splits;
-	uint64_t coalesces;
-	uint64_t failed;
-	uint64_t reclaim_attempts;
+    uint64_t allocs;
+    uint64_t frees;
+    uint64_t splits;
+    uint64_t coalesces;
+    uint64_t failed;
+    uint64_t reclaim_attempts;
 };
 
 extern struct pmm_stats pmm_stats;
@@ -178,7 +178,7 @@ struct page *pmm_alloc_pages(unsigned order, unsigned flags);
 
 static inline struct page *pmm_alloc_page(unsigned flags)
 {
-	return pmm_alloc_pages(0, flags);
+    return pmm_alloc_pages(0, flags);
 }
 
 /* Free a block previously returned by pmm_alloc_pages() at the same order. */

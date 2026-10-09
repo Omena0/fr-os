@@ -28,8 +28,8 @@ KLOG_SUBSYSTEM("gdt");
  * base is a full doubleword, which is why this cannot be a packed struct of
  * two natural-width fields without an explicit byte count. */
 struct gdtr {
-	uint16_t limit;
-	uint64_t base;
+    uint16_t limit;
+    uint64_t base;
 } __attribute__((packed));
 
 /*
@@ -55,26 +55,26 @@ struct gdtr {
  * because the IDT stubs read RSP0 at TSS+4 and IST pointers at TSS+0x24.
  */
 struct tss {
-	uint32_t reserved0;   /* 0x00 */
-	uint64_t rsp0;        /* 0x04 — 64 bits in long mode, not 16 */
-	uint64_t rsp1;        /* 0x0C */
-	uint64_t rsp2;        /* 0x14 */
-	uint64_t reserved1;   /* 0x1C */
-	uint64_t ist[7];      /* 0x24 — EIGHT bytes each in 64-bit mode */
-	uint64_t reserved2;   /* 0x5C */
-	uint64_t iomap_base;  /* 0x64 */
+    uint32_t reserved0;   /* 0x00 */
+    uint64_t rsp0;        /* 0x04 — 64 bits in long mode, not 16 */
+    uint64_t rsp1;        /* 0x0C */
+    uint64_t rsp2;        /* 0x14 */
+    uint64_t reserved1;   /* 0x1C */
+    uint64_t ist[7];      /* 0x24 — EIGHT bytes each in 64-bit mode */
+    uint64_t reserved2;   /* 0x5C */
+    uint64_t iomap_base;  /* 0x64 */
 } __attribute__((packed));
 
 _Static_assert(offsetof(struct tss, rsp0) == 4,
-	       "the interrupt stubs and the IDT read RSP0 at TSS+4");
+           "the interrupt stubs and the IDT read RSP0 at TSS+4");
 _Static_assert(offsetof(struct tss, rsp1) == 0x0C, "bad rsp1 offset");
 _Static_assert(offsetof(struct tss, rsp2) == 0x14, "bad rsp2 offset");
 _Static_assert(offsetof(struct tss, ist) == 0x24, "bad IST offset");
 _Static_assert(sizeof(((struct tss *)0)->ist[0]) == 8,
-	       "64-bit IST slots are 8 bytes, not 4");
+           "64-bit IST slots are 8 bytes, not 4");
 _Static_assert(offsetof(struct tss, iomap_base) == 0x64, "bad iomap offset");
 _Static_assert(sizeof(struct tss) == 108,
-	       "a 64-bit TSS is 108 bytes through iomap_base, before any bitmap");
+           "a 64-bit TSS is 108 bytes through iomap_base, before any bitmap");
 
 /*
  * Per the docs, each CPU has its own GDT and TSS. The boot CPU is the only one
@@ -94,16 +94,16 @@ struct tss kernel_tss __attribute__((aligned(16)));
  * accompany a CS change.
  */
 void gdt_flush(uint64_t gdt_pointer, uint16_t code_selector,
-	       uint16_t data_selector);
+           uint16_t data_selector);
 void tss_flush(uint16_t tss_selector);
 
 /* ------------------------------------------------- private helpers --------- */
 
 static void gdt_set(unsigned index, uint64_t entry)
 {
-	ASSERT_MSG(index < GDT_ENTRIES, "gdt: descriptor index %u out of range",
-		  index);
-	gdt[index] = entry;
+    ASSERT_MSG(index < GDT_ENTRIES, "gdt: descriptor index %u out of range",
+          index);
+    gdt[index] = entry;
 }
 
 /* ------------------------------------------------- IST stacks ------------- */
@@ -127,97 +127,97 @@ static void gdt_set(unsigned index, uint64_t entry)
  */
 void gdt_set_ist_stack(uint8_t ist, void *stack_top)
 {
-	ASSERT_MSG(ist >= 1 && ist <= 7, "gdt: IST index %u out of range", ist);
-	ASSERT_MSG(((uintptr_t)stack_top & 0xFFFFFFFF00000000ULL) == 0,
-		   "gdt: IST stack %p does not fit the 32-bit IST field; it must "
-		   "be mapped at a low linear address",
-		   stack_top);
+    ASSERT_MSG(ist >= 1 && ist <= 7, "gdt: IST index %u out of range", ist);
+    ASSERT_MSG(((uintptr_t)stack_top & 0xFFFFFFFF00000000ULL) == 0,
+           "gdt: IST stack %p does not fit the 32-bit IST field; it must "
+           "be mapped at a low linear address",
+           stack_top);
 
-	kernel_tss.ist[ist - 1] = (uint64_t)(uintptr_t)stack_top;
+    kernel_tss.ist[ist - 1] = (uint64_t)(uintptr_t)stack_top;
 }
 
 bool gdt_have_ist(uint8_t ist)
 {
-	return ist >= 1 && ist <= 7 && kernel_tss.ist[ist - 1] != 0;
+    return ist >= 1 && ist <= 7 && kernel_tss.ist[ist - 1] != 0;
 }
 
 /* ------------------------------------------------- public interface ------- */
 
 void gdt_reload(uint32_t cpu)
 {
-	/*
-	 * Per-CPU, per the docs. With a single GDT and a single TSS there is
-	 * nothing to vary yet; the parameter is part of the interface so that
-	 * secondary-CPU startup is a local operation rather than a redesign.
-	 */
-	(void)cpu;
+    /*
+     * Per-CPU, per the docs. With a single GDT and a single TSS there is
+     * nothing to vary yet; the parameter is part of the interface so that
+     * secondary-CPU startup is a local operation rather than a redesign.
+     */
+    (void)cpu;
 
-	gdt_set(GDT_INDEX_NULL,    0);
-	gdt_set(GDT_INDEX_KCODE,   GDT_LCODE64);
-	gdt_set(GDT_INDEX_KDATA,   GDT_LDATA64);
-	/* The STAR base. Never executed; see the file comment. */
-	gdt_set(GDT_INDEX_UCODE32, GDT_LUSERCODE32);
-	gdt_set(GDT_INDEX_UDATA,   GDT_LUSERDATA);
-	gdt_set(GDT_INDEX_UCODE64, GDT_LUSER64);
+    gdt_set(GDT_INDEX_NULL,    0);
+    gdt_set(GDT_INDEX_KCODE,   GDT_LCODE64);
+    gdt_set(GDT_INDEX_KDATA,   GDT_LDATA64);
+    /* The STAR base. Never executed; see the file comment. */
+    gdt_set(GDT_INDEX_UCODE32, GDT_LUSERCODE32);
+    gdt_set(GDT_INDEX_UDATA,   GDT_LUSERDATA);
+    gdt_set(GDT_INDEX_UCODE64, GDT_LUSER64);
 
-	/*
-	 * Zeroed here rather than at compile time, because the TSS descriptor
-	 * needs the TSS's own address, which is not a constant this file can
-	 * compute. This also resets any IST pointer that gdt_set_ist_stack()
-	 * installed, since the CPU is holding a reference to this struct.
-	 */
-	memset(&kernel_tss, 0, sizeof(kernel_tss));
-	/* No I/O permission bitmap follows the structure, so every port access
-	 * from ring 3 is denied. There is no bitmap to make exceptions in. */
-	kernel_tss.iomap_base = sizeof(kernel_tss);
+    /*
+     * Zeroed here rather than at compile time, because the TSS descriptor
+     * needs the TSS's own address, which is not a constant this file can
+     * compute. This also resets any IST pointer that gdt_set_ist_stack()
+     * installed, since the CPU is holding a reference to this struct.
+     */
+    memset(&kernel_tss, 0, sizeof(kernel_tss));
+    /* No I/O permission bitmap follows the structure, so every port access
+     * from ring 3 is denied. There is no bitmap to make exceptions in. */
+    kernel_tss.iomap_base = sizeof(kernel_tss);
 
-	gdt_set(GDT_INDEX_TSS,
-		GDT_TSS_DESC64_LOW((uint64_t)&kernel_tss, sizeof(kernel_tss) - 1));
-	gdt_set(GDT_INDEX_TSS + 1,
-		GDT_TSS_DESC64_HIGH((uint64_t)&kernel_tss));
+    gdt_set(GDT_INDEX_TSS,
+        GDT_TSS_DESC64_LOW((uint64_t)&kernel_tss, sizeof(kernel_tss) - 1));
+    gdt_set(GDT_INDEX_TSS + 1,
+        GDT_TSS_DESC64_HIGH((uint64_t)&kernel_tss));
 
-	struct gdtr gdtr = {
-		.limit = sizeof(gdt) - 1,
-		.base  = (uint64_t)gdt,
-	};
+    struct gdtr gdtr = {
+        .limit = sizeof(gdt) - 1,
+        .base  = (uint64_t)gdt,
+    };
 
-	/* CS first, then the TSS. A ring-3 interrupt before the LTR would load
-	 * RSP0 from a TSS the CPU is not using yet and run on a null stack. */
-	gdt_flush((uint64_t)&gdtr, KERNEL_CODE_SELECTOR, KERNEL_DATA_SELECTOR);
+    /* CS first, then the TSS. A ring-3 interrupt before the LTR would load
+     * RSP0 from a TSS the CPU is not using yet and run on a null stack. */
+    gdt_flush((uint64_t)&gdtr, KERNEL_CODE_SELECTOR, KERNEL_DATA_SELECTOR);
 
-	/*
-	 * Before the TSS, because it is the first thing after the reload that
-	 * can read a segment register, and GS.base is not what it was.
-	 *
-	 * gdt_flush reloads GS with a selector, which is the only thing that
-	 * refreshes its cached descriptor -- and which also replaces the hidden
-	 * base with the descriptor's, zero for a flat segment. The per-CPU
-	 * pointer is destroyed by the reload that makes the segment registers
-	 * correct, so it goes back here. The very next statement in this
-	 * function is a klog(), which reads this_cpu_id().
-	 */
-	percpu_install_gs_base(cpu);
+    /*
+     * Before the TSS, because it is the first thing after the reload that
+     * can read a segment register, and GS.base is not what it was.
+     *
+     * gdt_flush reloads GS with a selector, which is the only thing that
+     * refreshes its cached descriptor -- and which also replaces the hidden
+     * base with the descriptor's, zero for a flat segment. The per-CPU
+     * pointer is destroyed by the reload that makes the segment registers
+     * correct, so it goes back here. The very next statement in this
+     * function is a klog(), which reads this_cpu_id().
+     */
+    percpu_install_gs_base(cpu);
 
-	tss_flush(TSS_SELECTOR);
+    tss_flush(TSS_SELECTOR);
 
-	klog(KLOG_INFO, "gdt: cpu %u, %u entries, kcode=%#x kdata=%#x "
-	     "ucode32=%#x udata=%#x ucode64=%#x tss=%#x\n",
-	     cpu, GDT_ENTRIES, KERNEL_CODE_SELECTOR, KERNEL_DATA_SELECTOR,
-	     USER_CODE_SELECTOR, USER_DATA_SELECTOR, USER_CODE64_SELECTOR,
-	     TSS_SELECTOR);
+    klog(KLOG_INFO, "gdt: cpu %u, %u entries, kcode=%#x kdata=%#x "
+         "ucode32=%#x udata=%#x ucode64=%#x tss=%#x\n",
+         cpu, GDT_ENTRIES, KERNEL_CODE_SELECTOR, KERNEL_DATA_SELECTOR,
+         USER_CODE_SELECTOR, USER_DATA_SELECTOR, USER_CODE64_SELECTOR,
+         TSS_SELECTOR);
 
-	if (!gdt_have_ist(IST_DOUBLE_FAULT) || !gdt_have_ist(IST_NMI))
-		klog(KLOG_WARN,
-		     "gdt: IST1/IST2 have no stack; double fault and NMI will run "
-		     "on the interrupted stack until a low fixed mapping exists");
+    if (!gdt_have_ist(IST_DOUBLE_FAULT) || !gdt_have_ist(IST_NMI))
+        klog(KLOG_WARN,
+             "gdt: IST1/IST2 have no stack; double fault and NMI will run "
+             "on the interrupted stack until a low fixed mapping exists");
 }
 
 void tss_set_kernel_stack(void *stack_top)
 {
-	/*
-	 * The CPU reads RSP0 as a full 64 bits. Truncating it to 16, which the
-	 * protected-mode layout would suggest, would produce a stack address in
-	 * the low 64 KiB and fault on the first ring-3 interrupt.
-	 */
-	kernel_tss.rsp0 = (uint64_t)stack_top;
+    /*
+     * The CPU reads RSP0 as a full 64 bits. Truncating it to 16, which the
+     * protected-mode layout would suggest, would produce a stack address in
+     * the low 64 KiB and fault on the first ring-3 interrupt.
+     */
+    kernel_tss.rsp0 = (uint64_t)stack_top;
 }

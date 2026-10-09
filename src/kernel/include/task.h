@@ -70,41 +70,41 @@ typedef s64 off_t;
  * practice here, so the release path decrements and frees in one step.
  */
 typedef struct {
-	volatile s32 count;
+    volatile s32 count;
 } refcount_t;
 
 #define REFCOUNT_INIT(n) { (n) }
 
 static inline void refcount_set(refcount_t *r, s32 n)
 {
-	__atomic_store_n(&r->count, n, __ATOMIC_RELAXED);
+    __atomic_store_n(&r->count, n, __ATOMIC_RELAXED);
 }
 
 static inline void refcount_inc(refcount_t *r)
 {
-	__atomic_add_fetch(&r->count, 1, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&r->count, 1, __ATOMIC_RELAXED);
 }
 
 /* Decrement and report whether the object is now unreferenced. */
 static inline bool refcount_dec_and_test(refcount_t *r)
 {
-	return __atomic_sub_fetch(&r->count, 1, __ATOMIC_ACQ_REL) == 0;
+    return __atomic_sub_fetch(&r->count, 1, __ATOMIC_ACQ_REL) == 0;
 }
 
 static inline s32 refcount_read(const refcount_t *r)
 {
-	return __atomic_load_n(&r->count, __ATOMIC_ACQUIRE);
+    return __atomic_load_n(&r->count, __ATOMIC_ACQUIRE);
 }
 
 /* ------------------------------------------------------------ states -------- */
 
 typedef enum {
-	TASK_NEW = 0,      /* built, not yet on any run queue */
-	TASK_RUNNABLE,     /* on a run queue, waiting for the CPU */
-	TASK_RUNNING,      /* the task on this CPU right now */
-	TASK_BLOCKED,      /* sleeping on a timer, I/O, or a child */
-	TASK_ZOMBIE,       /* exited, exit status not yet reaped */
-	TASK_DEAD,         /* reaped or detached; the object is on its way out */
+    TASK_NEW = 0,      /* built, not yet on any run queue */
+    TASK_RUNNABLE,     /* on a run queue, waiting for the CPU */
+    TASK_RUNNING,      /* the task on this CPU right now */
+    TASK_BLOCKED,      /* sleeping on a timer, I/O, or a child */
+    TASK_ZOMBIE,       /* exited, exit status not yet reaped */
+    TASK_DEAD,         /* reaped or detached; the object is on its way out */
 } task_state_t;
 
 /* -------------------------------------------------------- credentials ------ */
@@ -116,9 +116,9 @@ typedef enum {
 #define CAP_DAC_OVERRIDE (1ULL << 1)
 
 struct cred {
-	u32 uid;
-	u32 gid;
-	u64 caps;
+    u32 uid;
+    u32 gid;
+    u64 caps;
 };
 
 /* ------------------------------------------------------------- cpumask ------ */
@@ -130,71 +130,71 @@ struct cred {
  * path where a load and a bit test are cheaper than a branch.
  */
 typedef struct {
-	u64 bits[(MAX_CPUS + 63) / 64];
+    u64 bits[(MAX_CPUS + 63) / 64];
 } cpumask_t;
 
 #define CPU_MASK_BITS  ((u32)(sizeof(cpumask_t) * 8))
 
 static inline void cpumask_clear(cpumask_t *m)
 {
-	for (u32 i = 0; i < ARRAY_SIZE(m->bits); i++)
-		m->bits[i] = 0;
+    for (u32 i = 0; i < ARRAY_SIZE(m->bits); i++)
+        m->bits[i] = 0;
 }
 
 static inline void cpumask_setall(cpumask_t *m)
 {
-	for (u32 i = 0; i < ARRAY_SIZE(m->bits); i++)
-		m->bits[i] = ~0ULL;
+    for (u32 i = 0; i < ARRAY_SIZE(m->bits); i++)
+        m->bits[i] = ~0ULL;
 }
 
 static inline void cpumask_set(cpumask_t *m, u32 cpu)
 {
-	if (cpu < CPU_MASK_BITS)
-		m->bits[cpu / 64] |= 1ULL << (cpu % 64);
+    if (cpu < CPU_MASK_BITS)
+        m->bits[cpu / 64] |= 1ULL << (cpu % 64);
 }
 
 static inline void cpumask_clear_one(cpumask_t *m, u32 cpu)
 {
-	if (cpu < CPU_MASK_BITS)
-		m->bits[cpu / 64] &= ~(1ULL << (cpu % 64));
+    if (cpu < CPU_MASK_BITS)
+        m->bits[cpu / 64] &= ~(1ULL << (cpu % 64));
 }
 
 static inline bool cpumask_test(const cpumask_t *m, u32 cpu)
 {
-	if (cpu >= CPU_MASK_BITS)
-		return false;
-	return (m->bits[cpu / 64] & (1ULL << (cpu % 64))) != 0;
+    if (cpu >= CPU_MASK_BITS)
+        return false;
+    return (m->bits[cpu / 64] & (1ULL << (cpu % 64))) != 0;
 }
 
 static inline bool cpumask_empty(const cpumask_t *m)
 {
-	for (u32 i = 0; i < ARRAY_SIZE(m->bits); i++)
-		if (m->bits[i])
-			return false;
-	return true;
+    for (u32 i = 0; i < ARRAY_SIZE(m->bits); i++)
+        if (m->bits[i])
+            return false;
+    return true;
 }
 
 static inline void cpumask_copy(cpumask_t *dst, const cpumask_t *src)
 {
-	for (u32 i = 0; i < ARRAY_SIZE(src->bits); i++)
-		dst->bits[i] = src->bits[i];
+    for (u32 i = 0; i < ARRAY_SIZE(src->bits); i++)
+        dst->bits[i] = src->bits[i];
 }
 
 /* The saved-register block described at the top of this file. Declared here
  * because sched.c and task.c build it and context.S consumes it; the offsets
  * are the ABI between the two, so a change here is a change to context.S. */
 struct context {
-	u64 r15;
-	u64 r14;
-	u64 r13;
-	u64 r12;
-	u64 rbx;
-	u64 rbp;
-	u64 rip;      /* consumed by the `ret` at the end of context_switch */
+    u64 r15;
+    u64 r14;
+    u64 r13;
+    u64 r12;
+    u64 rbx;
+    u64 rbp;
+    u64 rip;      /* consumed by the `ret` at the end of context_switch */
 };
 
 STATIC_ASSERT(offsetof(struct context, rip) == 48,
-	      "context frame layout must match context.S");
+          "context frame layout must match context.S");
 
 /* ------------------------------------------------------------ the task ------ */
 /* Kernel stack size. Large enough for the deepest path in the kernel (a syscall
@@ -211,107 +211,107 @@ STATIC_ASSERT(offsetof(struct context, rip) == 48,
 #define TASK_FPU_STATE_SIZE    4160u
 
 struct task {
-	/* --- identity ------------------------------------------------------- */
-	u32 pid;
-	u32 tid;
-	u32 ppid;
-	u32 pgid;
-	u32 sid;
-	char comm[TASK_COMM_LEN];
+    /* --- identity ------------------------------------------------------- */
+    u32 pid;
+    u32 tid;
+    u32 ppid;
+    u32 pgid;
+    u32 sid;
+    char comm[TASK_COMM_LEN];
 
-	/* --- lifecycle ------------------------------------------------------ */
-	task_state_t state;
-	int exit_code;
-	bool detached;        /* removed from every run queue for good */
-	bool reaped;          /* parent has collected the exit status */
-	struct address_space *mm;
-	refcount_t refs;
+    /* --- lifecycle ------------------------------------------------------ */
+    task_state_t state;
+    int exit_code;
+    bool detached;        /* removed from every run queue for good */
+    bool reaped;          /* parent has collected the exit status */
+    struct address_space *mm;
+    refcount_t refs;
 
-	/* --- run queue membership ------------------------------------------- */
-	struct list_head rq_node;
-	u32 rq_cpu;           /* CPU whose run queue holds this task */
-	bool on_rq;           /* sitting on a per-CPU run queue */
-	bool in_global;       /* sitting on the global migration list */
+    /* --- run queue membership ------------------------------------------- */
+    struct list_head rq_node;
+    u32 rq_cpu;           /* CPU whose run queue holds this task */
+    bool on_rq;           /* sitting on a per-CPU run queue */
+    bool in_global;       /* sitting on the global migration list */
 
-	/* --- scheduling ------------------------------------------------------ */
-	u32 policy;
-	s32 nice;
-	u32 rt_priority;
-	u64 rt_slice;         /* ticks of RT slice left before a RR rotation */
-	u8 mlfq_level;        /* 0 = highest */
-	u8 io_boost;          /* one I/O boost already taken, prevents cascades */
-	u8 rt_throttled;      /* RT bandwidth exhausted for this period */
-	u64 vruntime;         /* nanoseconds of CPU, monotonic per level */
-	u64 exec_budget;      /* ticks left in the current MLFQ slice */
-	u64 deadline_ns;      /* SCHED_DEADLINE: relative deadline */
-	u64 period_ns;        /* SCHED_DEADLINE: period */
-	u64 rt_runtime;       /* SCHED_DEADLINE: CPU budget per period */
-	u64 rt_consumed;      /* consumed out of rt_runtime this period */
-	u64 rt_period_start;  /* tick the current period began at */
-	u64 abs_deadline;     /* absolute tick deadline, EDF ordering key */
-	u64 affinity_mask;    /* 1 << cpu when pinned, 0 when unpinned */
-	cpumask_t cpumask;
-	u64 last_run;         /* tick it last started running */
-	u64 total_ticks;      /* lifetime CPU ticks */
-	u64 wait_ticks;       /* ticks spent runnable-but-not-running (aging) */
-	bool cpu_accounted;   /* charged to a per-CPU accounting bucket */
+    /* --- scheduling ------------------------------------------------------ */
+    u32 policy;
+    s32 nice;
+    u32 rt_priority;
+    u64 rt_slice;         /* ticks of RT slice left before a RR rotation */
+    u8 mlfq_level;        /* 0 = highest */
+    u8 io_boost;          /* one I/O boost already taken, prevents cascades */
+    u8 rt_throttled;      /* RT bandwidth exhausted for this period */
+    u64 vruntime;         /* nanoseconds of CPU, monotonic per level */
+    u64 exec_budget;      /* ticks left in the current MLFQ slice */
+    u64 deadline_ns;      /* SCHED_DEADLINE: relative deadline */
+    u64 period_ns;        /* SCHED_DEADLINE: period */
+    u64 rt_runtime;       /* SCHED_DEADLINE: CPU budget per period */
+    u64 rt_consumed;      /* consumed out of rt_runtime this period */
+    u64 rt_period_start;  /* tick the current period began at */
+    u64 abs_deadline;     /* absolute tick deadline, EDF ordering key */
+    u64 affinity_mask;    /* 1 << cpu when pinned, 0 when unpinned */
+    cpumask_t cpumask;
+    u64 last_run;         /* tick it last started running */
+    u64 total_ticks;      /* lifetime CPU ticks */
+    u64 wait_ticks;       /* ticks spent runnable-but-not-running (aging) */
+    bool cpu_accounted;   /* charged to a per-CPU accounting bucket */
 
-	/* --- execution context ---------------------------------------------- */
-	void *kernel_stack;
-	u64 context_rsp;      /* points at the r15 slot of struct context */
-	u64 *fpu_state;       /* 64-byte aligned FXSAVE area */
-	bool fpu_dirty;       /* x87/SSE state must be saved on switch-out */
+    /* --- execution context ---------------------------------------------- */
+    void *kernel_stack;
+    u64 context_rsp;      /* points at the r15 slot of struct context */
+    u64 *fpu_state;       /* 64-byte aligned FXSAVE area */
+    bool fpu_dirty;       /* x87/SSE state must be saved on switch-out */
 
-	/*
-	 * The task's FS base, and the only reason MSR_FS_BASE is not simply a
-	 * per-CPU constant.
-	 *
-	 * MSR_FS_BASE is a per-CPU register, and a thread pointer is per-task
-	 * state: arch_prctl writes the register for whoever is running now, and
-	 * every %fs-relative access the task makes is relative to it. So the
-	 * value has to travel with the task across a switch, exactly as CR3 and
-	 * the FPU image do — see sched_switch_frame(), which is where that save
-	 * and restore belongs and where the FS pair has to sit alongside the
-	 * other two.
-	 *
-	 * Zero for a kernel thread and for a user task that has not installed a
-	 * thread pointer, which is the state every process is in before its
-	 * startup code runs. Nothing in the kernel addresses memory through
-	 * %fs — per-CPU state is %gs, read through the hidden GS base — so a
-	 * task's FS base pointing into user space is inert while the task is
-	 * running in the kernel.
-	 */
-	u64 fs_base;
+    /*
+     * The task's FS base, and the only reason MSR_FS_BASE is not simply a
+     * per-CPU constant.
+     *
+     * MSR_FS_BASE is a per-CPU register, and a thread pointer is per-task
+     * state: arch_prctl writes the register for whoever is running now, and
+     * every %fs-relative access the task makes is relative to it. So the
+     * value has to travel with the task across a switch, exactly as CR3 and
+     * the FPU image do — see sched_switch_frame(), which is where that save
+     * and restore belongs and where the FS pair has to sit alongside the
+     * other two.
+     *
+     * Zero for a kernel thread and for a user task that has not installed a
+     * thread pointer, which is the state every process is in before its
+     * startup code runs. Nothing in the kernel addresses memory through
+     * %fs — per-CPU state is %gs, read through the hidden GS base — so a
+     * task's FS base pointing into user space is inert while the task is
+     * running in the kernel.
+     */
+    u64 fs_base;
 
-	/* --- kernel thread entry -------------------------------------------- */
-	void (*thread_fn)(void *);
-	void *thread_arg;
+    /* --- kernel thread entry -------------------------------------------- */
+    void (*thread_fn)(void *);
+    void *thread_arg;
 
-	/* --- files ------------------------------------------------------------ */
-	struct file **fds;
-	u32 fd_count;
-	struct cred cred;
+    /* --- files ------------------------------------------------------------ */
+    struct file **fds;
+    u32 fd_count;
+    struct cred cred;
 
-	/* --- process relationships ------------------------------------------- */
-	struct list_head sibling;   /* on the parent's children list */
-	struct list_head children;  /* head of this task's children */
-	struct task *parent;
-	void *mm_private;
+    /* --- process relationships ------------------------------------------- */
+    struct list_head sibling;   /* on the parent's children list */
+    struct list_head children;  /* head of this task's children */
+    struct task *parent;
+    void *mm_private;
 
-	/* Where a user task starts. The kernel trampoline reads these and
-	 * iretq's into ring 3; a kernel task ignores them. A task created by
-	 * fork inherits the parent's saved user registers here, so it resumes
-	 * at the same instruction with RAX = 0. */
-	u64 user_rip;
-	u64 user_rsp;
-	u64 user_rflags;
+    /* Where a user task starts. The kernel trampoline reads these and
+     * iretq's into ring 3; a kernel task ignores them. A task created by
+     * fork inherits the parent's saved user registers here, so it resumes
+     * at the same instruction with RAX = 0. */
+    u64 user_rip;
+    u64 user_rsp;
+    u64 user_rflags;
 
-	/* --- sleeping and waiting --------------------------------------------- */
-	struct list_head sleep_node;  /* on a per-CPU sleep list */
-	bool sleeping;
-	u64 wake_tick;                /* tick the sleeper becomes runnable */
-	struct task *waiter;          /* task blocked on this one changing state */
-	struct list_head all_node;    /* on the global task list */
+    /* --- sleeping and waiting --------------------------------------------- */
+    struct list_head sleep_node;  /* on a per-CPU sleep list */
+    bool sleeping;
+    u64 wake_tick;                /* tick the sleeper becomes runnable */
+    struct task *waiter;          /* task blocked on this one changing state */
+    struct list_head all_node;    /* on the global task list */
 };
 
 STATIC_ASSERT(sizeof(cpumask_t) == 32, "cpumask must cover MAX_CPUS in 4 words");

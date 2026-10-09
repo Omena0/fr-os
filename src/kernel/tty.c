@@ -42,10 +42,10 @@ KLOG_SUBSYSTEM("tty");
 #define TTY_RING_CAP 4096
 
 struct tty_ring {
-	u8    *buf;
-	size_t head;   /* next position written */
-	size_t tail;   /* next position read */
-	size_t count;  /* bytes currently held */
+    u8    *buf;
+    size_t head;   /* next position written */
+    size_t tail;   /* next position read */
+    size_t count;  /* bytes currently held */
 };
 
 /* Explicit count rather than a head/tail comparison: the ring is empty exactly
@@ -86,47 +86,47 @@ static bool out_dropped_reported;
  * account for; the ring itself has no notion of a drop. */
 static size_t ring_push(struct tty_ring *r, const u8 *src, size_t count)
 {
-	size_t space;
-	size_t n;
+    size_t space;
+    size_t n;
 
-	/*
-	 * A ring with no storage is not a ring that should be pushed into, and
-	 * `r->buf[r->head]` on a null buf is a write to address 0 -- which is
-	 * indistinguishable, from the fault that reports it, from a wild store
-	 * anywhere else. Refusing here and saying so is the difference between a
-	 * located fault and a mystery. tty_init() checks the same invariant when
-	 * it attaches the storage, so reaching this means something detached it
-	 * afterwards.
-	 */
-	if (!r->buf) {
-		klog(KLOG_FATAL, "tty: ring push with no storage attached\n");
-		return 0;
-	}
+    /*
+     * A ring with no storage is not a ring that should be pushed into, and
+     * `r->buf[r->head]` on a null buf is a write to address 0 -- which is
+     * indistinguishable, from the fault that reports it, from a wild store
+     * anywhere else. Refusing here and saying so is the difference between a
+     * located fault and a mystery. tty_init() checks the same invariant when
+     * it attaches the storage, so reaching this means something detached it
+     * afterwards.
+     */
+    if (!r->buf) {
+        klog(KLOG_FATAL, "tty: ring push with no storage attached\n");
+        return 0;
+    }
 
-	space = TTY_RING_CAP - r->count;
-	n = MIN(count, space);
+    space = TTY_RING_CAP - r->count;
+    n = MIN(count, space);
 
-	for (size_t i = 0; i < n; i++) {
-		r->buf[r->head] = src[i];
-		if (++r->head == TTY_RING_CAP)
-			r->head = 0;
-	}
-	r->count += n;
-	return n;
+    for (size_t i = 0; i < n; i++) {
+        r->buf[r->head] = src[i];
+        if (++r->head == TTY_RING_CAP)
+            r->head = 0;
+    }
+    r->count += n;
+    return n;
 }
 
 /* Copy out, returning how many bytes were available. */
 static size_t ring_pop(struct tty_ring *r, u8 *dst, size_t count)
 {
-	size_t n = MIN(count, r->count);
+    size_t n = MIN(count, r->count);
 
-	for (size_t i = 0; i < n; i++) {
-		dst[i] = r->buf[r->tail];
-		if (++r->tail == TTY_RING_CAP)
-			r->tail = 0;
-	}
-	r->count -= n;
-	return n;
+    for (size_t i = 0; i < n; i++) {
+        dst[i] = r->buf[r->tail];
+        if (++r->tail == TTY_RING_CAP)
+            r->tail = 0;
+    }
+    r->count -= n;
+    return n;
 }
 
 /* ------------------------------------------------------------- output ------- */
@@ -145,59 +145,59 @@ static size_t ring_pop(struct tty_ring *r, u8 *dst, size_t count)
  */
 static void tty_drain(void)
 {
-	u8 chunk[TTY_DRAIN_CHUNK];
+    u8 chunk[TTY_DRAIN_CHUNK];
 
-	for (;;) {
-		u64 flags = spinlock_irqsave(&out_lock);
-		size_t n = ring_pop(&out_ring, chunk, TTY_DRAIN_CHUNK);
+    for (;;) {
+        u64 flags = spinlock_irqsave(&out_lock);
+        size_t n = ring_pop(&out_ring, chunk, TTY_DRAIN_CHUNK);
 
-		spinlock_unlock_irqrestore(&out_lock, flags);
+        spinlock_unlock_irqrestore(&out_lock, flags);
 
-		if (n == 0)
-			return;
-		console_write_raw((const char *)chunk, n);
-	}
+        if (n == 0)
+            return;
+        console_write_raw((const char *)chunk, n);
+    }
 }
 
 void tty_write(const char *buf, size_t count)
 {
-	size_t accepted;
-	u64 dropped_now = 0;
-	bool first = false;
+    size_t accepted;
+    u64 dropped_now = 0;
+    bool first = false;
 
-	if (!buf || count == 0)
-		return;
+    if (!buf || count == 0)
+        return;
 
-	u64 flags = spinlock_irqsave(&out_lock);
+    u64 flags = spinlock_irqsave(&out_lock);
 
-	accepted = ring_push(&out_ring, (const u8 *)buf, count);
-	if (accepted < count) {
-		dropped_now = count - accepted;
-		out_dropped += dropped_now;
-		/* Warn on the first drop of a burst only. Every drop reporting
-		 * itself would fill the console with the very output that did not
-		 * fit, which is a feedback loop. */
-		first = !out_dropped_reported;
-		out_dropped_reported = true;
-	}
+    accepted = ring_push(&out_ring, (const u8 *)buf, count);
+    if (accepted < count) {
+        dropped_now = count - accepted;
+        out_dropped += dropped_now;
+        /* Warn on the first drop of a burst only. Every drop reporting
+         * itself would fill the console with the very output that did not
+         * fit, which is a feedback loop. */
+        first = !out_dropped_reported;
+        out_dropped_reported = true;
+    }
 
-	spinlock_unlock_irqrestore(&out_lock, flags);
+    spinlock_unlock_irqrestore(&out_lock, flags);
 
-	if (first)
-		klog(KLOG_WARN, "tty: output ring full, %lu byte(s) dropped "
-		     "(%lu total)\n", (unsigned long)dropped_now,
-		     (unsigned long)out_dropped);
+    if (first)
+        klog(KLOG_WARN, "tty: output ring full, %lu byte(s) dropped "
+             "(%lu total)\n", (unsigned long)dropped_now,
+             (unsigned long)out_dropped);
 
-	tty_drain();
+    tty_drain();
 }
 
 u64 tty_write_dropped(void)
 {
-	u64 flags = spinlock_irqsave(&out_lock);
-	u64 n = out_dropped;
+    u64 flags = spinlock_irqsave(&out_lock);
+    u64 n = out_dropped;
 
-	spinlock_unlock_irqrestore(&out_lock, flags);
-	return n;
+    spinlock_unlock_irqrestore(&out_lock, flags);
+    return n;
 }
 
 /* ------------------------------------------------------------- input -------- */
@@ -243,29 +243,29 @@ static struct task *tty_waiter;
  */
 static void tty_in_push(char c)
 {
-	struct task *wake = NULL;
-	u64 flags = spinlock_irqsave(&in_lock);
+    struct task *wake = NULL;
+    u64 flags = spinlock_irqsave(&in_lock);
 
-	/*
-	 * No logging from here. This runs on every keystroke inside an interrupt
-	 * handler, and reporting a full ring through the console would recurse
-	 * into the 8042 handshakes on a controller that is by definition not
-	 * keeping up. tty_read_dropped() is how the loss is found.
-	 */
-	if (ring_push(&in_ring, (const u8 *)&c, 1) == 0)
-		in_dropped++;
+    /*
+     * No logging from here. This runs on every keystroke inside an interrupt
+     * handler, and reporting a full ring through the console would recurse
+     * into the 8042 handshakes on a controller that is by definition not
+     * keeping up. tty_read_dropped() is how the loss is found.
+     */
+    if (ring_push(&in_ring, (const u8 *)&c, 1) == 0)
+        in_dropped++;
 
-	if (tty_waiter) {
-		wake = tty_waiter;
-		tty_waiter = NULL;
-	}
+    if (tty_waiter) {
+        wake = tty_waiter;
+        tty_waiter = NULL;
+    }
 
-	spinlock_unlock_irqrestore(&in_lock, flags);
+    spinlock_unlock_irqrestore(&in_lock, flags);
 
-	if (wake)
-		sched_wake(wake);
+    if (wake)
+        sched_wake(wake);
 
-	console_putc(c);
+    console_putc(c);
 }
 
 /*
@@ -296,10 +296,10 @@ static void tty_in_push(char c)
  */
 static void tty_poll_serial(void)
 {
-	char c;
+    char c;
 
-	while (serial_getc(&c))
-		tty_in_push((uint8_t)c);
+    while (serial_getc(&c))
+        tty_in_push((uint8_t)c);
 }
 
 /* ------------------------------------------------- COM1 receive interrupt --- */
@@ -356,21 +356,21 @@ static void tty_poll_serial(void)
  * it, evaluated by the compiler instead of by a boot.
  */
 _Static_assert(VECTOR_IRQ_COM1 == VECTOR_IRQ_BASE + 4,
-	       "COM1 is IRQ4 and the remap delivers VECTOR_IRQ_BASE + irq; a "
-	       "handler on any other vector is never entered");
+           "COM1 is IRQ4 and the remap delivers VECTOR_IRQ_BASE + irq; a "
+           "handler on any other vector is never entered");
 _Static_assert(VECTOR_IRQ_COM1 < VECTOR_STUB_MAX,
-	       "interrupt_entry.S generates no stub at or past VECTOR_STUB_MAX, "
-	       "so this vector would be absorbed by the default handler");
+           "interrupt_entry.S generates no stub at or past VECTOR_STUB_MAX, "
+           "so this vector would be absorbed by the default handler");
 _Static_assert(VECTOR_IRQ_COM1 != VECTOR_IRQ_KEYBOARD,
-	       "two drivers on one vector is the race idt_set_handler() warns "
-	       "about");
+           "two drivers on one vector is the race idt_set_handler() warns "
+           "about");
 _Static_assert(PIC1_IRQ_COM1_BIT == (1u << 4),
-	       "IRQ4 is bit 4 of the master's interrupt mask register");
+           "IRQ4 is bit 4 of the master's interrupt mask register");
 _Static_assert(UART_IER_RX_AVAILABLE == 1,
-	       "bit 0 of the UART's interrupt enable register is the receiver");
+           "bit 0 of the UART's interrupt enable register is the receiver");
 _Static_assert(COM1_DRAIN_LIMIT >= COM1_FIFO_CAP,
-	       "the drain bound must exceed what the receive FIFO can hold, or a "
-	       "burst is truncated with bytes still in the device");
+           "the drain bound must exceed what the receive FIFO can hold, or a "
+           "burst is truncated with bytes still in the device");
 
 /*
  * The register offsets this file touches are not assertable against each other
@@ -406,171 +406,171 @@ _Static_assert(COM1_DRAIN_LIMIT >= COM1_FIFO_CAP,
  */
 static void com1_irq(struct interrupt_frame *frame)
 {
-	unsigned int drained = 0;
-	char c;
+    unsigned int drained = 0;
+    char c;
 
-	(void)frame;
+    (void)frame;
 
-	while (drained < COM1_DRAIN_LIMIT && serial_getc(&c)) {
-		tty_in_push((uint8_t)c);
-		drained++;
-	}
+    while (drained < COM1_DRAIN_LIMIT && serial_getc(&c)) {
+        tty_in_push((uint8_t)c);
+        drained++;
+    }
 }
 
 size_t tty_read(char *buf, size_t count, bool block)
 {
-	if (!buf || count == 0)
-		return 0;
+    if (!buf || count == 0)
+        return 0;
 
-	for (;;) {
-		u64 flags;
-		struct task *me;
-		size_t n;
+    for (;;) {
+        u64 flags;
+        struct task *me;
+        size_t n;
 
-		/* Serial first, so a byte that arrived while the ring was empty is
-		 * seen before deciding the ring is empty at all. This is the
-		 * fallback for a UART whose receive interrupt does not fire, and it
-		 * shares the FIFO with the COM1 handler rather than duplicating it:
-		 * a byte leaves the receive FIFO when the RBR is read, so whichever
-		 * of the two gets there first has it and the other cannot push the
-		 * same byte twice. */
-		tty_poll_serial();
+        /* Serial first, so a byte that arrived while the ring was empty is
+         * seen before deciding the ring is empty at all. This is the
+         * fallback for a UART whose receive interrupt does not fire, and it
+         * shares the FIFO with the COM1 handler rather than duplicating it:
+         * a byte leaves the receive FIFO when the RBR is read, so whichever
+         * of the two gets there first has it and the other cannot push the
+         * same byte twice. */
+        tty_poll_serial();
 
-		me = block ? current_task() : NULL;
+        me = block ? current_task() : NULL;
 
-		flags = spinlock_irqsave(&in_lock);
-		n = ring_pop(&in_ring, (u8 *)buf, count);
+        flags = spinlock_irqsave(&in_lock);
+        n = ring_pop(&in_ring, (u8 *)buf, count);
 
-		/*
-		 * Publish, then look again -- both under in_lock, which is what
-		 * makes the pair atomic with respect to the interrupt handler.
-		 *
-		 * The gap this closes is real and is not hypothetical. Between the
-		 * ring_pop() above finding nothing and this task being recorded as
-		 * the waiter, an interrupt can arrive: the handler pushes the byte
-		 * and reads tty_waiter, finds NULL, and wakes nobody. The byte is
-		 * in the ring and this task is about to sleep on an empty ring, so
-		 * nothing wakes it until the *next* byte arrives -- one keystroke
-		 * late, forever if there is only ever one keystroke.
-		 *
-		 * Ordering it the other way is not available: the waiter cannot be
-		 * published before the ring is found empty, because then a reader
-		 * that finds a full ring would have to undo the publication, and
-		 * the window would simply move.
-		 *
-		 * So the second ring_pop() runs after the publication and before
-		 * the unlock, and both it and the handler's push-and-take-waiter
-		 * hold in_lock. Exactly one of three things happens:
-		 *
-		 *   - the handler completes first: the byte is in the ring, this
-		 *     pop finds it, and the task returns the data instead of
-		 *     sleeping;
-		 *   - this task completes first: the pop finds nothing, the waiter
-		 *     is cleared, and the handler then sees no waiter -- but the
-		 *     byte it pushed is still in the ring, so the loop's next pass
-		 *     pops it;
-		 *   - a reader on another CPU does it first: same as the second
-		 *     case, and tty_waiter is cleared so the handler does not wake
-		 *     a task that has already been served.
-		 */
-		if (n == 0 && me) {
-			tty_waiter = me;
-			n = ring_pop(&in_ring, (u8 *)buf, count);
-			if (n != 0) {
-				tty_waiter = NULL;
-				spinlock_unlock_irqrestore(&in_lock, flags);
-				return n;
-			}
-			/*
-			 * Still empty. Keep tty_waiter set across the unlock and
-			 * the block so an interrupt that delivers a byte after
-			 * the second ring_pop sees a valid waiter and wakes us.
-			 * Clearing it before sched_block_current() is the race
-			 * that leaves a task blocked forever on the first byte.
-			 */
-			spinlock_unlock_irqrestore(&in_lock, flags);
-			sched_block_current();
-			tty_waiter = NULL;
-			continue;
-		}
-		spinlock_unlock_irqrestore(&in_lock, flags);
+        /*
+         * Publish, then look again -- both under in_lock, which is what
+         * makes the pair atomic with respect to the interrupt handler.
+         *
+         * The gap this closes is real and is not hypothetical. Between the
+         * ring_pop() above finding nothing and this task being recorded as
+         * the waiter, an interrupt can arrive: the handler pushes the byte
+         * and reads tty_waiter, finds NULL, and wakes nobody. The byte is
+         * in the ring and this task is about to sleep on an empty ring, so
+         * nothing wakes it until the *next* byte arrives -- one keystroke
+         * late, forever if there is only ever one keystroke.
+         *
+         * Ordering it the other way is not available: the waiter cannot be
+         * published before the ring is found empty, because then a reader
+         * that finds a full ring would have to undo the publication, and
+         * the window would simply move.
+         *
+         * So the second ring_pop() runs after the publication and before
+         * the unlock, and both it and the handler's push-and-take-waiter
+         * hold in_lock. Exactly one of three things happens:
+         *
+         *   - the handler completes first: the byte is in the ring, this
+         *     pop finds it, and the task returns the data instead of
+         *     sleeping;
+         *   - this task completes first: the pop finds nothing, the waiter
+         *     is cleared, and the handler then sees no waiter -- but the
+         *     byte it pushed is still in the ring, so the loop's next pass
+         *     pops it;
+         *   - a reader on another CPU does it first: same as the second
+         *     case, and tty_waiter is cleared so the handler does not wake
+         *     a task that has already been served.
+         */
+        if (n == 0 && me) {
+            tty_waiter = me;
+            n = ring_pop(&in_ring, (u8 *)buf, count);
+            if (n != 0) {
+                tty_waiter = NULL;
+                spinlock_unlock_irqrestore(&in_lock, flags);
+                return n;
+            }
+            /*
+             * Still empty. Keep tty_waiter set across the unlock and
+             * the block so an interrupt that delivers a byte after
+             * the second ring_pop sees a valid waiter and wakes us.
+             * Clearing it before sched_block_current() is the race
+             * that leaves a task blocked forever on the first byte.
+             */
+            spinlock_unlock_irqrestore(&in_lock, flags);
+            sched_block_current();
+            tty_waiter = NULL;
+            continue;
+        }
+        spinlock_unlock_irqrestore(&in_lock, flags);
 
-		if (n != 0)
-			return n;
+        if (n != 0)
+            return n;
 
-		/* Nothing buffered and no wait requested. Reporting 0 is how a
-		 * caller tells an idle terminal from a closed one, and it is what
-		 * makes a poll loop terminate.
-		 *
-		 * `me == NULL` with block requested means current_task() gave
-		 * nothing, and sched_block_current() would then be a no-op: the
-		 * loop would spin here forever with no other task to run and
-		 * nothing to wake it. Reporting 0 is the honest answer for a
-		 * caller that is not a task. */
-		if (!me)
-			return 0;
+        /* Nothing buffered and no wait requested. Reporting 0 is how a
+         * caller tells an idle terminal from a closed one, and it is what
+         * makes a poll loop terminate.
+         *
+         * `me == NULL` with block requested means current_task() gave
+         * nothing, and sched_block_current() would then be a no-op: the
+         * loop would spin here forever with no other task to run and
+         * nothing to wake it. Reporting 0 is the honest answer for a
+         * caller that is not a task. */
+        if (!me)
+            return 0;
 
-		/*
-		 * Nothing buffered and a wait was requested: give the CPU up.
-		 *
-		 * This used to `sti; hlt;` -- enable interrupts, halt, wait for
-		 * something to wake the core. That is wrong in two separate ways,
-		 * and both showed up.
-		 *
-		 * A terminal read that halts the whole processor is not a process
-		 * blocking on input, it is the machine stopping: nothing else runs,
-		 * nothing else can make progress, and the only thing that ever ends
-		 * it is a device that may never speak. Yielding is what "block"
-		 * means, and the scheduler already knows how.
-		 *
-		 * And enabling interrupts here is much worse than wasteful. Every
-		 * syscall arrives with IF clear -- SYSCALL's SFMASK clears it -- so
-		 * this was the *first* time a timer tick could land while a process
-		 * was inside the kernel's syscall path. The kernel has never been
-		 * tested that way and does not survive it: with interrupts enabled
-		 * in a blocking read, runs died at `ret` in this function with a
-		 * *user* address as the stack pointer, and elsewhere jumped to
-		 * linear 0x400. Both are the interrupt/return path, not this loop.
-		 *
-		 * Yielding leaves interrupts off, exactly as every other blocking
-		 * path in the kernel does, and lets the idle task run -- which is
-		 * what keeps the timer ticking, since the idle task is what a
-		 * halted CPU was pretending to be.
-		 *
-		 * Note what is deliberately NOT here, given that the two faults
-		 * above both involved interrupt state. A syscall arrives with IF
-		 * clear, and this function does not turn it back on: the idle task
-		 * is the thing that re-enables interrupts around its hlt, and it
-		 * does that for the whole machine regardless of who blocked last.
-		 * Setting IF here would be the same enabling that killed the runs
-		 * above, and it would also be redundant -- there is no state this
-		 * function can leave behind that the idle loop does not already
-		 * establish for itself.
-		 *
-		 * MEASURED, and it is the boundary of what is known about the
-		 * wakeup below. With this file's half complete -- handler on vector
-		 * 36, IRQ4 unmasked, guest read-back of the master's mask showing
-		 * 0xec, and the UART's receive line visibly asserted (pic0 irr bit
-		 * 4) -- com1_irq() still never runs. The machine takes exactly one
-		 * timer tick and then delivers nothing further: over 26 s at
-		 * 100 Hz, one `pit: tick` line (tick 100 never arrives), pic0
-		 * reading isr=01 in 16 of 16 samples, the CPU in the idle halt in
-		 * 40 of 40 samples. An 8259 blocks equal-or-lower-priority requests
-		 * while an in-service bit is set, and IRQ4 is below IRQ0, so the
-		 * COM1 handler is waiting on the timer path clearing, not on
-		 * anything in this file. Reported to whoever owns idt.c.
-		 */
-		sched_block_current();
-	}
+        /*
+         * Nothing buffered and a wait was requested: give the CPU up.
+         *
+         * This used to `sti; hlt;` -- enable interrupts, halt, wait for
+         * something to wake the core. That is wrong in two separate ways,
+         * and both showed up.
+         *
+         * A terminal read that halts the whole processor is not a process
+         * blocking on input, it is the machine stopping: nothing else runs,
+         * nothing else can make progress, and the only thing that ever ends
+         * it is a device that may never speak. Yielding is what "block"
+         * means, and the scheduler already knows how.
+         *
+         * And enabling interrupts here is much worse than wasteful. Every
+         * syscall arrives with IF clear -- SYSCALL's SFMASK clears it -- so
+         * this was the *first* time a timer tick could land while a process
+         * was inside the kernel's syscall path. The kernel has never been
+         * tested that way and does not survive it: with interrupts enabled
+         * in a blocking read, runs died at `ret` in this function with a
+         * *user* address as the stack pointer, and elsewhere jumped to
+         * linear 0x400. Both are the interrupt/return path, not this loop.
+         *
+         * Yielding leaves interrupts off, exactly as every other blocking
+         * path in the kernel does, and lets the idle task run -- which is
+         * what keeps the timer ticking, since the idle task is what a
+         * halted CPU was pretending to be.
+         *
+         * Note what is deliberately NOT here, given that the two faults
+         * above both involved interrupt state. A syscall arrives with IF
+         * clear, and this function does not turn it back on: the idle task
+         * is the thing that re-enables interrupts around its hlt, and it
+         * does that for the whole machine regardless of who blocked last.
+         * Setting IF here would be the same enabling that killed the runs
+         * above, and it would also be redundant -- there is no state this
+         * function can leave behind that the idle loop does not already
+         * establish for itself.
+         *
+         * MEASURED, and it is the boundary of what is known about the
+         * wakeup below. With this file's half complete -- handler on vector
+         * 36, IRQ4 unmasked, guest read-back of the master's mask showing
+         * 0xec, and the UART's receive line visibly asserted (pic0 irr bit
+         * 4) -- com1_irq() still never runs. The machine takes exactly one
+         * timer tick and then delivers nothing further: over 26 s at
+         * 100 Hz, one `pit: tick` line (tick 100 never arrives), pic0
+         * reading isr=01 in 16 of 16 samples, the CPU in the idle halt in
+         * 40 of 40 samples. An 8259 blocks equal-or-lower-priority requests
+         * while an in-service bit is set, and IRQ4 is below IRQ0, so the
+         * COM1 handler is waiting on the timer path clearing, not on
+         * anything in this file. Reported to whoever owns idt.c.
+         */
+        sched_block_current();
+    }
 }
 
 u64 tty_read_dropped(void)
 {
-	u64 flags = spinlock_irqsave(&in_lock);
-	u64 n = in_dropped;
+    u64 flags = spinlock_irqsave(&in_lock);
+    u64 n = in_dropped;
 
-	spinlock_unlock_irqrestore(&in_lock, flags);
-	return n;
+    spinlock_unlock_irqrestore(&in_lock, flags);
+    return n;
 }
 
 /* --------------------------------------------------------- PS/2 keyboard ---- */
@@ -640,32 +640,32 @@ u64 tty_read_dropped(void)
  * measurement. */
 static u64 ps2_us_to_tsc(u64 us)
 {
-	if (!cpu_features.tsc_khz)
-		return us * 3000;	/* ~3 GHz, the common case */
-	return us * cpu_features.tsc_khz / 1000;
+    if (!cpu_features.tsc_khz)
+        return us * 3000;    /* ~3 GHz, the common case */
+    return us * cpu_features.tsc_khz / 1000;
 }
 
 static bool ps2_wait(uint8_t mask, bool set)
 {
-	u64 deadline = rdtsc() + (u64)ps2_us_to_tsc(PS2_WAIT_US);
+    u64 deadline = rdtsc() + (u64)ps2_us_to_tsc(PS2_WAIT_US);
 
-	for (;;) {
-		uint8_t status = inb(PS2_STATUS);
+    for (;;) {
+        uint8_t status = inb(PS2_STATUS);
 
-		if (!!(status & mask) == set)
-			return true;
-		if (rdtsc() >= deadline)
-			return false;
-		io_wait();
-	}
+        if (!!(status & mask) == set)
+            return true;
+        if (rdtsc() >= deadline)
+            return false;
+        io_wait();
+    }
 }
 
 static bool ps2_write_port(uint16_t port, uint8_t value)
 {
-	if (!ps2_wait(PS2_STATUS_IBF, false))
-		return false;
-	outb(port, value);
-	return true;
+    if (!ps2_wait(PS2_STATUS_IBF, false))
+        return false;
+    outb(port, value);
+    return true;
 }
 
 /* Read one byte from the data port, assuming the caller has already established
@@ -673,9 +673,9 @@ static bool ps2_write_port(uint16_t port, uint8_t value)
  * cannot turn into a phantom keystroke. */
 static uint8_t ps2_read_data(void)
 {
-	if (!ps2_wait(PS2_STATUS_OBF, true))
-		return 0;
-	return inb(PS2_DATA);
+    if (!ps2_wait(PS2_STATUS_OBF, true))
+        return 0;
+    return inb(PS2_DATA);
 }
 
 /* Throw away anything the controller already has queued. Done before the line
@@ -683,10 +683,10 @@ static uint8_t ps2_read_data(void)
  * otherwise arrive as the first keystroke of the session. */
 static void ps2_flush(void)
 {
-	unsigned int guard = 1024;
+    unsigned int guard = 1024;
 
-	while ((inb(PS2_STATUS) & PS2_STATUS_OBF) && guard--)
-		(void)inb(PS2_DATA);
+    while ((inb(PS2_STATUS) & PS2_STATUS_OBF) && guard--)
+        (void)inb(PS2_DATA);
 }
 
 /* Consume one controller response, leaving the data register. Used to swallow the
@@ -701,12 +701,12 @@ static void ps2_flush(void)
  */
 static void ps2_expect_ack(uint8_t cmd, uint8_t want)
 {
-	uint8_t resp = ps2_read_data();
+    uint8_t resp = ps2_read_data();
 
-	if (resp != want)
-		klog(KLOG_WARN, "tty: 8042 command 0x%02x answered 0x%02x, "
-		     "expected 0x%02x\n", (unsigned)cmd, (unsigned)resp,
-		     (unsigned)want);
+    if (resp != want)
+        klog(KLOG_WARN, "tty: 8042 command 0x%02x answered 0x%02x, "
+             "expected 0x%02x\n", (unsigned)cmd, (unsigned)resp,
+             (unsigned)want);
 }
 
 /* ---------------------------------------------- scancode translation -------- */
@@ -715,27 +715,27 @@ static void ps2_expect_ack(uint8_t cmd, uint8_t want)
  * byte: it is either a modifier, a function key, or part of a sequence this
  * driver does not decode yet. */
 static const char scancode_base[0x40] = {
-	[0x01] = 0x1B,                    /* Esc */
-	[0x02] = '1', [0x03] = '2', [0x04] = '3', [0x05] = '4',
-	[0x06] = '5', [0x07] = '6', [0x08] = '7', [0x09] = '8',
-	[0x0A] = '9', [0x0B] = '0',
-	[0x0C] = '-', [0x0D] = '=',
-	[0x0E] = '\b',                    /* Backspace */
-	[0x0F] = '\t',                    /* Tab */
-	[0x10] = 'q', [0x11] = 'w', [0x12] = 'e', [0x13] = 'r',
-	[0x14] = 't', [0x15] = 'y', [0x16] = 'u', [0x17] = 'i',
-	[0x18] = 'o', [0x19] = 'p',
-	[0x1A] = '[', [0x1B] = ']',
-	[0x1C] = '\n',                    /* Enter */
-	[0x1E] = 'a', [0x1F] = 's', [0x20] = 'd', [0x21] = 'f',
-	[0x22] = 'g', [0x23] = 'h', [0x24] = 'j', [0x25] = 'k',
-	[0x26] = 'l',
-	[0x27] = ';', [0x28] = '\'', [0x29] = '`',
-	[0x2B] = '\\',
-	[0x2C] = 'z', [0x2D] = 'x', [0x2E] = 'c', [0x2F] = 'v',
-	[0x30] = 'b', [0x31] = 'n', [0x32] = 'm',
-	[0x33] = ',', [0x34] = '.', [0x35] = '/',
-	[0x39] = ' ',
+    [0x01] = 0x1B,                    /* Esc */
+    [0x02] = '1', [0x03] = '2', [0x04] = '3', [0x05] = '4',
+    [0x06] = '5', [0x07] = '6', [0x08] = '7', [0x09] = '8',
+    [0x0A] = '9', [0x0B] = '0',
+    [0x0C] = '-', [0x0D] = '=',
+    [0x0E] = '\b',                    /* Backspace */
+    [0x0F] = '\t',                    /* Tab */
+    [0x10] = 'q', [0x11] = 'w', [0x12] = 'e', [0x13] = 'r',
+    [0x14] = 't', [0x15] = 'y', [0x16] = 'u', [0x17] = 'i',
+    [0x18] = 'o', [0x19] = 'p',
+    [0x1A] = '[', [0x1B] = ']',
+    [0x1C] = '\n',                    /* Enter */
+    [0x1E] = 'a', [0x1F] = 's', [0x20] = 'd', [0x21] = 'f',
+    [0x22] = 'g', [0x23] = 'h', [0x24] = 'j', [0x25] = 'k',
+    [0x26] = 'l',
+    [0x27] = ';', [0x28] = '\'', [0x29] = '`',
+    [0x2B] = '\\',
+    [0x2C] = 'z', [0x2D] = 'x', [0x2E] = 'c', [0x2F] = 'v',
+    [0x30] = 'b', [0x31] = 'n', [0x32] = 'm',
+    [0x33] = ',', [0x34] = '.', [0x35] = '/',
+    [0x39] = ' ',
 };
 
 /*
@@ -745,14 +745,14 @@ static const char scancode_base[0x40] = {
  * that are all the same transformation.
  */
 static const char scancode_shifted[0x40] = {
-	[0x02] = '!', [0x03] = '@', [0x04] = '#', [0x05] = '$',
-	[0x06] = '%', [0x07] = '^', [0x08] = '&', [0x09] = '*',
-	[0x0A] = '(', [0x0B] = ')',
-	[0x0C] = '_', [0x0D] = '+',
-	[0x1A] = '{', [0x1B] = '}',
-	[0x27] = ':', [0x28] = '"', [0x29] = '~',
-	[0x2B] = '|',
-	[0x33] = '<', [0x34] = '>', [0x35] = '?',
+    [0x02] = '!', [0x03] = '@', [0x04] = '#', [0x05] = '$',
+    [0x06] = '%', [0x07] = '^', [0x08] = '&', [0x09] = '*',
+    [0x0A] = '(', [0x0B] = ')',
+    [0x0C] = '_', [0x0D] = '+',
+    [0x1A] = '{', [0x1B] = '}',
+    [0x27] = ':', [0x28] = '"', [0x29] = '~',
+    [0x2B] = '|',
+    [0x33] = '<', [0x34] = '>', [0x35] = '?',
 };
 
 /* Make codes with no ASCII of their own. */
@@ -772,82 +772,82 @@ static bool extended_pending;
 
 static char tty_translate(uint8_t make)
 {
-	char c;
+    char c;
 
-	if (make >= ARRAY_SIZE(scancode_base))
-		return 0;
+    if (make >= ARRAY_SIZE(scancode_base))
+        return 0;
 
-	c = scancode_base[make];
-	if (c == 0)
-		return 0;
+    c = scancode_base[make];
+    if (c == 0)
+        return 0;
 
-	if (!shift_held)
-		return c;
+    if (!shift_held)
+        return c;
 
-	char s = scancode_shifted[make];
-	if (s != 0)
-		return s;
-	if (c >= 'a' && c <= 'z')
-		return (char)(c - ('a' - 'A'));
-	return c;
+    char s = scancode_shifted[make];
+    if (s != 0)
+        return s;
+    if (c >= 'a' && c <= 'z')
+        return (char)(c - ('a' - 'A'));
+    return c;
 }
 
 /* One scancode from port 0x60. Called from the IRQ handler, with interrupts
  * off, so the decoder state below needs no lock of its own. */
 static void keyboard_scancode(uint8_t sc)
 {
-	bool make = (sc & 0x80) == 0;
-	uint8_t code = make ? sc : (uint8_t)(sc & 0x7F);
-	char c;
+    bool make = (sc & 0x80) == 0;
+    uint8_t code = make ? sc : (uint8_t)(sc & 0x7F);
+    char c;
 
-	/* Set 2 IDs, command acknowledgements, resend requests, and errors. None
-	 * of them is a keystroke, and treating 0xFA as a key would put a byte
-	 * nobody typed into the read stream on every command the kernel issues. */
-	if (sc == 0xFA || sc == 0xFE || sc == 0xFF || (sc >= 0xF0 && sc <= 0xFD)) {
-		/* A resend means the controller rejected the last command byte.
-		 * The commands this driver sends are all self-contained, so the
-		 * recovery is to drop the request and let the next one proceed; a
-		 * command that genuinely needs repeating will be re-issued by
-		 * whatever noticed the failure. */
-		return;
-	}
+    /* Set 2 IDs, command acknowledgements, resend requests, and errors. None
+     * of them is a keystroke, and treating 0xFA as a key would put a byte
+     * nobody typed into the read stream on every command the kernel issues. */
+    if (sc == 0xFA || sc == 0xFE || sc == 0xFF || (sc >= 0xF0 && sc <= 0xFD)) {
+        /* A resend means the controller rejected the last command byte.
+         * The commands this driver sends are all self-contained, so the
+         * recovery is to drop the request and let the next one proceed; a
+         * command that genuinely needs repeating will be re-issued by
+         * whatever noticed the failure. */
+        return;
+    }
 
-	/* Prefix, not a key. 0xE0 introduces the extended block; 0xE1 introduces
-	 * the pause sequence, which is two more bytes for a key that produces
-	 * nothing. Both are treated the same way: the byte that follows is
-	 * consumed with them and never reaches the input ring. */
-	if (sc == 0xE0 || sc == 0xE1) {
-		extended_pending = true;
-		return;
-	}
+    /* Prefix, not a key. 0xE0 introduces the extended block; 0xE1 introduces
+     * the pause sequence, which is two more bytes for a key that produces
+     * nothing. Both are treated the same way: the byte that follows is
+     * consumed with them and never reaches the input ring. */
+    if (sc == 0xE0 || sc == 0xE1) {
+        extended_pending = true;
+        return;
+    }
 
-	/* Everything else in 0xE0-0xFF is a controller response or an ID, not a
-	 * key. The make codes this driver decodes all live below 0x80. */
-	if (sc > 0xE0)
-		return;
+    /* Everything else in 0xE0-0xFF is a controller response or an ID, not a
+     * key. The make codes this driver decodes all live below 0x80. */
+    if (sc > 0xE0)
+        return;
 
-	if (extended_pending) {
-		extended_pending = false;
-		return;
-	}
+    if (extended_pending) {
+        extended_pending = false;
+        return;
+    }
 
-	/* Shift is state, not input. It has to be tracked on make and break
-	 * because a terminal is entirely shift-driven: nothing is readable while
-	 * it is held, and leaving it latched after the key is released turns
-	 * every later key into upper case. */
-	if (code == SC_LSHIFT || code == SC_RSHIFT) {
-		shift_held = make;
-		return;
-	}
+    /* Shift is state, not input. It has to be tracked on make and break
+     * because a terminal is entirely shift-driven: nothing is readable while
+     * it is held, and leaving it latched after the key is released turns
+     * every later key into upper case. */
+    if (code == SC_LSHIFT || code == SC_RSHIFT) {
+        shift_held = make;
+        return;
+    }
 
-	/* Only make codes produce input. A break code means the key came back up,
-	 * and feeding it in would double every keystroke. */
-	if (!make)
-		return;
+    /* Only make codes produce input. A break code means the key came back up,
+     * and feeding it in would double every keystroke. */
+    if (!make)
+        return;
 
-	c = tty_translate(code);
-	if (c != 0)
-		tty_in_push(c);
+    c = tty_translate(code);
+    if (c != 0)
+        tty_in_push(c);
 }
 
 /* Master 8259 data port and the keyboard's line bit are defined with the COM1
@@ -855,41 +855,41 @@ static void keyboard_scancode(uint8_t sc)
 
 static void keyboard_irq(struct interrupt_frame *frame)
 {
-	uint8_t status = inb(PS2_STATUS);
+    uint8_t status = inb(PS2_STATUS);
 
-	/*
-	 * Drain the output buffer, not one byte of it.
-	 *
-	 * Reading the status port clears the controller's interrupt line, and a
-	 * new one is only generated when a byte arrives *after* that read. So a
-	 * handler that takes one byte and returns discards the line while more
-	 * bytes are still sitting there, and the rest of the burst is never
-	 * delivered -- there is nothing left to interrupt for. Measured: five
-	 * keystrokes injected into the guest produced one IRQ, and one character.
-	 *
-	 * Bounded by the same OBF bit that gates the loop, so it terminates as
-	 * soon as the controller is empty, and it cannot spin on a controller
-	 * that never clears OBF for longer than one pass is bounded by the
-	 * scancode queue draining.
-	 */
-	for (unsigned guard = 0; guard < 32; guard++) {
-		if (!(status & PS2_STATUS_OBF))
-			return;
+    /*
+     * Drain the output buffer, not one byte of it.
+     *
+     * Reading the status port clears the controller's interrupt line, and a
+     * new one is only generated when a byte arrives *after* that read. So a
+     * handler that takes one byte and returns discards the line while more
+     * bytes are still sitting there, and the rest of the burst is never
+     * delivered -- there is nothing left to interrupt for. Measured: five
+     * keystrokes injected into the guest produced one IRQ, and one character.
+     *
+     * Bounded by the same OBF bit that gates the loop, so it terminates as
+     * soon as the controller is empty, and it cannot spin on a controller
+     * that never clears OBF for longer than one pass is bounded by the
+     * scancode queue draining.
+     */
+    for (unsigned guard = 0; guard < 32; guard++) {
+        if (!(status & PS2_STATUS_OBF))
+            return;
 
-		/* The byte is from the mouse, which shares the controller. It has
-		 * its own interrupt line and no driver yet; taking its byte here
-		 * would steal it from whichever driver claims IRQ12. Leave it for
-		 * the mouse's own interrupt rather than returning, or the byte
-		 * stays in the buffer and the loop spins to its bound. */
-		if (status & PS2_STATUS_SYS)
-			return;
+        /* The byte is from the mouse, which shares the controller. It has
+         * its own interrupt line and no driver yet; taking its byte here
+         * would steal it from whichever driver claims IRQ12. Leave it for
+         * the mouse's own interrupt rather than returning, or the byte
+         * stays in the buffer and the loop spins to its bound. */
+        if (status & PS2_STATUS_SYS)
+            return;
 
-		keyboard_scancode(inb(PS2_DATA));
+        keyboard_scancode(inb(PS2_DATA));
 
-		/* Re-read: the byte we just took may have been the last, and the
-		 * status must be sampled again to know that. */
-		status = inb(PS2_STATUS);
-	}
+        /* Re-read: the byte we just took may have been the last, and the
+         * status must be sampled again to know that. */
+        status = inb(PS2_STATUS);
+    }
 }
 
 /* pic_remap() masks every line, so it must happen exactly once. Called from
@@ -900,154 +900,154 @@ static bool pic_remapped;
 
 void tty_init(void)
 {
-	u64 flags = irq_save();
-	uint8_t config = 0;
+    u64 flags = irq_save();
+    uint8_t config = 0;
 
-	if (pic_remapped) {
-		irq_restore(flags);
-		return;
-	}
-	pic_remapped = true;
+    if (pic_remapped) {
+        irq_restore(flags);
+        return;
+    }
+    pic_remapped = true;
 
-	/*
-	 * Remap first: the keyboard interrupt arrives on the vector the remap
-	 * produces, and until it has run the vector in the IDT is not the one
-	 * the controller will raise.
-	 */
-	pic_remap();
+    /*
+     * Remap first: the keyboard interrupt arrives on the vector the remap
+     * produces, and until it has run the vector in the IDT is not the one
+     * the controller will raise.
+     */
+    pic_remap();
 
-	/*
-	 * Drain the controller before the first command, and do not run its self
-	 * test.
-	 *
-	 * The self test was here, and it is the step everything downstream was
-	 * getting wrong. The controller answers 0xAA with 0x55 and then 0xAA; some
-	 * implementations -- QEMU among them -- answer with 0x55 alone. Consuming
-	 * "the second byte" on the assumption that it is always there reads a reply
-	 * that belongs to a *later* command, and then that command's real reply is
-	 * never seen. Both readings were tried here and neither is reliable:
-	 * trusting one byte leaves a stray 0xAA to be mistaken for the next reply,
-	 * and trusting two swallows the next reply instead. The observed result was
-	 * "8042 command 0xae answered 0x00" -- the enable-interface command,
-	 * unanswered, which is why no key ever arrived.
-	 *
-	 * The self test is diagnostic, not setup. A controller that is absent leaves
-	 * the port unreadable, which the bounded waits below already turn into a
-	 * reported failure rather than a hang. Draining first gives a known-empty
-	 * register, which is the property the sequence actually needs.
-	 */	ps2_flush();
+    /*
+     * Drain the controller before the first command, and do not run its self
+     * test.
+     *
+     * The self test was here, and it is the step everything downstream was
+     * getting wrong. The controller answers 0xAA with 0x55 and then 0xAA; some
+     * implementations -- QEMU among them -- answer with 0x55 alone. Consuming
+     * "the second byte" on the assumption that it is always there reads a reply
+     * that belongs to a *later* command, and then that command's real reply is
+     * never seen. Both readings were tried here and neither is reliable:
+     * trusting one byte leaves a stray 0xAA to be mistaken for the next reply,
+     * and trusting two swallows the next reply instead. The observed result was
+     * "8042 command 0xae answered 0x00" -- the enable-interface command,
+     * unanswered, which is why no key ever arrived.
+     *
+     * The self test is diagnostic, not setup. A controller that is absent leaves
+     * the port unreadable, which the bounded waits below already turn into a
+     * reported failure rather than a hang. Draining first gives a known-empty
+     * register, which is the property the sequence actually needs.
+     */    ps2_flush();
 
-	if (ps2_write_port(PS2_CMD, PS2_CMD_ENABLE_KBD))
-		/* 0xAE (enable keyboard interface) does not generate a response. */
-		;
+    if (ps2_write_port(PS2_CMD, PS2_CMD_ENABLE_KBD))
+        /* 0xAE (enable keyboard interface) does not generate a response. */
+        ;
 
-	ps2_flush();
+    ps2_flush();
 
-	/*
-	 * Interrupt on keyboard bytes, keyboard clock not held low, and scancode
-	 * translation left on: this driver decodes set 1, and translation is what
-	 * turns the controller's set 2 into it. Setting it explicitly rather than
-	 * trusting the BIOS matters because the byte the BIOS left behind is
-	 * whatever the last BIOS keystroke left, and the two halves have to
-	 * agree on which set is arriving.
-	 */
-	if (ps2_write_port(PS2_CMD, PS2_CMD_READ_CONFIG))
-		config = ps2_read_data();
-	config |= PS2_CFG_KBD_INT | PS2_CFG_TRANSLATE;
-	config &= (uint8_t)~PS2_CFG_KBD_CLOCK;
-	if (ps2_write_port(PS2_CMD, PS2_CMD_WRITE_CONFIG))
-		ps2_write_port(PS2_DATA, config);
+    /*
+     * Interrupt on keyboard bytes, keyboard clock not held low, and scancode
+     * translation left on: this driver decodes set 1, and translation is what
+     * turns the controller's set 2 into it. Setting it explicitly rather than
+     * trusting the BIOS matters because the byte the BIOS left behind is
+     * whatever the last BIOS keystroke left, and the two halves have to
+     * agree on which set is arriving.
+     */
+    if (ps2_write_port(PS2_CMD, PS2_CMD_READ_CONFIG))
+        config = ps2_read_data();
+    config |= PS2_CFG_KBD_INT | PS2_CFG_TRANSLATE;
+    config &= (uint8_t)~PS2_CFG_KBD_CLOCK;
+    if (ps2_write_port(PS2_CMD, PS2_CMD_WRITE_CONFIG))
+        ps2_write_port(PS2_DATA, config);
 
-	/* Scanning on, or no interrupt is ever generated no matter what the
-	 * config byte says. */
-	if (ps2_write_port(PS2_DATA, KBD_CMD_ENABLE_SCAN))
-		ps2_expect_ack(KBD_CMD_ENABLE_SCAN, 0xFA);
+    /* Scanning on, or no interrupt is ever generated no matter what the
+     * config byte says. */
+    if (ps2_write_port(PS2_DATA, KBD_CMD_ENABLE_SCAN))
+        ps2_expect_ack(KBD_CMD_ENABLE_SCAN, 0xFA);
 
-	ps2_flush();
+    ps2_flush();
 
-	spinlock_init(&out_lock);
-	spinlock_init(&in_lock);
-	out_ring.buf = out_storage;
-	in_ring.buf  = in_storage;
+    spinlock_init(&out_lock);
+    spinlock_init(&in_lock);
+    out_ring.buf = out_storage;
+    in_ring.buf  = in_storage;
 
-	/*
-	 * Read the storage back and complain here if it did not stick.
-	 *
-	 * The rings are declared with `.buf = NULL` and get their storage here, so
-	 * a store that is lost, reordered past the calls below, or aimed at a
-	 * different object leaves a ring that looks initialised and is not. Every
-	 * later symptom is a write to address 0 from ring_push() on some process's
-	 * first write -- which says nothing about where the value went, and has
-	 * been seen to happen on roughly one boot in four and not at all on others.
-	 *
-	 * Checking it here turns that into a located failure at the point where the
-	 * invariant is established, which is the only place it can be checked. It
-	 * costs one load and one compare, once, before interrupts are re-enabled.
-	 */
-	if (out_ring.buf != out_storage || in_ring.buf != in_storage) {
-		klog(KLOG_FATAL,
-		     "tty: ring storage did not attach (out %p expected %p, "
-		     "in %p expected %p)\n",
-		     (void *)out_ring.buf, (void *)out_storage,
-		     (void *)in_ring.buf, (void *)in_storage);
-		return;
-	}
+    /*
+     * Read the storage back and complain here if it did not stick.
+     *
+     * The rings are declared with `.buf = NULL` and get their storage here, so
+     * a store that is lost, reordered past the calls below, or aimed at a
+     * different object leaves a ring that looks initialised and is not. Every
+     * later symptom is a write to address 0 from ring_push() on some process's
+     * first write -- which says nothing about where the value went, and has
+     * been seen to happen on roughly one boot in four and not at all on others.
+     *
+     * Checking it here turns that into a located failure at the point where the
+     * invariant is established, which is the only place it can be checked. It
+     * costs one load and one compare, once, before interrupts are re-enabled.
+     */
+    if (out_ring.buf != out_storage || in_ring.buf != in_storage) {
+        klog(KLOG_FATAL,
+             "tty: ring storage did not attach (out %p expected %p, "
+             "in %p expected %p)\n",
+             (void *)out_ring.buf, (void *)out_storage,
+             (void *)in_ring.buf, (void *)in_storage);
+        return;
+    }
 
-	/*
-	 * Handler before the line is unmasked, in that order and not the other
-	 * way round. An unmasked line whose vector is still the default handler
-	 * fires on every keystroke into a function that only counts, and worse,
-	 * it re-arms the line from inside a handler that has already been
-	 * entered by the same interrupt.
-	 */
-	idt_set_handler(VECTOR_IRQ_KEYBOARD, keyboard_irq, IST_NONE, 0);
-	idt_set_handler(VECTOR_IRQ_COM1, com1_irq, IST_NONE, 0);
+    /*
+     * Handler before the line is unmasked, in that order and not the other
+     * way round. An unmasked line whose vector is still the default handler
+     * fires on every keystroke into a function that only counts, and worse,
+     * it re-arms the line from inside a handler that has already been
+     * entered by the same interrupt.
+     */
+    idt_set_handler(VECTOR_IRQ_KEYBOARD, keyboard_irq, IST_NONE, 0);
+    idt_set_handler(VECTOR_IRQ_COM1, com1_irq, IST_NONE, 0);
 
-	/*
-	 * The UART's own half of the same rule. serial_init() programs the
-	 * interrupt enable register to 0x00, so the receiver has been raising
-	 * nothing since boot and no amount of unmasking IRQ4 would produce an
-	 * interrupt. Read-modify-write rather than a plain assignment: bit 1 is
-	 * the transmit-empty interrupt, which belongs to whoever wants it, and
-	 * silently clearing it here would make this file responsible for a
-	 * decision it did not make.
-	 *
-	 * Still before the PIC unmask below, so the line cannot become visible
-	 * before there is something behind it.
-	 */
-	outb(COM1 + UART_IER,
-	     (uint8_t)(inb(COM1 + UART_IER) | UART_IER_RX_AVAILABLE));
+    /*
+     * The UART's own half of the same rule. serial_init() programs the
+     * interrupt enable register to 0x00, so the receiver has been raising
+     * nothing since boot and no amount of unmasking IRQ4 would produce an
+     * interrupt. Read-modify-write rather than a plain assignment: bit 1 is
+     * the transmit-empty interrupt, which belongs to whoever wants it, and
+     * silently clearing it here would make this file responsible for a
+     * decision it did not make.
+     *
+     * Still before the PIC unmask below, so the line cannot become visible
+     * before there is something behind it.
+     */
+    outb(COM1 + UART_IER,
+         (uint8_t)(inb(COM1 + UART_IER) | UART_IER_RX_AVAILABLE));
 
-	config = inb(PIC1_DATA_PORT);
-	config &= (uint8_t)~(PIC1_IRQ_KEYBOARD_BIT | PIC1_IRQ_COM1_BIT);
-	outb(PIC1_DATA_PORT, config);
+    config = inb(PIC1_DATA_PORT);
+    config &= (uint8_t)~(PIC1_IRQ_KEYBOARD_BIT | PIC1_IRQ_COM1_BIT);
+    outb(PIC1_DATA_PORT, config);
 
-	/*
-	 * Read both lines back. This is a pin and not politeness: the two
-	 * unmasked bits are the entire difference between a tty that can be
-	 * typed at and one that cannot, and the failure mode is completely
-	 * silent -- the poll still works, so the console keeps printing, the
-	 * kernel looks healthy, and a person types at a terminal that is not
-	 * listening. OCPW1 reads back the mask register, so this says what the
-	 * device is actually using rather than what was written to it.
-	 */
-	config = inb(PIC1_DATA_PORT);
-	if (config & (PIC1_IRQ_KEYBOARD_BIT | PIC1_IRQ_COM1_BIT)) {
-		klog(KLOG_FATAL, "tty: PIC1 unmask did not take, mask is %#x "
-		     "(keyboard %#x, COM1 %#x)\n", (unsigned)config,
-		     (unsigned)!!(config & PIC1_IRQ_KEYBOARD_BIT),
-		     (unsigned)!!(config & PIC1_IRQ_COM1_BIT));
-		return;
-	}
+    /*
+     * Read both lines back. This is a pin and not politeness: the two
+     * unmasked bits are the entire difference between a tty that can be
+     * typed at and one that cannot, and the failure mode is completely
+     * silent -- the poll still works, so the console keeps printing, the
+     * kernel looks healthy, and a person types at a terminal that is not
+     * listening. OCPW1 reads back the mask register, so this says what the
+     * device is actually using rather than what was written to it.
+     */
+    config = inb(PIC1_DATA_PORT);
+    if (config & (PIC1_IRQ_KEYBOARD_BIT | PIC1_IRQ_COM1_BIT)) {
+        klog(KLOG_FATAL, "tty: PIC1 unmask did not take, mask is %#x "
+             "(keyboard %#x, COM1 %#x)\n", (unsigned)config,
+             (unsigned)!!(config & PIC1_IRQ_KEYBOARD_BIT),
+             (unsigned)!!(config & PIC1_IRQ_COM1_BIT));
+        return;
+    }
 
-	if (!(inb(COM1 + UART_IER) & UART_IER_RX_AVAILABLE))
-		klog(KLOG_FATAL, "tty: COM1 receive interrupt enable did not "
-		     "take, IER is %#x\n", (unsigned)inb(COM1 + UART_IER));
+    if (!(inb(COM1 + UART_IER) & UART_IER_RX_AVAILABLE))
+        klog(KLOG_FATAL, "tty: COM1 receive interrupt enable did not "
+             "take, IER is %#x\n", (unsigned)inb(COM1 + UART_IER));
 
 
-	irq_restore(flags);
+    irq_restore(flags);
 
-	klog(KLOG_INFO, "tty: rings %u bytes each, 8042 up, keyboard on "
-	     "vector %u, COM1 receive on vector %u\n", (unsigned)TTY_RING_CAP,
-	     VECTOR_IRQ_KEYBOARD, VECTOR_IRQ_COM1);
+    klog(KLOG_INFO, "tty: rings %u bytes each, 8042 up, keyboard on "
+         "vector %u, COM1 receive on vector %u\n", (unsigned)TTY_RING_CAP,
+         VECTOR_IRQ_KEYBOARD, VECTOR_IRQ_COM1);
 }

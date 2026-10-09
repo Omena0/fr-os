@@ -113,49 +113,49 @@ BUILD_INPUTS_STAMP := $(BUILD)/.build-inputs.stamp
 # three of the four loader objects, and the ones that did have a .d were
 # trusted. $(BUILD_INPUTS_STAMP) below is the other half of it.
 $(OBJ)/boot/%.S.o: src/boot/%.S $(BUILD_INPUTS_STAMP)
-	@mkdir -p $(dir $@)
-	$(HOST_GCC) $(BOOT_ASFLAGS) -MMD -MP -MF $@.d -x assembler-with-cpp -c $< -o $@
+    @mkdir -p $(dir $@)
+    $(HOST_GCC) $(BOOT_ASFLAGS) -MMD -MP -MF $@.d -x assembler-with-cpp -c $< -o $@
 
 $(OBJ)/boot/%.c.o: src/boot/%.c $(BUILD_INPUTS_STAMP)
-	@mkdir -p $(dir $@)
-	$(HOST_CC_32) $(BOOT_CFLAGS) -MMD -MP -MF $@.d -c $< -o $@
+    @mkdir -p $(dir $@)
+    $(HOST_CC_32) $(BOOT_CFLAGS) -MMD -MP -MF $@.d -c $< -o $@
 
 $(OBJ)/kernel/%.S.o: src/kernel/%.S $(BUILD_INPUTS_STAMP)
-	@mkdir -p $(dir $@)
-	$(HOST_CC_64) -MMD -MP -MF $@.d -c -x assembler-with-cpp $(KERNEL_CFLAGS) -I src/kernel/include $< -o $@
+    @mkdir -p $(dir $@)
+    $(HOST_CC_64) -MMD -MP -MF $@.d -c -x assembler-with-cpp $(KERNEL_CFLAGS) -I src/kernel/include $< -o $@
 
 $(OBJ)/kernel/drivers/%.c.o: src/kernel/drivers/%.c $(BUILD_INPUTS_STAMP)
-	@mkdir -p $(dir $@)
-	$(HOST_CC_64) $(KERNEL_CFLAGS) -MMD -MP -MF $@.d $< -c -o $@
+    @mkdir -p $(dir $@)
+    $(HOST_CC_64) $(KERNEL_CFLAGS) -MMD -MP -MF $@.d $< -c -o $@
 
 $(OBJ)/kernel/%.c.o: src/kernel/%.c $(BUILD_INPUTS_STAMP)
-	@mkdir -p $(dir $@)
-	$(HOST_CC_64) $(KERNEL_CFLAGS) -MMD -MP -MF $@.d $< -c -o $@
+    @mkdir -p $(dir $@)
+    $(HOST_CC_64) $(KERNEL_CFLAGS) -MMD -MP -MF $@.d $< -c -o $@
 
 $(OBJ)/libc/%.S.o: src/libc/%.S $(BUILD_INPUTS_STAMP)
-	@mkdir -p $(dir $@)
-	$(HOST_CC_64) -MMD -MP -MF $@.d -c -x assembler-with-cpp $(USER_CFLAGS) -I src/libc/include $< -o $@
+    @mkdir -p $(dir $@)
+    $(HOST_CC_64) -MMD -MP -MF $@.d -c -x assembler-with-cpp $(USER_CFLAGS) -I src/libc/include $< -o $@
 
 $(OBJ)/libc/%.c.o: src/libc/%.c $(BUILD_INPUTS_STAMP)
-	@mkdir -p $(dir $@)
-	$(HOST_CC_64) $(USER_CFLAGS) -MMD -MP -MF $@.d $< -c -o $@
+    @mkdir -p $(dir $@)
+    $(HOST_CC_64) $(USER_CFLAGS) -MMD -MP -MF $@.d $< -c -o $@
 
 # The 32-bit bootloader uses a separate linker and its own script.
 $(BUILD)/stage1.elf: $(STAGE1_OBJ) src/boot/stage1.ld
-	@mkdir -p $(dir $@)
-	$(HOST_LD_32) -m elf_i386 -T src/boot/stage1.ld -o $@ $(STAGE1_OBJ) --build-id=none
-	$(HOST_OBJCOPY) -O binary $@ $(BUILD)/stage1.bin
-	@size=$$(stat -c%s $(BUILD)/stage1.bin); \
-	 if [ "$$size" -ne 512 ]; then \
-		echo "ERROR: stage1.bin is $$size bytes, the MBR must be exactly 512"; \
-		exit 1; \
-	 fi
+    @mkdir -p $(dir $@)
+    $(HOST_LD_32) -m elf_i386 -T src/boot/stage1.ld -o $@ $(STAGE1_OBJ) --build-id=none
+    $(HOST_OBJCOPY) -O binary $@ $(BUILD)/stage1.bin
+    @size=$$(stat -c%s $(BUILD)/stage1.bin); \
+     if [ "$$size" -ne 512 ]; then \
+        echo "ERROR: stage1.bin is $$size bytes, the MBR must be exactly 512"; \
+        exit 1; \
+     fi
 
 $(BUILD)/stage2.elf: $(STAGE2_OBJ) src/boot/stage2.ld
-	@mkdir -p $(dir $@)
-	$(HOST_LD_32) -m elf_i386 -T src/boot/stage2.ld -o $@ $(STAGE2_OBJ) \
-		--build-id=none -z noexecstack
-	$(HOST_OBJCOPY) -O binary $@ $(BUILD)/stage2.bin
+    @mkdir -p $(dir $@)
+    $(HOST_LD_32) -m elf_i386 -T src/boot/stage2.ld -o $@ $(STAGE2_OBJ) \
+        --build-id=none -z noexecstack
+    $(HOST_OBJCOPY) -O binary $@ $(BUILD)/stage2.bin
 
 # The initrd is a flat container of (name, offset, size) records wrapping the
 # userspace ELFs. It is built before the kernel because the kernel embeds it as
@@ -167,59 +167,59 @@ $(BUILD)/stage2.elf: $(STAGE2_OBJ) src/boot/stage2.ld
 # blob would keep the old layout until something unrelated forced a rebuild.
 $(HELLO_ELF): $(HELLO_SRC) $(LIBC_OBJ) $(BUILD)/libc.a src/include/version.h \
              $(VERIFY_ISA_PY)
-	@mkdir -p $(dir $@)
-	$(HOST_CC_64) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $(HELLO_SRC) \
-		$(BUILD)/libc.a $(KERNEL_VERSION_DEFS)
-	$(HOST_OBJCOPY) $(STRIP_DEBUG) $@
-	@$(MAKE) --no-print-directory verify-isa PROFILE=user FILE=$@
+    @mkdir -p $(dir $@)
+    $(HOST_CC_64) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $(HELLO_SRC) \
+        $(BUILD)/libc.a $(KERNEL_VERSION_DEFS)
+    $(HOST_OBJCOPY) $(STRIP_DEBUG) $@
+    @$(MAKE) --no-print-directory verify-isa PROFILE=user FILE=$@
 
 $(INITRD): $(INIT_ELF) $(HELLO_ELF) tools/initrd.py
-	@mkdir -p $(dir $@)
-	python3 tools/initrd.py --out $@ --program init=$(INIT_ELF) \
-		--program hello=$(HELLO_ELF)
+    @mkdir -p $(dir $@)
+    python3 tools/initrd.py --out $@ --program init=$(INIT_ELF) \
+        --program hello=$(HELLO_ELF)
 
 # version.h supplies KERNEL_VERSION/KERNEL_GIT_REV/KERNEL_BUILD_STAMP, which
 # reach the image as -D flags on the link line rather than through a header
 # dependency, so nothing else would notice a change to it.
 $(INIT_ELF): $(INIT_MAIN_SRC) $(LIBC_OBJ) $(BUILD)/libc.a src/include/version.h \
             $(VERIFY_ISA_PY)
-	@mkdir -p $(dir $@)
-	$(HOST_CC_64) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $(INIT_MAIN_SRC) \
-		$(BUILD)/libc.a $(KERNEL_VERSION_DEFS)
-	@# Strip DWARF only. The symtab stays, so the kernel's ELF loader and any
-	@# backtrace still resolve symbols by name; what goes is the .debug_*
-	@# sections, which for this image are 91% of its bytes. That matters
-	@# because the initrd is bin2c'd into the kernel's .rodata -- a PT_LOAD
-	@# the loader reads -- so every byte here is a byte read from disk at
-	@# boot and charged against the landing-zone budget. See config.mk.
-	$(HOST_OBJCOPY) $(STRIP_DEBUG) $@
-	@$(MAKE) --no-print-directory verify-isa PROFILE=user FILE=$@
+    @mkdir -p $(dir $@)
+    $(HOST_CC_64) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $(INIT_MAIN_SRC) \
+        $(BUILD)/libc.a $(KERNEL_VERSION_DEFS)
+    @# Strip DWARF only. The symtab stays, so the kernel's ELF loader and any
+    @# backtrace still resolve symbols by name; what goes is the .debug_*
+    @# sections, which for this image are 91% of its bytes. That matters
+    @# because the initrd is bin2c'd into the kernel's .rodata -- a PT_LOAD
+    @# the loader reads -- so every byte here is a byte read from disk at
+    @# boot and charged against the landing-zone budget. See config.mk.
+    $(HOST_OBJCOPY) $(STRIP_DEBUG) $@
+    @$(MAKE) --no-print-directory verify-isa PROFILE=user FILE=$@
 
 $(BUILD)/libc.a: $(LIBC_OBJ)
-	@mkdir -p $(dir $@)
-	@rm -f $@
-	$(HOST_AR) rcs $@ $^
+    @mkdir -p $(dir $@)
+    @rm -f $@
+    $(HOST_AR) rcs $@ $^
 
 # The kernel archive. Kept separate from libc so a kernel-only change does not
 # relink the userspace images.
 $(BUILD)/libk.a: $(KERNEL_OBJ)
-	@mkdir -p $(dir $@)
-	@rm -f $@
-	$(HOST_AR) rcs $@ $^
+    @mkdir -p $(dir $@)
+    @rm -f $@
+    $(HOST_AR) rcs $@ $^
 
 # The initrd blob is turned into a C array and compiled into the kernel. A
 # separate translation unit keeps the 100 KB of hex out of the main build's
 # dependency graph, so touching main.c does not force a rebuild of it.
 $(OBJ)/kernel/initrd.c.o: $(INITRD) tools/bin2c.py
-	@mkdir -p $(dir $@)
-	python3 tools/bin2c.py $< init_image > build/initrd.c
-	$(HOST_CC_64) $(KERNEL_CFLAGS) -c build/initrd.c -o $@
+    @mkdir -p $(dir $@)
+    python3 tools/bin2c.py $< init_image > build/initrd.c
+    $(HOST_CC_64) $(KERNEL_CFLAGS) -c build/initrd.c -o $@
 $(BUILD)/kernel.elf: $(BUILD)/libk.a $(OBJ)/kernel/initrd.c.o \
                    src/kernel/link.ld $(VERIFY_ISA_PY)
-	@mkdir -p $(dir $@)
-	$(HOST_LD_64) $(KERNEL_LDFLAGS) -o $@ \
-		$(BUILD)/libk.a $(OBJ)/kernel/initrd.c.o
-	@$(MAKE) --no-print-directory verify-isa PROFILE=kernel FILE=$@
+    @mkdir -p $(dir $@)
+    $(HOST_LD_64) $(KERNEL_LDFLAGS) -o $@ \
+        $(BUILD)/libk.a $(OBJ)/kernel/initrd.c.o
+    @$(MAKE) --no-print-directory verify-isa PROFILE=kernel FILE=$@
 
 # Enforce the ISA policy in config.mk instead of trusting it.
 #
@@ -274,10 +274,10 @@ $(BUILD)/kernel.elf: $(BUILD)/libk.a $(OBJ)/kernel/initrd.c.o \
 
 .PHONY: verify-isa
 verify-isa:
-	@if [ -z "$(PROFILE)" ]; then \
-	   echo "verify-isa: set PROFILE=kernel or PROFILE=user" >&2; exit 1; \
-	 fi
-	@python3 $(VERIFY_ISA_PY) --profile $(PROFILE) $${FILE:-$(BUILD)/kernel.elf}
+    @if [ -z "$(PROFILE)" ]; then \
+       echo "verify-isa: set PROFILE=kernel or PROFILE=user" >&2; exit 1; \
+     fi
+    @python3 $(VERIFY_ISA_PY) --profile $(PROFILE) $${FILE:-$(BUILD)/kernel.elf}
 
 # The gate is the only thing standing between a flag typo and a kernel that
 # cannot boot, so it is tested. `make verify-isa-test` runs the classifier's
@@ -291,8 +291,8 @@ verify-isa:
 # $(BUILD) so `make clean` removes the probes.
 .PHONY: verify-isa-test
 verify-isa-test:
-	@sh tests/isa/verify_isa_test.sh "$(HOST_CC_64)" "$(BUILD)/verify-isa" \
-		"$(KERNEL_CFLAGS)" "$(USER_CFLAGS)"
+    @sh tests/isa/verify_isa_test.sh "$(HOST_CC_64)" "$(BUILD)/verify-isa" \
+        "$(KERNEL_CFLAGS)" "$(USER_CFLAGS)"
 
 # The image is a function of the four artifacts *and* of the script that lays
 # them out: disk.py owns the LBA assignments, the sector budget checks and the
@@ -300,13 +300,13 @@ verify-isa-test:
 # changing. It is a prerequisite for the same reason link.ld is one for the
 # kernel.
 $(DISK): $(BUILD)/stage1.elf $(BUILD)/stage2.elf $(BUILD)/kernel.elf $(INITRD) tools/disk.py
-	@mkdir -p $(dir $@)
-	python3 tools/disk.py \
-		--stage1 $(BUILD)/stage1.bin \
-		--stage2 $(BUILD)/stage2.bin \
-		--kernel $(BUILD)/kernel.elf \
-		--initrd $(INITRD) \
-		--out $@
+    @mkdir -p $(dir $@)
+    python3 tools/disk.py \
+        --stage1 $(BUILD)/stage1.bin \
+        --stage2 $(BUILD)/stage2.bin \
+        --kernel $(BUILD)/kernel.elf \
+        --initrd $(INITRD) \
+        --out $@
 
 # ----------------------------------------------------------------- top level --
 
@@ -338,7 +338,7 @@ KERNEL_VERSION_DEFS := -DKERNEL_VERSION=\"$(KERNEL_VERSION)\" \
 # The gate that *does* gate every build is `verify-isa` itself, applied to the
 # finished kernel.elf, init.elf and hello.elf from the link rules.
 all: $(DISK)
-	@echo "built $(DISK)"
+    @echo "built $(DISK)"
 
 # The boot smoke test: the only check here that boots anything at all, and the
 # one that answers the question the ISA self-test cannot -- does the kernel
@@ -367,67 +367,67 @@ all: $(DISK)
 # "all checks passed".
 .PHONY: boot-smoke
 boot-smoke: $(DISK)
-	@rm -f $(BUILD)/.boot-smoke-skipped
-	@python3 tests/boot_smoke.py --image $(DISK) $(BOOT_SMOKE_ARGS); \
-	 rc=$$?; \
-	 if [ $$rc -eq 0 ]; then exit 0; fi; \
-	 if [ $$rc -eq 77 ]; then \
-	   mkdir -p $(BUILD); : > $(BUILD)/.boot-smoke-skipped; exit 0; \
-	 fi; \
-	 exit $$rc
+    @rm -f $(BUILD)/.boot-smoke-skipped
+    @python3 tests/boot_smoke.py --image $(DISK) $(BOOT_SMOKE_ARGS); \
+     rc=$$?; \
+     if [ $$rc -eq 0 ]; then exit 0; fi; \
+     if [ $$rc -eq 77 ]; then \
+       mkdir -p $(BUILD); : > $(BUILD)/.boot-smoke-skipped; exit 0; \
+     fi; \
+     exit $$rc
 
 .PHONY: test-harnesses
 test-harnesses: $(INIT_ELF) $(HELLO_ELF)
-	@echo "== TLS harness =="
-	@sh tests/tls_harness.sh build/init.elf build/hello.elf
-	@echo "== Context switch harness =="
-	@sh tests/run_context_harness.sh
-	@echo "== Schedule resume check =="
-	@python3 tests/check_schedule_resume.py build/kernel.elf || true
+    @echo "== TLS harness =="
+    @sh tests/tls_harness.sh build/init.elf build/hello.elf
+    @echo "== Context switch harness =="
+    @sh tests/run_context_harness.sh
+    @echo "== Schedule resume check =="
+    @python3 tests/check_schedule_resume.py build/kernel.elf || true
 
 # Runtime tests: build and run the test framework inside the booted OS
 RUNTIME_TESTS := tests/runtime/framework/test_runner.c \
-		 tests/runtime/framework/test_framework.c \
-		 tests/runtime/kernel/test_process_syscalls.c \
-		 tests/runtime/kernel/test_memory_syscalls.c \
-		 tests/runtime/kernel/test_file_syscalls.c \
-		 tests/runtime/kernel/test_ipc_syscalls.c \
-		 tests/runtime/kernel/test_scheduling_syscalls.c \
-		 tests/runtime/kernel/test_security_syscalls.c \
-		 tests/runtime/init/test_init_system.c
+         tests/runtime/framework/test_framework.c \
+         tests/runtime/kernel/test_process_syscalls.c \
+         tests/runtime/kernel/test_memory_syscalls.c \
+         tests/runtime/kernel/test_file_syscalls.c \
+         tests/runtime/kernel/test_ipc_syscalls.c \
+         tests/runtime/kernel/test_scheduling_syscalls.c \
+         tests/runtime/kernel/test_security_syscalls.c \
+         tests/runtime/init/test_init_system.c
 
 build/test-runner: $(RUNTIME_TESTS) $(INIT_ELF) $(HELLO_ELF) $(BUILD)/libc.a
-	@mkdir -p $(dir $@)
-	$(HOST_CC_64) $(USER_CFLAGS) -I tests/runtime/framework $(USER_LDFLAGS) -o $@ \
-		$(RUNTIME_TESTS) $(BUILD)/libc.a
+    @mkdir -p $(dir $@)
+    $(HOST_CC_64) $(USER_CFLAGS) -I tests/runtime/framework $(USER_LDFLAGS) -o $@ \
+        $(RUNTIME_TESTS) $(BUILD)/libc.a
 
 $(BUILD)/initrd-runtime.img: $(INIT_ELF) build/test-runner tools/initrd.py
-	@mkdir -p $(dir $@)
-	python3 tools/initrd.py --out $@ --program init=$(INIT_ELF) --program runtime-tests=build/test-runner
+    @mkdir -p $(dir $@)
+    python3 tools/initrd.py --out $@ --program init=$(INIT_ELF) --program runtime-tests=build/test-runner
 
 $(BUILD)/os-runtime.img: $(BUILD)/stage1.elf $(BUILD)/stage2.elf $(BUILD)/kernel.elf $(BUILD)/initrd-runtime.img tools/disk.py
-	@echo "--stage1 build/stage1.bin \\"
-	@echo "--stage2 build/stage2.bin \\"
-	python3 tools/disk.py --stage1 build/stage1.bin \
-		--stage2 build/stage2.bin \
-		--kernel build/kernel.elf \
-		--initrd $(BUILD)/initrd-runtime.img \
-		--out $@
+    @echo "--stage1 build/stage1.bin \\"
+    @echo "--stage2 build/stage2.bin \\"
+    python3 tools/disk.py --stage1 build/stage1.bin \
+        --stage2 build/stage2.bin \
+        --kernel build/kernel.elf \
+        --initrd $(BUILD)/initrd-runtime.img \
+        --out $@
 
 .PHONY: test-runtime
 test-runtime: $(BUILD)/os-runtime.img build/test-runner
-	@echo "=== Booting runtime tests ==="
-	@FR_TMPDIR=$(BUILD) BOOT_SMOKE_TIMEOUT=60 python3 tests/boot_smoke.py --image $(BUILD)/os-runtime.img --run-tests
-	@echo "=== Runtime tests complete ==="
+    @echo "=== Booting runtime tests ==="
+    @FR_TMPDIR=$(BUILD) BOOT_SMOKE_TIMEOUT=60 python3 tests/boot_smoke.py --image $(BUILD)/os-runtime.img --run-tests
+    @echo "=== Runtime tests complete ==="
 
 .PHONY: check
 check: verify-isa-test boot-smoke test-harnesses test-runtime
-	@if [ -f $(BUILD)/.boot-smoke-skipped ]; then \
-	   rm -f $(BUILD)/.boot-smoke-skipped; \
-	   echo "check: the boot smoke test was SKIPPED -- the kernel boot path was NOT exercised"; \
-	 else \
-	   echo "all checks passed"; \
-	 fi
+    @if [ -f $(BUILD)/.boot-smoke-skipped ]; then \
+       rm -f $(BUILD)/.boot-smoke-skipped; \
+       echo "check: the boot smoke test was SKIPPED -- the kernel boot path was NOT exercised"; \
+     else \
+       echo "all checks passed"; \
+     fi
 .PHONY: kernel
 kernel: $(BUILD)/kernel.elf
 
@@ -449,33 +449,33 @@ disk: $(DISK)
 # dependency information at all.
 .PHONY: deps
 deps:
-	@set -e; for f in $(KERNEL_C_SRC) $(KERNEL_S_SRC); do \
-		o=$(patsubst src/%,$(OBJ)/%.o,$$f); \
-		mkdir -p $$(dirname $$o); \
-		if [ "$${f##*.}" = "c" ]; then \
-			$(HOST_CC_64) $(KERNEL_CFLAGS) -MM -MT $$o -MF $$o.d $$f; \
-		else \
-			$(HOST_CC_64) -x assembler-with-cpp $(KERNEL_CFLAGS) -I src/kernel/include -MM -MT $$o -MF $$o.d $$f; \
-		fi; \
-	done
-	@set -e; for f in $(LIBC_SRC) $(LIBC_S_SRC); do \
-		o=$(patsubst src/%,$(OBJ)/%.o,$$f); \
-		mkdir -p $$(dirname $$o); \
-		if [ "$${f##*.}" = "c" ]; then \
-			$(HOST_CC_64) $(USER_CFLAGS) -MM -MT $$o -MF $$o.d $$f; \
-		else \
-			$(HOST_CC_64) -x assembler-with-cpp $(USER_CFLAGS) -I src/libc/include -MM -MT $$o -MF $$o.d $$f; \
-		fi; \
-	done
-	@set -e; for f in $(STAGE2_SRC) $(STAGE1_SRC); do \
-		o=$(patsubst src/%,$(OBJ)/%.o,$$f); \
-		mkdir -p $$(dirname $$o); \
-		if [ "$${f##*.}" = "c" ]; then \
-			$(HOST_CC_32) $(BOOT_CFLAGS) -MM -MT $$o -MF $$o.d $$f; \
-		else \
-			$(HOST_CC_32) -x assembler-with-cpp $(BOOT_ASFLAGS) -MM -MT $$o -MF $$o.d $$f; \
-		fi; \
-	done
+    @set -e; for f in $(KERNEL_C_SRC) $(KERNEL_S_SRC); do \
+        o=$(patsubst src/%,$(OBJ)/%.o,$$f); \
+        mkdir -p $$(dirname $$o); \
+        if [ "$${f##*.}" = "c" ]; then \
+            $(HOST_CC_64) $(KERNEL_CFLAGS) -MM -MT $$o -MF $$o.d $$f; \
+        else \
+            $(HOST_CC_64) -x assembler-with-cpp $(KERNEL_CFLAGS) -I src/kernel/include -MM -MT $$o -MF $$o.d $$f; \
+        fi; \
+    done
+    @set -e; for f in $(LIBC_SRC) $(LIBC_S_SRC); do \
+        o=$(patsubst src/%,$(OBJ)/%.o,$$f); \
+        mkdir -p $$(dirname $$o); \
+        if [ "$${f##*.}" = "c" ]; then \
+            $(HOST_CC_64) $(USER_CFLAGS) -MM -MT $$o -MF $$o.d $$f; \
+        else \
+            $(HOST_CC_64) -x assembler-with-cpp $(USER_CFLAGS) -I src/libc/include -MM -MT $$o -MF $$o.d $$f; \
+        fi; \
+    done
+    @set -e; for f in $(STAGE2_SRC) $(STAGE1_SRC); do \
+        o=$(patsubst src/%,$(OBJ)/%.o,$$f); \
+        mkdir -p $$(dirname $$o); \
+        if [ "$${f##*.}" = "c" ]; then \
+            $(HOST_CC_32) $(BOOT_CFLAGS) -MM -MT $$o -MF $$o.d $$f; \
+        else \
+            $(HOST_CC_32) -x assembler-with-cpp $(BOOT_ASFLAGS) -MM -MT $$o -MF $$o.d $$f; \
+        fi; \
+    done
 
 # ------------------------------------------------- dependency self-healing ----
 #
@@ -515,42 +515,42 @@ deps:
 # digest is unchanged, which is what keeps the stamp from looking newer than
 # every object on every single build.
 $(BUILD_INPUTS_STAMP): FORCE
-	@mkdir -p $(dir $@)
-	@digest=$$(cat $(BUILD_INPUTS) $(HEADER_FILES) 2>/dev/null | sha256sum | cut -d' ' -f1); \
-	 if [ -r $@ ] && [ "$$(cat $@)" = "$$digest" ]; then exit 0; fi; \
-	 printf '%s\n' "$$digest" > $@.tmp && mv -f $@.tmp $@; \
-	 echo "make: build inputs changed ($$digest), rebuilding every object"
+    @mkdir -p $(dir $@)
+    @digest=$$(cat $(BUILD_INPUTS) $(HEADER_FILES) 2>/dev/null | sha256sum | cut -d' ' -f1); \
+     if [ -r $@ ] && [ "$$(cat $@)" = "$$digest" ]; then exit 0; fi; \
+     printf '%s\n' "$$digest" > $@.tmp && mv -f $@.tmp $@; \
+     echo "make: build inputs changed ($$digest), rebuilding every object"
 
 .PHONY: clean
 clean:
-	rm -rf $(BUILD)
+    rm -rf $(BUILD)
 
 .PHONY: run
 run: $(DISK)
-	./run.sh
+    ./run.sh
 
 .PHONY: run-gdb
 run-gdb: $(DISK)
-	./run.sh --gdb
+    ./run.sh --gdb
 
 .PHONY: help
 help:
-	@echo "make            build build/os.img"
-	@echo "make kernel     build the kernel ELF only"
-	@echo "make run        boot the image under QEMU"
-	@echo "make run-gdb    boot under QEMU with a GDB stub on :1234"
-	@echo "make deps       regenerate header dependency files"
-	@echo "make check      the ISA self-test plus the boot smoke test"
-	@echo "make boot-smoke boot the image and assert the kernel reached init"
-	@echo "make clean      remove build/"
-	@echo "make verify-isa PROFILE=kernel|user FILE=<elf>   run the ISA gate by hand"
-	@echo "make verify-isa-test          test the ISA gate itself"
-	@echo "python3 tests/boot_smoke.py --self-test   test the boot-log classifier"
-	@echo ""
-	@echo "boot smoke test environment:"
-	@echo "  BOOT_SMOKE_TIMEOUT=25   seconds to wait for init's prompt (0 is refused)"
-	@echo "  BOOT_SMOKE_ALLOW_TCG=1  run under emulation when /dev/kvm is unusable"
-	@echo "  FR_TMPDIR=<dir>         scratch for the image copy and serial log"
+    @echo "make            build build/os.img"
+    @echo "make kernel     build the kernel ELF only"
+    @echo "make run        boot the image under QEMU"
+    @echo "make run-gdb    boot under QEMU with a GDB stub on :1234"
+    @echo "make deps       regenerate header dependency files"
+    @echo "make check      the ISA self-test plus the boot smoke test"
+    @echo "make boot-smoke boot the image and assert the kernel reached init"
+    @echo "make clean      remove build/"
+    @echo "make verify-isa PROFILE=kernel|user FILE=<elf>   run the ISA gate by hand"
+    @echo "make verify-isa-test          test the ISA gate itself"
+    @echo "python3 tests/boot_smoke.py --self-test   test the boot-log classifier"
+    @echo ""
+    @echo "boot smoke test environment:"
+    @echo "  BOOT_SMOKE_TIMEOUT=25   seconds to wait for init's prompt (0 is refused)"
+    @echo "  BOOT_SMOKE_ALLOW_TCG=1  run under emulation when /dev/kvm is unusable"
+    @echo "  FR_TMPDIR=<dir>         scratch for the image copy and serial log"
 
 # Pull in the per-object header dependencies. Every pattern rule above writes
 # one next to its object, so this list is complete by construction and is

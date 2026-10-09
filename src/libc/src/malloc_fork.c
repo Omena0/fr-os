@@ -18,11 +18,11 @@
 
 __attribute__((weak)) void __malloc_fork_child(void)
 {
-	/*
-	 * No-op fallback. The inherited arenas are left mapped rather than
-	 * unmapped: reaping them here would need the arena list, and a child
-	 * that frees a block the parent is still using is already the bug this
-	 * hook exists to prevent, not one that more aggressive teardown could
-	 * paper over.
-	 */
+    /*
+     * No-op fallback. The inherited arenas are left mapped rather than
+     * unmapped: reaping them here would need the arena list, and a child
+     * that frees a block the parent is still using is already the bug this
+     * hook exists to prevent, not one that more aggressive teardown could
+     * paper over.
+     */
 }

@@ -24,53 +24,53 @@ extern int sys_write(int fd, const void *buf, size_t count);
 
 static void put(const char *s)
 {
-	size_t n = 0;
+    size_t n = 0;
 
-	while (s[n])
-		n++;
-	if (n)
-		(void)sys_write(2, s, n);
+    while (s[n])
+        n++;
+    if (n)
+        (void)sys_write(2, s, n);
 }
 
 static void put_num(long v)
 {
-	char buf[24];
-	int i = 0;
-	int j = 0;
-	unsigned long mag = v < 0 ? (unsigned long)(-(v + 1)) + 1
-				  : (unsigned long)v;
+    char buf[24];
+    int i = 0;
+    int j = 0;
+    unsigned long mag = v < 0 ? (unsigned long)(-(v + 1)) + 1
+                  : (unsigned long)v;
 
-	if (mag == 0)
-		buf[i++] = '0';
-	while (mag) {
-		buf[i++] = (char)('0' + (mag % 10));
-		mag /= 10;
-	}
-	if (v < 0)
-		buf[i++] = '-';
-	/* Reverse the digits in place */
-	for (j = 0; j < i / 2; j++) {
-		char tmp = buf[j];
-		buf[j] = buf[i - 1 - j];
-		buf[i - 1 - j] = tmp;
-	}
-	if (i)
-		(void)sys_write(2, buf, i);
+    if (mag == 0)
+        buf[i++] = '0';
+    while (mag) {
+        buf[i++] = (char)('0' + (mag % 10));
+        mag /= 10;
+    }
+    if (v < 0)
+        buf[i++] = '-';
+    /* Reverse the digits in place */
+    for (j = 0; j < i / 2; j++) {
+        char tmp = buf[j];
+        buf[j] = buf[i - 1 - j];
+        buf[i - 1 - j] = tmp;
+    }
+    if (i)
+        (void)sys_write(2, buf, i);
 }
 
 void __assert_fail(const char *assertion, const char *file, int line,
-		   const char *function)
+           const char *function)
 {
-	put("Fr OS assertion failed: ");
-	put(assertion ? assertion : "(null)");
-	put(" at ");
-	put(file ? file : "(null)");
-	put(":");
-	put_num(line);
-	if (function) {
-		put(" in ");
-		put(function);
-	}
-	put("\n");
-	abort();
+    put("Fr OS assertion failed: ");
+    put(assertion ? assertion : "(null)");
+    put(" at ");
+    put(file ? file : "(null)");
+    put(":");
+    put_num(line);
+    if (function) {
+        put(" in ");
+        put(function);
+    }
+    put("\n");
+    abort();
 }

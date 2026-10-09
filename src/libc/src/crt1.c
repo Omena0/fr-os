@@ -73,43 +73,43 @@ extern void (*__init_array_end[])(void);
 
 static unsigned long rdtsc(void)
 {
-	unsigned int lo, hi;
+    unsigned int lo, hi;
 
-	__asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
-	return ((unsigned long)hi << 32) | lo;
+    __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
+    return ((unsigned long)hi << 32) | lo;
 }
 
 static unsigned long get_random_seed(void)
 {
-	/* AT_RANDOM's value is the *address* of 16 kernel-supplied random
-	 * bytes, not the bytes themselves. */
-	if (__libc_auxv) {
-		unsigned long *auxv = __libc_auxv;
+    /* AT_RANDOM's value is the *address* of 16 kernel-supplied random
+     * bytes, not the bytes themselves. */
+    if (__libc_auxv) {
+        unsigned long *auxv = __libc_auxv;
 
-		while (auxv[0] != AT_NULL) {
-			if (auxv[0] == AT_RANDOM) {
-				unsigned long seed;
+        while (auxv[0] != AT_NULL) {
+            if (auxv[0] == AT_RANDOM) {
+                unsigned long seed;
 
-				/* Use memcpy instead of a pointer cast:
-				 * auxv[1] is a kernel-supplied address
-				 * whose alignment isn't guaranteed for
-				 * unsigned long access. */
-				__builtin_memcpy(&seed, (void *)(uintptr_t)auxv[1], sizeof(seed));
-				return seed;
-			}
-			auxv += 2;
-		}
-	}
-	/* Fallback: TSC */
-	return rdtsc();
+                /* Use memcpy instead of a pointer cast:
+                 * auxv[1] is a kernel-supplied address
+                 * whose alignment isn't guaranteed for
+                 * unsigned long access. */
+                __builtin_memcpy(&seed, (void *)(uintptr_t)auxv[1], sizeof(seed));
+                return seed;
+            }
+            auxv += 2;
+        }
+    }
+    /* Fallback: TSC */
+    return rdtsc();
 }
 
 static void run_init_array(void)
 {
-	void (**ctor)(void);
+    void (**ctor)(void);
 
-	for (ctor = __init_array_start; ctor < __init_array_end; ctor++)
-		(*ctor)();
+    for (ctor = __init_array_start; ctor < __init_array_end; ctor++)
+        (*ctor)();
 }
 
 /* ------------------------------------------------------- thread locals ----- */
@@ -136,7 +136,7 @@ static void run_init_array(void)
  * notices -- before main, before any constructor, and while there is still a
  * diagnostic worth printing.
  */
-#define LIBC_TLS_SENTINEL  0x4c6962635f544c53ULL	/* "Libc_TLS" */
+#define LIBC_TLS_SENTINEL  0x4c6962635f544c53ULL    /* "Libc_TLS" */
 
 __thread unsigned long __libc_tls_sentinel = LIBC_TLS_SENTINEL;
 
@@ -153,10 +153,10 @@ __thread unsigned long __libc_tls_sentinel = LIBC_TLS_SENTINEL;
  */
 static __attribute__((noreturn)) void tls_fatal(const char *msg)
 {
-	__syscall3(SYS_write, 2, (long)msg, (long)strlen(msg));
-	__syscall1(SYS_exit, 127);
-	for (;;)
-		__asm__ __volatile__("hlt");
+    __syscall3(SYS_write, 2, (long)msg, (long)strlen(msg));
+    __syscall1(SYS_exit, 127);
+    for (;;)
+        __asm__ __volatile__("hlt");
 }
 
 /*
@@ -172,46 +172,46 @@ static __attribute__((noreturn)) void tls_fatal(const char *msg)
  */
 static void __libc_setup_tls(void)
 {
-	unsigned long base = (unsigned long)sys_get_tls_base();
+    unsigned long base = (unsigned long)sys_get_tls_base();
 
-	if (!base) {
-		tls_fatal("libc: the kernel loaded no TLS block for this "
-			  "image, so every __thread access is a null-pointer "
-			  "dereference. Refusing to start.\n");
-	}
+    if (!base) {
+        tls_fatal("libc: the kernel loaded no TLS block for this "
+              "image, so every __thread access is a null-pointer "
+              "dereference. Refusing to start.\n");
+    }
 
-	if (sys_arch_prctl(ARCH_SET_FS, base) != 0) {
-		tls_fatal("libc: arch_prctl(ARCH_SET_FS) failed; no thread "
-			  "pointer, so __thread cannot work. Refusing to "
-			  "start.\n");
-	}
+    if (sys_arch_prctl(ARCH_SET_FS, base) != 0) {
+        tls_fatal("libc: arch_prctl(ARCH_SET_FS) failed; no thread "
+              "pointer, so __thread cannot work. Refusing to "
+              "start.\n");
+    }
 
-	if (__libc_tls_sentinel != LIBC_TLS_SENTINEL) {
-		tls_fatal("libc: thread-local storage did not read back the "
-			  "value the image was linked with; the thread pointer "
-			  "is wrong. Refusing to start.\n");
-	}
+    if (__libc_tls_sentinel != LIBC_TLS_SENTINEL) {
+        tls_fatal("libc: thread-local storage did not read back the "
+              "value the image was linked with; the thread pointer "
+              "is wrong. Refusing to start.\n");
+    }
 }
 
 void __libc_init(void)
 {
-	/* Initialize stack guard */
-	__stack_chk_guard = get_random_seed();
-	/* Initialize allocator (creates initial arena if needed) */
-	/* malloc(1) will trigger arena creation */
-	void *p = malloc(1);
+    /* Initialize stack guard */
+    __stack_chk_guard = get_random_seed();
+    /* Initialize allocator (creates initial arena if needed) */
+    /* malloc(1) will trigger arena creation */
+    void *p = malloc(1);
 
-	if (p)
-		free(p);
+    if (p)
+        free(p);
 }
 
 void __stack_chk_fail(void)
 {
-	/* Stack smashing detected */
-	__asm__ __volatile__("int3" ::: "memory");
-	/* If we somehow continue, abort */
-	for (;;)
-		__asm__ __volatile__("hlt");
+    /* Stack smashing detected */
+    __asm__ __volatile__("int3" ::: "memory");
+    /* If we somehow continue, abort */
+    for (;;)
+        __asm__ __volatile__("hlt");
 }
 
 /*
@@ -228,73 +228,73 @@ void __stack_chk_fail(void)
 static __attribute__((used, noreturn)) void
 __libc_start_c(unsigned long *sp)
 {
-	char **argv;
+    char **argv;
 
-	__libc_argc = (int)sp[0];
-	argv = (char **)&sp[1];
-	__libc_argv = argv;
-	__libc_envp = argv + __libc_argc + 1;
+    __libc_argc = (int)sp[0];
+    argv = (char **)&sp[1];
+    __libc_argv = argv;
+    __libc_envp = argv + __libc_argc + 1;
 
-	/* envp[] is NULL-terminated; the auxv pairs start one word later. */
-	{
-		unsigned long *scan = (unsigned long *)__libc_envp;
+    /* envp[] is NULL-terminated; the auxv pairs start one word later. */
+    {
+        unsigned long *scan = (unsigned long *)__libc_envp;
 
-		while (*scan)
-			scan++;
-		__libc_auxv = scan + 1;
-	}
+        while (*scan)
+            scan++;
+        __libc_auxv = scan + 1;
+    }
 
-	environ = __libc_envp;
-	__environ = __libc_envp;
+    environ = __libc_envp;
+    __environ = __libc_envp;
 
-	/*
-	 * Before the constructors, and before __libc_init. Both can reach
-	 * thread-local storage -- a constructor that calls into stdio touches
-	 * errno, and __libc_init() calls malloc() -- and neither can be trusted
-	 * to do so before the thread pointer exists.
-	 */
-	__libc_setup_tls();
+    /*
+     * Before the constructors, and before __libc_init. Both can reach
+     * thread-local storage -- a constructor that calls into stdio touches
+     * errno, and __libc_init() calls malloc() -- and neither can be trusted
+     * to do so before the thread pointer exists.
+     */
+    __libc_setup_tls();
 
-	/*
-	 * Constructors run before __libc_init and before main. A constructor
-	 * that calls into stdio or the allocator therefore sees a libc whose
-	 * globals are published but whose arena does not exist yet; that is the
-	 * same guarantee main() gets, and __libc_init is deliberately not made
-	 * to run first because a constructor may legitimately be what decides
-	 * the process is worth starting at all.
-	 */
-	run_init_array();
+    /*
+     * Constructors run before __libc_init and before main. A constructor
+     * that calls into stdio or the allocator therefore sees a libc whose
+     * globals are published but whose arena does not exist yet; that is the
+     * same guarantee main() gets, and __libc_init is deliberately not made
+     * to run first because a constructor may legitimately be what decides
+     * the process is worth starting at all.
+     */
+    run_init_array();
 
-	__libc_init();
+    __libc_init();
 
-	int ret = main(__libc_argc, __libc_argv, __libc_envp);
+    int ret = main(__libc_argc, __libc_argv, __libc_envp);
 
-	exit(ret);
+    exit(ret);
 }
 
 __attribute__((noreturn, naked))
 void _start(void)
 {
-	/*
-	 * Written in the no-operand asm form on purpose. Inside a naked
-	 * function GCC hands the template straight to the assembler without
-	 * substituting operands, so an operand list here would make it try to
-	 * read %ebp and %rsp as operand references and fail to parse. There is
-	 * nothing to pass anyway: the stack pointer is the argument.
-	 *
-	 * RSP is already 16-byte aligned: ret_to_user pads the iretq frame so
-	 * that its padding pop lands the user on the boundary. The AND is belt
-	 * and braces -- a misaligned first call would misalign every stack the
-	 * program ever has, and nothing later could recover it.
-	 *
-	 * __libc_start_c is called rather than jumped to, so that RSP is 8 mod
-	 * 16 at the top of its own frame, per the SysV call convention, which
-	 * is what lets it be an ordinary C function.
-	 */
-	__asm__(
-		"xorl %ebp, %ebp\n\t"        /* terminate the backtrace chain */
-		"movq %rsp, %rdi\n\t"
-		"andq $-16, %rsp\n\t"
-		"call __libc_start_c\n\t"
-		"hlt\n\t");
+    /*
+     * Written in the no-operand asm form on purpose. Inside a naked
+     * function GCC hands the template straight to the assembler without
+     * substituting operands, so an operand list here would make it try to
+     * read %ebp and %rsp as operand references and fail to parse. There is
+     * nothing to pass anyway: the stack pointer is the argument.
+     *
+     * RSP is already 16-byte aligned: ret_to_user pads the iretq frame so
+     * that its padding pop lands the user on the boundary. The AND is belt
+     * and braces -- a misaligned first call would misalign every stack the
+     * program ever has, and nothing later could recover it.
+     *
+     * __libc_start_c is called rather than jumped to, so that RSP is 8 mod
+     * 16 at the top of its own frame, per the SysV call convention, which
+     * is what lets it be an ordinary C function.
+     */
+    __asm__(
+        "xorl %ebp, %ebp\n\t"        /* terminate the backtrace chain */
+        "movq %rsp, %rdi\n\t"
+        "andq $-16, %rsp\n\t"
+        "call __libc_start_c\n\t"
+        "hlt\n\t");
 }

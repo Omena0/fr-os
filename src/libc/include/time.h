@@ -44,12 +44,12 @@ typedef uint32_t clockid_t;
  * here: clock_gettime rejects them with EINVAL rather than returning the
  * monotonic clock under a name that promises something else.
  */
-#define CLOCK_REALTIME		0
-#define CLOCK_MONOTONIC		1
-#define CLOCK_PROCESS_CPUTIME_ID	2
-#define CLOCK_THREAD_CPUTIME_ID	3
-#define CLOCK_MONOTONIC_RAW	4
-#define CLOCK_BOOTTIME		7
+#define CLOCK_REALTIME        0
+#define CLOCK_MONOTONIC        1
+#define CLOCK_PROCESS_CPUTIME_ID    2
+#define CLOCK_THREAD_CPUTIME_ID    3
+#define CLOCK_MONOTONIC_RAW    4
+#define CLOCK_BOOTTIME        7
 
 extern int  clock_gettime(clockid_t clk_id, struct timespec *tp);
 extern int  clock_getres(clockid_t clk_id, struct timespec *res);

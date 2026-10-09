@@ -24,19 +24,19 @@
 #include <types.h>
 
 typedef enum {
-	KLOG_DEBUG = 0,
-	KLOG_INFO  = 1,
-	KLOG_WARN  = 2,
-	KLOG_ERROR = 3,
-	KLOG_FATAL = 4,
+    KLOG_DEBUG = 0,
+    KLOG_INFO  = 1,
+    KLOG_WARN  = 2,
+    KLOG_ERROR = 3,
+    KLOG_FATAL = 4,
 } klog_level_t;
 
 struct klog_record {
-	klog_level_t level;
-	uint64_t timestamp;      /* TSC ticks */
-	uint32_t cpu;
-	const char *subsystem;   /* static string, set by KLOG_SUBSYSTEM */
-	const char *message;     /* static format string */
+    klog_level_t level;
+    uint64_t timestamp;      /* TSC ticks */
+    uint32_t cpu;
+    const char *subsystem;   /* static string, set by KLOG_SUBSYSTEM */
+    const char *message;     /* static format string */
 };
 
 /*
@@ -53,7 +53,7 @@ struct klog_record {
  * produced.
  */
 #define KLOG_SUBSYSTEM(name) \
-	static const char klog_subsys_name[] __attribute__((unused)) = name
+    static const char klog_subsys_name[] __attribute__((unused)) = name
 
 /* Set the compile-time minimum level. Anything below is compiled out, so a
  * debug-heavy subsystem costs nothing in the release build. */
@@ -65,7 +65,7 @@ void klog_init(void);
 
 /* The formatted form. Normally reached through the klog() macro below. */
 void klog_emit(klog_level_t level, const char *subsystem,
-	       const char *fmt, ...) __attribute__((format(printf, 3, 4)));
+           const char *fmt, ...) __attribute__((format(printf, 3, 4)));
 
 /*
  * The logging entry point.
@@ -77,11 +77,11 @@ void klog_emit(klog_level_t level, const char *subsystem,
  * turning on logging everywhere.
  */
 #define klog(level, ...)                                                  \
-	do {                                                              \
-		if ((level) >= KLOG_COMPILE_LEVEL &&                     \
-		    (level) >= klog_runtime_level)                      \
-			klog_emit((level), klog_subsys_name, __VA_ARGS__); \
-	} while (0)
+    do {                                                              \
+        if ((level) >= KLOG_COMPILE_LEVEL &&                     \
+            (level) >= klog_runtime_level)                      \
+            klog_emit((level), klog_subsys_name, __VA_ARGS__); \
+    } while (0)
 
 /* Current runtime threshold; messages below it are dropped. */
 extern klog_level_t klog_runtime_level;

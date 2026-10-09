@@ -81,9 +81,9 @@ int    rand(void);
 void   srand(unsigned int seed);
 
 void   qsort(void *base, size_t nmemb, size_t size,
-		 int (*compar)(const void *, const void *));
+         int (*compar)(const void *, const void *));
 void  *bsearch(const void *key, const void *base, size_t nmemb, size_t size,
-		 int (*compar)(const void *, const void *));
+         int (*compar)(const void *, const void *));
 
 int abs(int j);
 long labs(long j);

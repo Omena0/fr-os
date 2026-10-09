@@ -45,82 +45,82 @@ KERNEL_PROVENANCE = 0x4f53424f4f45524e;
 
 SECTIONS
 {
-	. = KERNEL_VIRT_BASE + SIZEOF_HEADERS;
+    . = KERNEL_VIRT_BASE + SIZEOF_HEADERS;
 
-	.text : {
-		_stext = .;
-		/* The entry stub lives in its own section so it is guaranteed to be
-		 * at the first executable address. kmain.S clobbers every register
-		 * before touching any of them, so nothing may sit in front of it. */
-		*(.text.boot)
-		*(.text .text.*)
-		_etext = .;
-	}
+    .text : {
+        _stext = .;
+        /* The entry stub lives in its own section so it is guaranteed to be
+         * at the first executable address. kmain.S clobbers every register
+         * before touching any of them, so nothing may sit in front of it. */
+        *(.text.boot)
+        *(.text .text.*)
+        _etext = .;
+    }
 
 
-	. = ALIGN(4096);
-	.rodata : {
-		_rodata = .;
-		*(.rodata .rodata.*)
-		_erodata = .;
-	}
+    . = ALIGN(4096);
+    .rodata : {
+        _rodata = .;
+        *(.rodata .rodata.*)
+        _erodata = .;
+    }
 
-	/* Build provenance: toolchain versions, build host, build id. Read by the
-	 * kernel's version syscall and the debug subsystem. */
-	.note : {
-		. = ALIGN(8);
-		*(.note.gnu.build-id)
-		*(.note.*)
-	}
+    /* Build provenance: toolchain versions, build host, build id. Read by the
+     * kernel's version syscall and the debug subsystem. */
+    .note : {
+        . = ALIGN(8);
+        *(.note.gnu.build-id)
+        *(.note.*)
+    }
 
-	. = ALIGN(4096);
-	.data : {
-		_data = .;
-		*(.data .data.*)
-		*(.got .got.plt)
-		_ = .;
-		PROVIDE(__global_pointer$ = . + 0x800);
-		*(.sdata .sdata.*)
-		_edata = .;
-	}
+    . = ALIGN(4096);
+    .data : {
+        _data = .;
+        *(.data .data.*)
+        *(.got .got.plt)
+        _ = .;
+        PROVIDE(__global_pointer$ = . + 0x800);
+        *(.sdata .sdata.*)
+        _edata = .;
+    }
 
-	. = ALIGN(4096);
-	.bss : {
-		_bss = .;
-		*(.dynbss)
-		*(.bss .bss.*)
-		*(COMMON)
+    . = ALIGN(4096);
+    .bss : {
+        _bss = .;
+        *(.dynbss)
+        *(.bss .bss.*)
+        *(COMMON)
 
-		/*
-		 * The boot stack. Reserved inside .bss rather than in a separate
-		 * section so that stage2's BSS zeroing covers it: the bootloader
-		 * cannot know this kernel's BSS size, so it zeroes the whole landing
-		 * zone instead, and a stack outside .bss would be filled with
-		 * garbage on the way past.
-		 *
-		 * 32 KiB is the depth the panic backtrace and the syscall path are
-		 * sized for. It is not a general-purpose per-CPU stack — those are
-		 * allocated by kstack_alloc() once the allocator is up, because
-		 * interrupt handlers must not share a stack with the task they
-		 * interrupt.
-		 */
-		. = ALIGN(4096);
-		__kernel_stack_bottom = .;
-		. += KERNEL_STACK_SIZE;
-		__kernel_stack_top = .;
+        /*
+         * The boot stack. Reserved inside .bss rather than in a separate
+         * section so that stage2's BSS zeroing covers it: the bootloader
+         * cannot know this kernel's BSS size, so it zeroes the whole landing
+         * zone instead, and a stack outside .bss would be filled with
+         * garbage on the way past.
+         *
+         * 32 KiB is the depth the panic backtrace and the syscall path are
+         * sized for. It is not a general-purpose per-CPU stack — those are
+         * allocated by kstack_alloc() once the allocator is up, because
+         * interrupt handlers must not share a stack with the task they
+         * interrupt.
+         */
+        . = ALIGN(4096);
+        __kernel_stack_bottom = .;
+        . += KERNEL_STACK_SIZE;
+        __kernel_stack_top = .;
 
-		. = ALIGN(4096);
-		_ebss = .;
-	}
+        . = ALIGN(4096);
+        _ebss = .;
+    }
 
-	/* Discarded deliberately: unwind tables describe kernel frames in terms
-	 * of the kernel's own text, and there is no unwinder in the boot path.
-	 * Leaving them in would bloat the image past the landing-zone budget. */
-	/DISCARD/ : {
-		*(.eh_frame*)
-		*(.comment)
-		*(.note.GNU-stack)
-	}
+    /* Discarded deliberately: unwind tables describe kernel frames in terms
+     * of the kernel's own text, and there is no unwinder in the boot path.
+     * Leaving them in would bloat the image past the landing-zone budget. */
+    /DISCARD/ : {
+        *(.eh_frame*)
+        *(.comment)
+        *(.note.GNU-stack)
+    }
 }
 
 /*

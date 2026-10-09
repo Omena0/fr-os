@@ -66,7 +66,7 @@ extern int sys_ioctl(int fd, unsigned long request, ...);
  * wrappers; they are redeclared here because sys/mman.h exposes only the public
  * mmap/munmap/mprotect spellings. */
 extern void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd,
-		      off_t offset);
+              off_t offset);
 extern int sys_munmap(void *addr, size_t length);
 extern int sys_mprotect(void *addr, size_t len, int prot);
 
@@ -91,145 +91,145 @@ pid_t wait4(pid_t pid, int *wstatus, int options, void *rusage);
 
 int write(int fd, const void *buf, size_t count)
 {
-	return sys_write(fd, buf, count);
+    return sys_write(fd, buf, count);
 }
 
 int read(int fd, void *buf, size_t count)
 {
-	return sys_read(fd, buf, count);
+    return sys_read(fd, buf, count);
 }
 
 int close(int fd)
 {
-	return sys_close(fd);
+    return sys_close(fd);
 }
 
 int open(const char *pathname, int flags, ...)
 {
-	mode_t mode = 0;
-	if (flags & O_CREAT) {
-		va_list ap;
-		va_start(ap, flags);
-		mode = va_arg(ap, mode_t);
-		va_end(ap);
-	}
-	return sys_open(pathname, flags, mode);
+    mode_t mode = 0;
+    if (flags & O_CREAT) {
+        va_list ap;
+        va_start(ap, flags);
+        mode = va_arg(ap, mode_t);
+        va_end(ap);
+    }
+    return sys_open(pathname, flags, mode);
 }
 
 off_t lseek(int fd, off_t offset, int whence)
 {
-	return sys_lseek(fd, offset, whence);
+    return sys_lseek(fd, offset, whence);
 }
 
 int fsync(int fd)
 {
-	(void)fd;
-	/* No persistent storage; treat as success */
-	return 0;
+    (void)fd;
+    /* No persistent storage; treat as success */
+    return 0;
 }
 
 int fdatasync(int fd)
 {
-	return fsync(fd);
+    return fsync(fd);
 }
 
 int ftruncate(int fd, off_t length)
 {
-	(void)fd;
-	(void)length;
-	__errno = ENOSYS;
-	return -1;
+    (void)fd;
+    (void)length;
+    __errno = ENOSYS;
+    return -1;
 }
 
 
 int isatty(int fd)
 {
-	/* Only fd 0,1,2 are valid and they're ttys */
-	return (fd >= 0 && fd <= 2) ? 1 : 0;
+    /* Only fd 0,1,2 are valid and they're ttys */
+    return (fd >= 0 && fd <= 2) ? 1 : 0;
 }
 
 int dup(int oldfd)
 {
-	return sys_dup(oldfd);
+    return sys_dup(oldfd);
 }
 
 int dup2(int oldfd, int newfd)
 {
-	return sys_dup2(oldfd, newfd);
+    return sys_dup2(oldfd, newfd);
 }
 
 int pipe(int pipefd[2])
 {
-	return sys_pipe(pipefd);
+    return sys_pipe(pipefd);
 }
 
 /* --------------------------- process management ---------------------------- */
 
 pid_t getpid(void)
 {
-	return sys_getpid();
+    return sys_getpid();
 }
 
 pid_t gettid(void)
 {
-	return sys_gettid();
+    return sys_gettid();
 }
 
 pid_t getppid(void)
 {
-	return sys_getppid();
+    return sys_getppid();
 }
 
 pid_t fork(void)
 {
-	pid_t ret = sys_fork();
+    pid_t ret = sys_fork();
 
-	if (ret == 0) {
-		/* Child process: reset allocator state and reinitialize.
-		 * __malloc_fork_child() drops the parent's cached chunks so
-		 * the child does not hand out blocks the parent still owns.
-		 * A fresh arena is created by the first malloc(1) below.
-		 *
-		 * __libc_init() is NOT called here: it re-runs the full libc
-		 * startup (stack guard, atexit, etc.) which only needs to
-		 * happen once, at process creation. The allocator reset is
-		 * all the child needs. */
-		__malloc_fork_child();
-		{
-			void *p = malloc(1);
+    if (ret == 0) {
+        /* Child process: reset allocator state and reinitialize.
+         * __malloc_fork_child() drops the parent's cached chunks so
+         * the child does not hand out blocks the parent still owns.
+         * A fresh arena is created by the first malloc(1) below.
+         *
+         * __libc_init() is NOT called here: it re-runs the full libc
+         * startup (stack guard, atexit, etc.) which only needs to
+         * happen once, at process creation. The allocator reset is
+         * all the child needs. */
+        __malloc_fork_child();
+        {
+            void *p = malloc(1);
 
-			if (p)
-				free(p);
-		}
-	}
-	return ret;
+            if (p)
+                free(p);
+        }
+    }
+    return ret;
 }
 
 int execve(const char *path, char *const argv[], char *const envp[])
 {
-	return sys_execve(path, argv, envp);
+    return sys_execve(path, argv, envp);
 }
 
 pid_t waitpid(pid_t pid, int *wstatus, int options)
 {
-	return wait4(pid, wstatus, options, NULL);
+    return wait4(pid, wstatus, options, NULL);
 }
 
 pid_t wait4(pid_t pid, int *wstatus, int options, void *rusage)
 {
-	return sys_wait4(pid, wstatus, options, rusage);
+    return sys_wait4(pid, wstatus, options, rusage);
 }
 
 void _exit(int status)
 {
-	/*
-	 * SYS_exit, not SYS_exit_group: _exit(2) terminates the calling thread
-	 * and leaves the rest of the process alone. Reaching for exit_group
-	 * here is indistinguishable from exit() in every program that has one
-	 * thread -- which is all of them today -- and wrong in the first
-	 * program that has two.
-	 */
-	sys_exit(status);
+    /*
+     * SYS_exit, not SYS_exit_group: _exit(2) terminates the calling thread
+     * and leaves the rest of the process alone. Reaching for exit_group
+     * here is indistinguishable from exit() in every program that has one
+     * thread -- which is all of them today -- and wrong in the first
+     * program that has two.
+     */
+    sys_exit(status);
 }
 
 
@@ -243,41 +243,41 @@ void _exit(int status)
  */
 int sleep(unsigned int seconds)
 {
-	struct timespec req = { .tv_sec = seconds, .tv_nsec = 0 };
-	struct timespec rem = { .tv_sec = 0, .tv_nsec = 0 };
+    struct timespec req = { .tv_sec = seconds, .tv_nsec = 0 };
+    struct timespec rem = { .tv_sec = 0, .tv_nsec = 0 };
 
-	while (nanosleep(&req, &rem) == -1) {
-		if (__errno != EINTR)
-			break;
-		req = rem;
-	}
-	return (int)rem.tv_sec;
+    while (nanosleep(&req, &rem) == -1) {
+        if (__errno != EINTR)
+            break;
+        req = rem;
+    }
+    return (int)rem.tv_sec;
 }
 
 int usleep(useconds_t usec)
 {
-	struct timespec req = { .tv_sec = usec / 1000000, .tv_nsec = (usec % 1000000) * 1000 };
-	struct timespec rem = { .tv_sec = 0, .tv_nsec = 0 };
+    struct timespec req = { .tv_sec = usec / 1000000, .tv_nsec = (usec % 1000000) * 1000 };
+    struct timespec rem = { .tv_sec = 0, .tv_nsec = 0 };
 
-	while (nanosleep(&req, &rem) == -1 && __errno == EINTR) {
-		req = rem;
-	}
-	return 0;
+    while (nanosleep(&req, &rem) == -1 && __errno == EINTR) {
+        req = rem;
+    }
+    return 0;
 }
 
 unsigned int alarm(unsigned int seconds)
 {
-	(void)seconds;
-	__errno = ENOSYS;
-	return 0;
+    (void)seconds;
+    __errno = ENOSYS;
+    return 0;
 }
 
 int pause(void)
 {
-	/* Simplified: sleep forever. Real implementation would wait for a signal. */
-	struct timespec req = { .tv_sec = 0x7FFFFFFF, .tv_nsec = 0 };
-	nanosleep(&req, NULL);
-	return -1;  /* Never reached unless interrupted */
+    /* Simplified: sleep forever. Real implementation would wait for a signal. */
+    struct timespec req = { .tv_sec = 0x7FFFFFFF, .tv_nsec = 0 };
+    nanosleep(&req, NULL);
+    return -1;  /* Never reached unless interrupted */
 }
 
 /* -------------------------------- sysconf ---------------------------------- */
@@ -292,172 +292,172 @@ int pause(void)
  */
 long sysconf(int name)
 {
-	switch (name) {
-	case _SC_PAGESIZE:
-		return (long)getpagesize();
-	case _SC_NPROCESSORS_ONLN:
-	case _SC_NPROCESSORS_CONF:
-		return 8;
-	case _SC_PID_MAX:
-		return 32768;
-	case _SC_USER_PROCESSES:
-		return 64;
-	default:
-		__errno = ENOSYS;
-		return -1;
-	}
+    switch (name) {
+    case _SC_PAGESIZE:
+        return (long)getpagesize();
+    case _SC_NPROCESSORS_ONLN:
+    case _SC_NPROCESSORS_CONF:
+        return 8;
+    case _SC_PID_MAX:
+        return 32768;
+    case _SC_USER_PROCESSES:
+        return 64;
+    default:
+        __errno = ENOSYS;
+        return -1;
+    }
 }
 
 int getpagesize(void)
 {
-	/* AT_PAGESZ when the kernel published it, the build's page size
-	 * otherwise. It always publishes it, but a program that runs before
-	 * the auxv is walked should still get the right answer. */
-	long aux_pagesz = getauxval(AT_PAGESZ);
+    /* AT_PAGESZ when the kernel published it, the build's page size
+     * otherwise. It always publishes it, but a program that runs before
+     * the auxv is walked should still get the right answer. */
+    long aux_pagesz = getauxval(AT_PAGESZ);
 
-	return aux_pagesz > 0 ? (int)aux_pagesz : 4096;
+    return aux_pagesz > 0 ? (int)aux_pagesz : 4096;
 }
 
 /* ----------------------------- cpu identity -------------------------------- */
 
 int getcpu(unsigned *cpu, unsigned *node)
 {
-	unsigned pair = 0;
-	int ret;
+    unsigned pair = 0;
+    int ret;
 
-	ret = sys_getcpu(&pair, NULL);
-	if (ret < 0)
-		return -1;
-	if (cpu)
-		*cpu = pair;
-	if (node)
-		*node = 0;   /* one NUMA node is the whole topology here */
-	return 0;
+    ret = sys_getcpu(&pair, NULL);
+    if (ret < 0)
+        return -1;
+    if (cpu)
+        *cpu = pair;
+    if (node)
+        *node = 0;   /* one NUMA node is the whole topology here */
+    return 0;
 }
 
 /* --------------------------- memory mapping -------------------------------- */
 
 void *mmap(void *addr, size_t length, int prot, int flags, int fd,
-	   off_t offset)
+       off_t offset)
 {
-	return sys_mmap(addr, length, prot, flags, fd, offset);
+    return sys_mmap(addr, length, prot, flags, fd, offset);
 }
 
 int munmap(void *addr, size_t length)
 {
-	return sys_munmap(addr, length);
+    return sys_munmap(addr, length);
 }
 
 int mprotect(void *addr, size_t len, int prot)
 {
-	return sys_mprotect(addr, len, prot);
+    return sys_mprotect(addr, len, prot);
 }
 
 int ioctl(int fd, unsigned long request, ...)
 {
-	va_list ap;
-	void *argp;
-	int ret;
+    va_list ap;
+    void *argp;
+    int ret;
 
-	va_start(ap, request);
-	argp = va_arg(ap, void *);
-	va_end(ap);
-	ret = sys_ioctl(fd, request, argp);
-	return ret;
+    va_start(ap, request);
+    argp = va_arg(ap, void *);
+    va_end(ap);
+    ret = sys_ioctl(fd, request, argp);
+    return ret;
 }
 
 /* -------------------------------- getauxval -------------------------------- */
 
 long getauxval(long type)
 {
-	if (!__libc_auxv)
-		return 0;
-	unsigned long *auxv = (unsigned long *)__libc_auxv;
-	while (auxv[0] != AT_NULL) {
-		if (auxv[0] == (unsigned long)type)
-			return (long)auxv[1];
-		auxv += 2;
-	}
-	return 0;
+    if (!__libc_auxv)
+        return 0;
+    unsigned long *auxv = (unsigned long *)__libc_auxv;
+    while (auxv[0] != AT_NULL) {
+        if (auxv[0] == (unsigned long)type)
+            return (long)auxv[1];
+        auxv += 2;
+    }
+    return 0;
 }
 
 /* ------------------------------ user/group --------------------------------- */
 
 uid_t getuid(void)
 {
-	return (uid_t)sys_getuid();
+    return (uid_t)sys_getuid();
 }
 
 uid_t geteuid(void)
 {
-	return (uid_t)sys_geteuid();
+    return (uid_t)sys_geteuid();
 }
 
 gid_t getgid(void)
 {
-	return (gid_t)sys_getgid();
+    return (gid_t)sys_getgid();
 }
 
 gid_t getegid(void)
 {
-	return (gid_t)sys_getegid();
+    return (gid_t)sys_getegid();
 }
 
 /* ---------------------------- filesystem stubs ----------------------------- */
 
 int chdir(const char *path)
 {
-	(void)path;
-	__errno = ENOSYS;
-	return -1;
+    (void)path;
+    __errno = ENOSYS;
+    return -1;
 }
 
 int fchdir(int fd)
 {
-	(void)fd;
-	__errno = ENOSYS;
-	return -1;
+    (void)fd;
+    __errno = ENOSYS;
+    return -1;
 }
 
 char *getcwd(char *buf, size_t size)
 {
-	(void)buf;
-	(void)size;
-	__errno = ENOSYS;
-	return NULL;
+    (void)buf;
+    (void)size;
+    __errno = ENOSYS;
+    return NULL;
 }
 
 int unlink(const char *pathname)
 {
-	(void)pathname;
-	__errno = ENOSYS;
-	return -1;
+    (void)pathname;
+    __errno = ENOSYS;
+    return -1;
 }
 
 int rmdir(const char *pathname)
 {
-	(void)pathname;
-	__errno = ENOSYS;
-	return -1;
+    (void)pathname;
+    __errno = ENOSYS;
+    return -1;
 }
 
 int access(const char *pathname, int mode)
 {
-	(void)pathname;
-	(void)mode;
-	__errno = ENOSYS;
-	return -1;
+    (void)pathname;
+    (void)mode;
+    __errno = ENOSYS;
+    return -1;
 }
 
 int truncate(const char *path, off_t length)
 {
-	(void)path;
-	(void)length;
-	__errno = ENOSYS;
-	return -1;
+    (void)path;
+    (void)length;
+    __errno = ENOSYS;
+    return -1;
 }
 
 int creat(const char *pathname, mode_t mode)
 {
-	return open(pathname, O_CREAT | O_WRONLY | O_TRUNC, mode);
+    return open(pathname, O_CREAT | O_WRONLY | O_TRUNC, mode);
 }

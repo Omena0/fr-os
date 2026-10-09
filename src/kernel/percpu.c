@@ -27,11 +27,11 @@ static uint32_t num_cpus;
  * mechanisms, and which one broke is the whole diagnosis.
  */
 struct gs_check {
-	uint64_t want;		/* the address that was asked for */
-	uint64_t msr;		/* what IA32_GS_BASE read back as */
-	uint64_t fast;		/* what this_cpu() returned */
-	uint32_t via_gs;	/* what a GS-relative load saw */
-	int step;		/* 0 = ok, else the check that failed */
+    uint64_t want;        /* the address that was asked for */
+    uint64_t msr;        /* what IA32_GS_BASE read back as */
+    uint64_t fast;        /* what this_cpu() returned */
+    uint32_t via_gs;    /* what a GS-relative load saw */
+    int step;        /* 0 = ok, else the check that failed */
 };
 
 /*
@@ -68,87 +68,87 @@ struct gs_check {
  */
 static struct gs_check gs_base_install(uint64_t want, uint32_t want_id)
 {
-	struct gs_check c = { .want = want, .step = 0 };
-	uint32_t id;
+    struct gs_check c = { .want = want, .step = 0 };
+    uint32_t id;
 
-	wrmsr(MSR_GS_BASE, want);
+    wrmsr(MSR_GS_BASE, want);
 
-	c.msr = rdmsr(MSR_GS_BASE);
-	if (c.msr != want)
-		c.step = 1;
+    c.msr = rdmsr(MSR_GS_BASE);
+    if (c.msr != want)
+        c.step = 1;
 
-	c.fast = (uint64_t)(uintptr_t)this_cpu();
-	if (c.fast != want)
-		c.step = c.step ? c.step : 2;
+    c.fast = (uint64_t)(uintptr_t)this_cpu();
+    if (c.fast != want)
+        c.step = c.step ? c.step : 2;
 
-	/* Offset 0 of percpu_data is cpu_id, so this is a real round trip. */
-	__asm__ volatile("movl %%gs:0, %0" : "=r"(id));
-	c.via_gs = id;
-	if (id != want_id)
-		c.step = c.step ? c.step : 3;
+    /* Offset 0 of percpu_data is cpu_id, so this is a real round trip. */
+    __asm__ volatile("movl %%gs:0, %0" : "=r"(id));
+    c.via_gs = id;
+    if (id != want_id)
+        c.step = c.step ? c.step : 3;
 
-	return c;
+    return c;
 }
 
 void percpu_setup(uint32_t cpu_id)
 {
-	if (cpu_id >= MAX_CPUS)
-		panic("percpu: cpu %u is out of range, MAX_CPUS is %d",
-		      cpu_id, MAX_CPUS);
+    if (cpu_id >= MAX_CPUS)
+        panic("percpu: cpu %u is out of range, MAX_CPUS is %d",
+              cpu_id, MAX_CPUS);
 
-	struct percpu_data *p = &percpu_data[cpu_id];
+    struct percpu_data *p = &percpu_data[cpu_id];
 
-	memset(p, 0, sizeof(*p));
-	p->cpu_id = cpu_id;
+    memset(p, 0, sizeof(*p));
+    p->cpu_id = cpu_id;
 
-	percpu_install_gs_base(cpu_id);
+    percpu_install_gs_base(cpu_id);
 
-	p->online = true;
-	if (cpu_id + 1 > num_cpus)
-		num_cpus = cpu_id + 1;
+    p->online = true;
+    if (cpu_id + 1 > num_cpus)
+        num_cpus = cpu_id + 1;
 }
 
 void percpu_install_gs_base(uint32_t cpu_id)
 {
-	if (cpu_id >= MAX_CPUS)
-		panic("percpu: gs base for cpu %u, MAX_CPUS is %d",
-		      cpu_id, MAX_CPUS);
+    if (cpu_id >= MAX_CPUS)
+        panic("percpu: gs base for cpu %u, MAX_CPUS is %d",
+              cpu_id, MAX_CPUS);
 
-	/*
-	 * The kernel's own data must never land in the GS-relative window that
-	 * userspace code could reach through a wild pointer, so the base points
-	 * at a dedicated per-CPU array rather than at anything user-mapped.
-	 */
-	struct gs_check c = gs_base_install((uint64_t)(uintptr_t)&percpu_data[cpu_id],
-					    cpu_id);
+    /*
+     * The kernel's own data must never land in the GS-relative window that
+     * userspace code could reach through a wild pointer, so the base points
+     * at a dedicated per-CPU array rather than at anything user-mapped.
+     */
+    struct gs_check c = gs_base_install((uint64_t)(uintptr_t)&percpu_data[cpu_id],
+                        cpu_id);
 
-	if (c.step) {
-		/*
-		 * Fatal, and deliberately so. This used to log and return, which
-		 * left `online` false, num_cpus at 0, and a GS base that nobody had
-		 * installed -- so every this_cpu() caller went on reading and writing
-		 * whatever happened to be mapped at the address it returned, which on
-		 * this machine is the bootloader's identity window. The address is
-		 * mapped and writable, so nothing faults: it surfaces much later as
-		 * an allocator returning NULL for every request and a triple fault
-		 * inside kmalloc(). There is no correct way to continue from here,
-		 * and no version of "log it and carry on" that is better than stopping.
-		 *
-		 * `step` says which route failed. 1 = the write did not land (wrong
-		 * MSR, hypervisor filtering, CR4 state). 2 = it landed and this_cpu()
-		 * reads something other than IA32_GS_BASE -- the bug this whole
-		 * function exists to catch. 3 = it landed and GS-relative addressing
-		 * disagrees about where this CPU's data is.
-		 */
-		panic_on_cpu(cpu_id,
-			     "percpu: GS base install failed at check %d: "
-			     "wrote %#lx, IA32_GS_BASE %#lx, this_cpu() %#lx, "
-			     "gs-relative cpu_id %u",
-			     c.step, c.want, c.msr, c.fast, c.via_gs);
-	}
+    if (c.step) {
+        /*
+         * Fatal, and deliberately so. This used to log and return, which
+         * left `online` false, num_cpus at 0, and a GS base that nobody had
+         * installed -- so every this_cpu() caller went on reading and writing
+         * whatever happened to be mapped at the address it returned, which on
+         * this machine is the bootloader's identity window. The address is
+         * mapped and writable, so nothing faults: it surfaces much later as
+         * an allocator returning NULL for every request and a triple fault
+         * inside kmalloc(). There is no correct way to continue from here,
+         * and no version of "log it and carry on" that is better than stopping.
+         *
+         * `step` says which route failed. 1 = the write did not land (wrong
+         * MSR, hypervisor filtering, CR4 state). 2 = it landed and this_cpu()
+         * reads something other than IA32_GS_BASE -- the bug this whole
+         * function exists to catch. 3 = it landed and GS-relative addressing
+         * disagrees about where this CPU's data is.
+         */
+        panic_on_cpu(cpu_id,
+                 "percpu: GS base install failed at check %d: "
+                 "wrote %#lx, IA32_GS_BASE %#lx, this_cpu() %#lx, "
+                 "gs-relative cpu_id %u",
+                 c.step, c.want, c.msr, c.fast, c.via_gs);
+    }
 }
 
 uint32_t percpu_num_cpus(void)
 {
-	return num_cpus;
+    return num_cpus;
 }

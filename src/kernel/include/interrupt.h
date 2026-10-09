@@ -54,18 +54,18 @@
  * remapped to 20-30" and "IRQ0 on vector 33" in the same run.
  */
 #define VECTOR_IRQ_BASE               32
-#define VECTOR_IRQ_TIMER              32	/* IRQ0 */
-#define VECTOR_IRQ_KEYBOARD           33	/* IRQ1 */
-#define VECTOR_IRQ_CASCADE            34	/* IRQ2 */
-#define VECTOR_IRQ_COM2               35	/* IRQ3 */
-#define VECTOR_IRQ_COM1               36	/* IRQ4 */
-#define VECTOR_IRQ_PARALLEL           37	/* IRQ5, LPT2 or primary IDE */
-#define VECTOR_IRQ_FLOPPY             38	/* IRQ6, floppy controller */
-#define VECTOR_IRQ_RTC                40	/* IRQ8, CMOS/RTC -- the first
-						 * line on the *slave*, so
-						 * this is also the
-						 * master/slave boundary
-						 * IRQ2 == VECTOR_IRQ_MAX */
+#define VECTOR_IRQ_TIMER              32    /* IRQ0 */
+#define VECTOR_IRQ_KEYBOARD           33    /* IRQ1 */
+#define VECTOR_IRQ_CASCADE            34    /* IRQ2 */
+#define VECTOR_IRQ_COM2               35    /* IRQ3 */
+#define VECTOR_IRQ_COM1               36    /* IRQ4 */
+#define VECTOR_IRQ_PARALLEL           37    /* IRQ5, LPT2 or primary IDE */
+#define VECTOR_IRQ_FLOPPY             38    /* IRQ6, floppy controller */
+#define VECTOR_IRQ_RTC                40    /* IRQ8, CMOS/RTC -- the first
+                         * line on the *slave*, so
+                         * this is also the
+                         * master/slave boundary
+                         * IRQ2 == VECTOR_IRQ_MAX */
 #define VECTOR_IRQ_MAX                48
 
 /*
@@ -92,11 +92,11 @@
  * sets a change to either end that is not a change to both fails the build.
  */
 _Static_assert(VECTOR_IRQ_TIMER    == VECTOR_IRQ_BASE + 0,
-	       "IRQ0 must be VECTOR_IRQ_BASE + 0: the 8259 master is remapped to "
-	       "PIC1_VECTOR_BASE, so vector == base + irq with nothing in between");
+           "IRQ0 must be VECTOR_IRQ_BASE + 0: the 8259 master is remapped to "
+           "PIC1_VECTOR_BASE, so vector == base + irq with nothing in between");
 _Static_assert(VECTOR_IRQ_KEYBOARD == VECTOR_IRQ_BASE + 1, "IRQ1 is off by one");
 _Static_assert(VECTOR_IRQ_CASCADE  == VECTOR_IRQ_BASE + 2,
-	       "IRQ2 is the cascade and is never acknowledged directly");
+           "IRQ2 is the cascade and is never acknowledged directly");
 _Static_assert(VECTOR_IRQ_COM2     == VECTOR_IRQ_BASE + 3, "IRQ3 is off by one");
 _Static_assert(VECTOR_IRQ_COM1     == VECTOR_IRQ_BASE + 4, "IRQ4 is off by one");
 _Static_assert(VECTOR_IRQ_PARALLEL == VECTOR_IRQ_BASE + 5, "IRQ5 is off by one");
@@ -114,16 +114,16 @@ _Static_assert(VECTOR_IRQ_FLOPPY   == VECTOR_IRQ_BASE + 6, "IRQ6 is off by one")
  * assert below is what noticed.
  */
 _Static_assert(VECTOR_IRQ_RTC == VECTOR_IRQ_BASE + 8,
-	       "the CMOS/RTC line is IRQ8 on AT hardware, which is the first line "
-	       "on the slave; 37 is IRQ5 (LPT2) and the old comment claimed 38 "
-		       "(floppy), so the constant and its comment disagreed");
+           "the CMOS/RTC line is IRQ8 on AT hardware, which is the first line "
+           "on the slave; 37 is IRQ5 (LPT2) and the old comment claimed 38 "
+               "(floppy), so the constant and its comment disagreed");
 _Static_assert(VECTOR_IRQ_RTC == VECTOR_IRQ_SLAVE_FIRST,
-	       "IRQ8 is the first slave line, so pic_eoi()'s master/slave split "
-		       "must fall exactly at VECTOR_IRQ_RTC");
+           "IRQ8 is the first slave line, so pic_eoi()'s master/slave split "
+               "must fall exactly at VECTOR_IRQ_RTC");
 _Static_assert(VECTOR_IRQ_MAX == VECTOR_IRQ_BASE + PIC_IRQ_COUNT,
-	       "VECTOR_IRQ_MAX must cover all 16 lines the two 8259s can raise, "
-	       "or interrupt_dispatch() will leave a real interrupt unacknowledged "
-	       "and the controller stops raising it");
+           "VECTOR_IRQ_MAX must cover all 16 lines the two 8259s can raise, "
+           "or interrupt_dispatch() will leave a real interrupt unacknowledged "
+           "and the controller stops raising it");
 
 /* The highest vector for which interrupt_entry.S generates a stub. Everything
  * from here to 255 has a gate but no stub, and a vector that arrives without
@@ -196,22 +196,22 @@ bool gdt_have_ist(uint8_t ist);
  * a kernel-origin interrupt the CPU pushes a zero SS.
  */
 struct interrupt_frame {
-	uint64_t rax;
-	uint64_t rdi;
-	uint64_t rsi;
-	uint64_t rdx;
-	uint64_t rcx;
-	uint64_t r8;
-	uint64_t r9;
-	uint64_t r10;
-	uint64_t r11;
-	uint64_t vector;
-	uint64_t error_code;
-	uint64_t rip;
-	uint64_t cs;
-	uint64_t rflags;
-	uint64_t rsp;
-	uint64_t ss;
+    uint64_t rax;
+    uint64_t rdi;
+    uint64_t rsi;
+    uint64_t rdx;
+    uint64_t rcx;
+    uint64_t r8;
+    uint64_t r9;
+    uint64_t r10;
+    uint64_t r11;
+    uint64_t vector;
+    uint64_t error_code;
+    uint64_t rip;
+    uint64_t cs;
+    uint64_t rflags;
+    uint64_t rsp;
+    uint64_t ss;
 };
 
 /*
@@ -242,19 +242,19 @@ struct interrupt_frame {
  * fields are only valid when frame_from_user(f) is true.
  */
 _Static_assert(offsetof(struct interrupt_frame, vector) == 72,
-	       "interrupt_entry.S pushes the vector at offset 72");
+           "interrupt_entry.S pushes the vector at offset 72");
 _Static_assert(offsetof(struct interrupt_frame, error_code) == 80,
-	       "interrupt_entry.S pushes the error code at offset 80");
+           "interrupt_entry.S pushes the error code at offset 80");
 _Static_assert(offsetof(struct interrupt_frame, rip) == 88,
-	       "interrupt_entry.S starts the CPU frame at offset 88");
+           "interrupt_entry.S starts the CPU frame at offset 88");
 _Static_assert(offsetof(struct interrupt_frame, cs) == 96, "bad cs offset");
 _Static_assert(offsetof(struct interrupt_frame, rflags) == 104,
-	       "bad rflags offset");
+           "bad rflags offset");
 _Static_assert(offsetof(struct interrupt_frame, rsp) == 112, "bad rsp offset");
 _Static_assert(offsetof(struct interrupt_frame, ss) == 120, "bad ss offset");
 _Static_assert(sizeof(struct interrupt_frame) == 128,
-	       "struct uses ring-3 layout (128 bytes); ring-0 frame is 112 bytes "
-	       "and only the prefix up to rflags is valid");
+           "struct uses ring-3 layout (128 bytes); ring-0 frame is 112 bytes "
+           "and only the prefix up to rflags is valid");
 
 /* Raised on ring 3 by a POP SS or interrupt, to prevent an attacker from
  * slipping a second stack frame in between the two CPU pushes. */
@@ -270,7 +270,7 @@ _Static_assert(sizeof(struct interrupt_frame) == 128,
 
 static inline bool frame_from_user(const struct interrupt_frame *f)
 {
-	return (f->cs & 3) == 3;
+    return (f->cs & 3) == 3;
 }
 
 /* Return the interrupted context's RSP. For ring-3 this is the saved user RSP;
@@ -278,7 +278,7 @@ static inline bool frame_from_user(const struct interrupt_frame *f)
  * frame pointer plus the ring-0 frame size (112). */
 static inline uint64_t frame_user_rsp(const struct interrupt_frame *f)
 {
-	return frame_from_user(f) ? f->rsp : (uint64_t)f + 112;
+    return frame_from_user(f) ? f->rsp : (uint64_t)f + 112;
 }
 
 /* ------------------------------------------------------------- API --------- */
@@ -297,7 +297,7 @@ typedef void (*irq_handler_t)(struct interrupt_frame *frame);
  * keyboard interrupt occasionally running the timer handler.
  */
 void idt_set_handler(uint8_t vector, irq_handler_t handler, uint8_t ist,
-		     uint8_t dpl);
+             uint8_t dpl);
 
 /* Build the IDT, install the IST stacks, and load IDTR. */
 void idt_init(void);
@@ -356,7 +356,7 @@ u64 pit_tick_count(void);
  * with no change, which is the whole point of routing through one function.
  */
 void process_deliver_signal(int signo, struct interrupt_frame *frame)
-	__attribute__((weak));
+    __attribute__((weak));
 
 /*
  * Terminate the task described by `frame`. Used for exceptions that are fatal to
@@ -367,6 +367,6 @@ void process_deliver_signal(int signo, struct interrupt_frame *frame)
  * docs/src/kernel/interrupt-handling.md.
  */
 void process_terminate_from_fault(struct interrupt_frame *frame)
-	__attribute__((weak));
+    __attribute__((weak));
 
 #endif /* INTERRUPT_H */

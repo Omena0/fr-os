@@ -96,8 +96,8 @@
 /* ------------------------------------------------------------- queues ------- */
 
 struct mlfq_queue {
-	struct list_head head;
-	u32 count;
+    struct list_head head;
+    u32 count;
 };
 
 /*
@@ -107,23 +107,23 @@ struct mlfq_queue {
  * branch, and it avoids a 128-bit shift on a CPU model that may not have it.
  */
 struct rt_prio_array {
-	u64 bitmap[2];
-	struct list_head queue[RT_PRIORITIES];
+    u64 bitmap[2];
+    struct list_head queue[RT_PRIORITIES];
 };
 
 struct runqueue {
-	spinlock_t lock;
-	struct mlfq_queue mlfq[MLFQ_LEVELS];
-	u32 mlfq_bitmap;          /* one bit per non-empty level */
-	struct rt_prio_array rt;
-	struct list_head deadline; /* ordered by abs_deadline, earliest first */
-	u32 deadline_count;
-	struct task *current;
-	struct task *idle;
-	u64 nr_running;
-	u64 nr_switches;
-	u64 clock;                /* ticks on this CPU since boot */
-	u64 deadline_util;        /* summed runtime/period, in percent */
+    spinlock_t lock;
+    struct mlfq_queue mlfq[MLFQ_LEVELS];
+    u32 mlfq_bitmap;          /* one bit per non-empty level */
+    struct rt_prio_array rt;
+    struct list_head deadline; /* ordered by abs_deadline, earliest first */
+    u32 deadline_count;
+    struct task *current;
+    struct task *idle;
+    u64 nr_running;
+    u64 nr_switches;
+    u64 clock;                /* ticks on this CPU since boot */
+    u64 deadline_util;        /* summed runtime/period, in percent */
 };
 
 /*
@@ -205,9 +205,9 @@ u32 sched_select_cpu(const cpumask_t *mask, u32 preferred);
  * rejected rather than admitted, because admitting it would silently break the
  * EDF guarantee it was asked for. */
 struct sched_deadline_attr {
-	u64 runtime_ns;
-	u64 deadline_ns;
-	u64 period_ns;
+    u64 runtime_ns;
+    u64 deadline_ns;
+    u64 period_ns;
 };
 
 /*
@@ -218,7 +218,7 @@ struct sched_deadline_attr {
  * `dl` is only consulted for SCHED_DEADLINE and may be NULL otherwise.
  */
 int sched_set_policy(struct task *t, u32 policy, u32 rt_priority,
-		     const struct sched_deadline_attr *dl);
+             const struct sched_deadline_attr *dl);
 
 /* Sleep for `ns`, using the scheduler's timer list. Returns early (0) if a
  * signal-equivalent wake happened; there are no signals yet, so it always

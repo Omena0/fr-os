@@ -43,18 +43,18 @@
  * time the return value is in RAX.
  */
 struct syscall_regs {
-	u64 rax;     /* syscall number in, return value out */
-	u64 rdi;
-	u64 rsi;
-	u64 rdx;
-	u64 r10;
-	u64 r8;
-	u64 r9;
-	u64 rcx;     /* clobbered by SYSCALL: user RIP */
-	u64 r11;     /* clobbered by SYSCALL: user RFLAGS */
-	u64 rip;     /* user RIP, copied out of rcx */
-	u64 rflags;  /* user RFLAGS, copied out of r11 */
-	u64 rsp;     /* user RSP, saved by the entry before the kernel stack */
+    u64 rax;     /* syscall number in, return value out */
+    u64 rdi;
+    u64 rsi;
+    u64 rdx;
+    u64 r10;
+    u64 r8;
+    u64 r9;
+    u64 rcx;     /* clobbered by SYSCALL: user RIP */
+    u64 r11;     /* clobbered by SYSCALL: user RFLAGS */
+    u64 rip;     /* user RIP, copied out of rcx */
+    u64 rflags;  /* user RFLAGS, copied out of r11 */
+    u64 rsp;     /* user RSP, saved by the entry before the kernel stack */
 };
 
 /* ------------------------------------------------------- per-CPU state ------ */
@@ -75,14 +75,14 @@ struct syscall_regs {
 #define SC_RET_TO_USER     16   /* non-zero: this frame may sysretq */
 
 struct syscall_cpu {
-	u64 kstack_top;
-	u64 user_rsp;
-	u64 ret_to_user;
-	u64 pad[5];
+    u64 kstack_top;
+    u64 user_rsp;
+    u64 ret_to_user;
+    u64 pad[5];
 };
 
 STATIC_ASSERT(sizeof(struct syscall_cpu) == SYSCALL_CPU_SIZE,
-	      "syscall_entry.S indexes this array with a shift");
+          "syscall_entry.S indexes this array with a shift");
 
 extern struct syscall_cpu syscall_cpus[MAX_CPUS];
 

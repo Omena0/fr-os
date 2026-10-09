@@ -98,8 +98,8 @@ static inline void *rec_pt(void)   { return (void *)(VMM_RECURSE_OFFSET + 0x3000
  * at level L is simply VMM_RECURSE_OFFSET + L*0x1000 + i*8. */
 static inline uint64_t *recursive_entry(unsigned level, unsigned index)
 {
-	return (uint64_t *)(VMM_RECURSE_OFFSET + (uint64_t)level * 0x1000 +
-			    (uint64_t)index * 8);
+    return (uint64_t *)(VMM_RECURSE_OFFSET + (uint64_t)level * 0x1000 +
+                (uint64_t)index * 8);
 }
 
 /* Kernel virtual memory layout, matching src/kernel/link.ld and boot.h. */
@@ -126,14 +126,14 @@ static inline uint64_t *recursive_entry(unsigned level, unsigned index)
  * an rbtree in struct address_space, and a change to mm_find_vma alone.
  */
 struct vma {
-	virt_addr_t start;          /* page aligned, inclusive */
-	virt_addr_t end;            /* page aligned, exclusive */
-	uint32_t prot;              /* VM_READ | VM_WRITE | VM_EXEC | VM_USER */
-	uint32_t flags;             /* VM_ANON, VM_FIXED, ... */
-	phys_addr_t phys_base;      /* for file-backed or pre-mapped regions */
-	void *file;                 /* backing file, or NULL */
-	uint64_t file_offset;          /* offset into the backing file */
-	struct list_head list;
+    virt_addr_t start;          /* page aligned, inclusive */
+    virt_addr_t end;            /* page aligned, exclusive */
+    uint32_t prot;              /* VM_READ | VM_WRITE | VM_EXEC | VM_USER */
+    uint32_t flags;             /* VM_ANON, VM_FIXED, ... */
+    phys_addr_t phys_base;      /* for file-backed or pre-mapped regions */
+    void *file;                 /* backing file, or NULL */
+    uint64_t file_offset;          /* offset into the backing file */
+    struct list_head list;
 } __packed;
 
 /*
@@ -144,42 +144,42 @@ struct vma {
  * CR3: dereferencing this PML4 requires a context switch to it.
  */
 struct address_space {
-	phys_addr_t pgd;
-	spinlock_t lock;
-	struct list_head vma_list;
-	uint64_t vma_count;
+    phys_addr_t pgd;
+    spinlock_t lock;
+    struct list_head vma_list;
+    uint64_t vma_count;
 
-	virt_addr_t start_code, end_code;
-	virt_addr_t start_data, end_data;
-	virt_addr_t start_brk, brk;
-	virt_addr_t stack_top;
+    virt_addr_t start_code, end_code;
+    virt_addr_t start_data, end_data;
+    virt_addr_t start_brk, brk;
+    virt_addr_t stack_top;
 
-	/*
-	 * The initial thread pointer, from the image's PT_TLS: `tls_ptr` is the
-	 * value the calling task must have in MSR_FS_BASE, and `tls_ptr -
-	 * tls_size` is the first byte of the block it addresses. Zero means the
-	 * image has no PT_TLS, which is a fact about the image rather than a
-	 * missing value, so a caller can tell "no thread-local storage" from
-	 * "a TLS block at address 0" — the latter is not representable, since
-	 * the loader rejects any p_vaddr that would put it there.
-	 *
-	 * It lives on the address space rather than on the task because the ELF
-	 * loader is handed an mm and a task, and only the mm belongs to the
-	 * image: a task that execs gets a new address space and with it a new
-	 * TLS block, and nothing copies this field across the exec. It also
-	 * means the block needs no separate lifetime -- it is an ordinary VMA in
-	 * this same list, so mm_put() frees it with everything else.
-	 */
-	virt_addr_t tls_ptr;
-	virt_addr_t tls_size;
+    /*
+     * The initial thread pointer, from the image's PT_TLS: `tls_ptr` is the
+     * value the calling task must have in MSR_FS_BASE, and `tls_ptr -
+     * tls_size` is the first byte of the block it addresses. Zero means the
+     * image has no PT_TLS, which is a fact about the image rather than a
+     * missing value, so a caller can tell "no thread-local storage" from
+     * "a TLS block at address 0" — the latter is not representable, since
+     * the loader rejects any p_vaddr that would put it there.
+     *
+     * It lives on the address space rather than on the task because the ELF
+     * loader is handed an mm and a task, and only the mm belongs to the
+     * image: a task that execs gets a new address space and with it a new
+     * TLS block, and nothing copies this field across the exec. It also
+     * means the block needs no separate lifetime -- it is an ordinary VMA in
+     * this same list, so mm_put() frees it with everything else.
+     */
+    virt_addr_t tls_ptr;
+    virt_addr_t tls_size;
 
-	/* Randomised mmap region base, per ASLR policy. */
-	virt_addr_t mmap_base;
-	virt_addr_t mmap_next;
+    /* Randomised mmap region base, per ASLR policy. */
+    virt_addr_t mmap_base;
+    virt_addr_t mmap_next;
 
-	/* Refcount on the address space: threads sharing it (CLONE_VM) hold
-	 * references so the last one to exit frees the page tables. */
-	volatile s32 refcount;
+    /* Refcount on the address space: threads sharing it (CLONE_VM) hold
+     * references so the last one to exit frees the page tables. */
+    volatile s32 refcount;
 };
 
 /*
@@ -202,12 +202,12 @@ void vmm_switch_to_kernel_pgd(void);
  */
 static inline void *phys_to_virt(phys_addr_t phys)
 {
-	return (void *)(PHYS_DIRECT_MAP + phys);
+    return (void *)(PHYS_DIRECT_MAP + phys);
 }
 
 static inline phys_addr_t virt_to_phys_direct(virt_addr_t virt)
 {
-	return virt - PHYS_DIRECT_MAP;
+    return virt - PHYS_DIRECT_MAP;
 }
 
 /*
@@ -244,7 +244,7 @@ void *vmm_boot_ptr(phys_addr_t phys);
  */
 static inline phys_addr_t kernel_virt_to_phys(virt_addr_t virt)
 {
-	return (virt - KERNEL_VIRT_BASE) + KERNEL_LANDING_ADDR;
+    return (virt - KERNEL_VIRT_BASE) + KERNEL_LANDING_ADDR;
 }
 
 /* ------------------------------------------------------------- vmalloc ----- */
@@ -273,12 +273,12 @@ void pt_free(phys_addr_t pgd, unsigned count);
 
 static inline uint64_t *pt_virt(phys_addr_t pgd)
 {
-	return (uint64_t *)(uintptr_t)(PHYS_DIRECT_MAP + pgd);
+    return (uint64_t *)(uintptr_t)(PHYS_DIRECT_MAP + pgd);
 }
 
 /* Map one 4 KiB page in `pgd`'s address space. */
 int vmm_map_page(phys_addr_t pgd, virt_addr_t virt, phys_addr_t phys,
-		 uint32_t prot);
+         uint32_t prot);
 
 /* Unmap one page. Returns the physical frame that was mapped, or 0. */
 phys_addr_t vmm_unmap_page(phys_addr_t pgd, virt_addr_t virt);
@@ -312,11 +312,11 @@ phys_addr_t vmm_translate(phys_addr_t pgd, virt_addr_t virt, uint64_t **leaf);
  * direct map, so it must stay.
  */
 int vmm_lookup_page(phys_addr_t pgd, virt_addr_t virt, phys_addr_t *phys,
-		    uint64_t **leaf);
+            uint64_t **leaf);
 
 /* Populate all leaf entries in a large-page-aligned range. */
 int vmm_map_large(phys_addr_t pgd, virt_addr_t virt, phys_addr_t phys,
-		  uint64_t count_pages_2mib, uint32_t prot);
+          uint64_t count_pages_2mib, uint32_t prot);
 
 /* -------------------------------------------------------- address spaces -- */
 
@@ -334,7 +334,7 @@ void mm_get(struct address_space *mm);
  * overlap an existing VMA unless VM_FIXED was requested for that exact range.
  */
 int mm_add_vma(struct address_space *mm, virt_addr_t start, virt_addr_t end,
-	       uint32_t prot, uint32_t flags);
+           uint32_t prot, uint32_t flags);
 
 int mm_remove_vma(struct address_space *mm, virt_addr_t start, virt_addr_t end);
 
@@ -389,7 +389,7 @@ void kmalloc_stats(u64 *allocs, u64 *frees, u64 *bytes_in_use);
  * -ENOMEM if a frame could not be allocated.
  */
 long vmm_handle_page_fault(struct address_space *mm, virt_addr_t addr,
-			   uint64_t error_code);
+               uint64_t error_code);
 
 /* The address space of the task running on this CPU, or NULL before the first
  * task exists. The #PF handler uses it; nothing else should assume the current

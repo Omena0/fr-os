@@ -36,54 +36,54 @@ static int atexit_count = 0;
 
 int atexit(void (*func)(void))
 {
-	if (atexit_count >= ATEXIT_MAX)
-		return -1;
-	atexit_funcs[atexit_count++] = func;
-	return 0;
+    if (atexit_count >= ATEXIT_MAX)
+        return -1;
+    atexit_funcs[atexit_count++] = func;
+    return 0;
 }
 
 /* __cxa_atexit is the C++ ABI variant; we support it by ignoring dso_handle. */
 int __cxa_atexit(void (*func)(void), void *arg, void *dso_handle)
 {
-	(void)arg;
-	(void)dso_handle;
-	return atexit(func);
+    (void)arg;
+    (void)dso_handle;
+    return atexit(func);
 }
 
 void exit(int status)
 {
-	/* Run atexit handlers in reverse order */
-	for (int i = atexit_count - 1; i >= 0; i--) {
-		if (atexit_funcs[i])
-			atexit_funcs[i]();
-	}
-	/*
-	 * Flush every stream, not just stdout. stdout is line buffered, so a
-	 * printf with no trailing newline -- the progress dots and the partial
-	 * line a program was interrupted on -- is still in its buffer at this
-	 * point, and this comment used to claim there was no stdio to flush.
-	 * There is: stdio.c is linked in whenever this file is. init.c only
-	 * survived without this by calling fflush(stdout) by hand before
-	 * returning, which is not something a program's exit() should depend
-	 * on.
-	 */
-	fflush(NULL);
-	sys_exit_group(status);
+    /* Run atexit handlers in reverse order */
+    for (int i = atexit_count - 1; i >= 0; i--) {
+        if (atexit_funcs[i])
+            atexit_funcs[i]();
+    }
+    /*
+     * Flush every stream, not just stdout. stdout is line buffered, so a
+     * printf with no trailing newline -- the progress dots and the partial
+     * line a program was interrupted on -- is still in its buffer at this
+     * point, and this comment used to claim there was no stdio to flush.
+     * There is: stdio.c is linked in whenever this file is. init.c only
+     * survived without this by calling fflush(stdout) by hand before
+     * returning, which is not something a program's exit() should depend
+     * on.
+     */
+    fflush(NULL);
+    sys_exit_group(status);
 }
 
 void _Exit(int status)
 {
-	/* Deliberately no flush: _Exit is the "leave now" path. */
-	sys_exit_group(status);
+    /* Deliberately no flush: _Exit is the "leave now" path. */
+    sys_exit_group(status);
 }
 
 void abort(void)
 {
-	/* In a real system, this would raise SIGABRT. There is no signal
-	 * delivery here, so the honest equivalent is to terminate immediately
-	 * with the abort status and skip the atexit handlers and the stdio
-	 * flush, which is what abort() is specified not to do. */
-	sys_exit_group(EXIT_FAILURE);
+    /* In a real system, this would raise SIGABRT. There is no signal
+     * delivery here, so the honest equivalent is to terminate immediately
+     * with the abort status and skip the atexit handlers and the stdio
+     * flush, which is what abort() is specified not to do. */
+    sys_exit_group(EXIT_FAILURE);
 }
 
 
@@ -105,21 +105,21 @@ enum str_width { W_INT = 0, W_LONG = 1, W_LLONG = 2 };
  * them an uninitialised int.
  */
 static void store_result(void *result, enum str_width width, int is_unsigned,
-			 unsigned long long value)
+             unsigned long long value)
 {
-	if (is_unsigned) {
-		switch (width) {
-		case W_INT:  *(unsigned int *)result = (unsigned int)value; break;
-		case W_LONG: *(unsigned long *)result = (unsigned long)value; break;
-		default:     *(unsigned long long *)result = value; break;
-		}
-	} else {
-		switch (width) {
-		case W_INT:  *(int *)result = (int)value; break;
-		case W_LONG: *(long *)result = (long)value; break;
-		default:     *(long long *)result = (long long)value; break;
-		}
-	}
+    if (is_unsigned) {
+        switch (width) {
+        case W_INT:  *(unsigned int *)result = (unsigned int)value; break;
+        case W_LONG: *(unsigned long *)result = (unsigned long)value; break;
+        default:     *(unsigned long long *)result = value; break;
+        }
+    } else {
+        switch (width) {
+        case W_INT:  *(int *)result = (int)value; break;
+        case W_LONG: *(long *)result = (long)value; break;
+        default:     *(long long *)result = (long long)value; break;
+        }
+    }
 }
 
 /* The value of one hex digit, or -1.  Written out rather than reaching for
@@ -128,200 +128,200 @@ static void store_result(void *result, enum str_width width, int is_unsigned,
  * something locale-dependent. */
 static int hex_digit(int c)
 {
-	if (c >= '0' && c <= '9')
-		return c - '0';
-	if (c >= 'a' && c <= 'f')
-		return c - 'a' + 10;
-	if (c >= 'A' && c <= 'F')
-		return c - 'A' + 10;
-	return -1;
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
 }
 
 static int strtoxx(const char *nptr, char **endptr, int base, int is_unsigned,
-		   void *result, enum str_width width)
+           void *result, enum str_width width)
 {
-	const char *s = nptr;
-	unsigned long long acc = 0;
-	unsigned long long cutoff;
-	unsigned long long max_digit;
-	unsigned long long sat;
-	int neg = 0;
-	int any = 0;
-	int c;
+    const char *s = nptr;
+    unsigned long long acc = 0;
+    unsigned long long cutoff;
+    unsigned long long max_digit;
+    unsigned long long sat;
+    int neg = 0;
+    int any = 0;
+    int c;
 
-	/* Skip whitespace */
-	while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\v' || *s == '\f' || *s == '\r')
-		s++;
+    /* Skip whitespace */
+    while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\v' || *s == '\f' || *s == '\r')
+        s++;
 
-	/* Handle sign */
-	if (*s == '-') {
-		neg = 1;
-		s++;
-	} else if (*s == '+') {
-		s++;
-	}
+    /* Handle sign */
+    if (*s == '-') {
+        neg = 1;
+        s++;
+    } else if (*s == '+') {
+        s++;
+    }
 
-	/* Handle base prefix.
-	 *
-	 * The "0x" is part of the expected form, not part of a digit, and the
-	 * expected form requires hex digits *after* it: C99 7.20.1.4p4 falls
-	 * back to "the longest initial subsequence of the expected form" when
-	 * the whole thing does not match, which for "0x" and "0xg" is just the
-	 * leading "0".  Consuming the prefix anyway made strtol("0x", &e, 16)
-	 * report no conversion at all and store nptr in *endptr, when the
-	 * answer is 0 with *endptr pointing at the "x" -- which is also where
-	 * the longest-subsequence rule puts it.  So the prefix is only taken
-	 * when a hex digit actually follows it.  Reading s[2] is safe because
-	 * s[1] is known to be 'x' or 'X', so s[2] is at worst the NUL.
-	 */
-	if ((base == 0 || base == 16) && s[0] == '0' &&
-	    (s[1] == 'x' || s[1] == 'X') && hex_digit(s[2]) >= 0) {
-		s += 2;
-		base = 16;
-	}
-	if (base == 0) {
-		if (*s == '0')
-			base = 8;
-		else
-			base = 10;
-	}
-	if (base < 2 || base > 36) {
-		/*
-		 * An invalid base writes 0 through result before returning, for
-		 * the same reason the no-digits case below does: the atoi/atol/
-		 * atoll wrappers ignore this function's return value and read
-		 * whatever was in their own uninitialised local.
-		 */
-		store_result(result, width, is_unsigned, 0);
-		if (endptr)
-			*endptr = (char *)nptr;
-		return 0;
-	}
+    /* Handle base prefix.
+     *
+     * The "0x" is part of the expected form, not part of a digit, and the
+     * expected form requires hex digits *after* it: C99 7.20.1.4p4 falls
+     * back to "the longest initial subsequence of the expected form" when
+     * the whole thing does not match, which for "0x" and "0xg" is just the
+     * leading "0".  Consuming the prefix anyway made strtol("0x", &e, 16)
+     * report no conversion at all and store nptr in *endptr, when the
+     * answer is 0 with *endptr pointing at the "x" -- which is also where
+     * the longest-subsequence rule puts it.  So the prefix is only taken
+     * when a hex digit actually follows it.  Reading s[2] is safe because
+     * s[1] is known to be 'x' or 'X', so s[2] is at worst the NUL.
+     */
+    if ((base == 0 || base == 16) && s[0] == '0' &&
+        (s[1] == 'x' || s[1] == 'X') && hex_digit(s[2]) >= 0) {
+        s += 2;
+        base = 16;
+    }
+    if (base == 0) {
+        if (*s == '0')
+            base = 8;
+        else
+            base = 10;
+    }
+    if (base < 2 || base > 36) {
+        /*
+         * An invalid base writes 0 through result before returning, for
+         * the same reason the no-digits case below does: the atoi/atol/
+         * atoll wrappers ignore this function's return value and read
+         * whatever was in their own uninitialised local.
+         */
+        store_result(result, width, is_unsigned, 0);
+        if (endptr)
+            *endptr = (char *)nptr;
+        return 0;
+    }
 
-	/* Compute cutoff for overflow detection and the maximum digit allowed
-	 * when acc == cutoff. C99 7.20.1.4: overflow is clamped to the
-	 * representable extreme (LLONG_MAX/1 + ULLONG_MAX), never wrapped. */
-	cutoff = is_unsigned ? ULLONG_MAX : (neg ? (unsigned long long)LLONG_MAX + 1 : LLONG_MAX);
-	cutoff /= base;
-	max_digit = is_unsigned ? ULLONG_MAX % base : (neg ? (LLONG_MAX + 1ULL) % base : LLONG_MAX % base);
+    /* Compute cutoff for overflow detection and the maximum digit allowed
+     * when acc == cutoff. C99 7.20.1.4: overflow is clamped to the
+     * representable extreme (LLONG_MAX/1 + ULLONG_MAX), never wrapped. */
+    cutoff = is_unsigned ? ULLONG_MAX : (neg ? (unsigned long long)LLONG_MAX + 1 : LLONG_MAX);
+    cutoff /= base;
+    max_digit = is_unsigned ? ULLONG_MAX % base : (neg ? (LLONG_MAX + 1ULL) % base : LLONG_MAX % base);
 
-	for (;;) {
-		c = *s;
-		if (c >= '0' && c <= '9')
-			c -= '0';
-		else if (c >= 'A' && c <= 'Z')
-			c -= 'A' - 10;
-		else if (c >= 'a' && c <= 'z')
-			c -= 'a' - 10;
-		else
-			break;
-		if (c >= base)
-			break;
-		if (any < 0 || acc > cutoff || (acc == cutoff && (unsigned long long)c > max_digit)) {
-			any = -1;
-		} else {
-			any = 1;
-			acc = acc * base + c;
-		}
-		s++;
-	}
+    for (;;) {
+        c = *s;
+        if (c >= '0' && c <= '9')
+            c -= '0';
+        else if (c >= 'A' && c <= 'Z')
+            c -= 'A' - 10;
+        else if (c >= 'a' && c <= 'z')
+            c -= 'a' - 10;
+        else
+            break;
+        if (c >= base)
+            break;
+        if (any < 0 || acc > cutoff || (acc == cutoff && (unsigned long long)c > max_digit)) {
+            any = -1;
+        } else {
+            any = 1;
+            acc = acc * base + c;
+        }
+        s++;
+    }
 
-	if (any < 0) {
-		__errno = ERANGE;
-		if (is_unsigned)
-			/*
-			 * ULLONG_MAX whether or not a sign was present. A
-			 * magnitude too large for the *unsigned* result type
-			 * has no negative range to clamp to, and the only
-			 * answer consistent with the in-range "-1" is
-			 * ULONG_MAX: the value is converted and then negated
-			 * in the unsigned type (C99 7.20.1.4). Returning 1
-			 * here -- which is what this did for a negative
-			 * subject sequence -- was neither the wrap nor the
-			 * clamp, and disagreed with every other libc.
-			 */
-			sat = ULLONG_MAX;
-		else
-			sat = neg ? (unsigned long long)LLONG_MAX + 1
-				 : (unsigned long long)LLONG_MAX;
-		store_result(result, width, is_unsigned, sat);
-	} else if (!any) {
-		/*
-		 * No digits converted. C99 7.20.1.4: the value is 0. It is also
-		 * the only path that does not write *result at all, which is
-		 * invisible through strtol (the caller passes a real variable)
-		 * and a read of uninitialised stack through atoi, which passes
-		 * `int result;` and ignores this function's return value.
-		 */
-		store_result(result, width, is_unsigned, 0);
-		if (endptr)
-			*endptr = (char *)nptr;
-		return 0;
-	} else {
-		/*
-		 * The sign is applied for the unsigned conversions too. C99
-		 * 7.20.1.4: the subject sequence has the expected form and is
-		 * converted, and "-1" converted to unsigned long is ULONG_MAX by
-		 * the narrowing rule, not 1. The previous code applied
-		 * `if (neg) acc = -acc` only in the signed branch.
-		 */
-		if (neg)
-			acc = (unsigned long long)0 - acc;
-		store_result(result, width, is_unsigned, acc);
-	}
+    if (any < 0) {
+        __errno = ERANGE;
+        if (is_unsigned)
+            /*
+             * ULLONG_MAX whether or not a sign was present. A
+             * magnitude too large for the *unsigned* result type
+             * has no negative range to clamp to, and the only
+             * answer consistent with the in-range "-1" is
+             * ULONG_MAX: the value is converted and then negated
+             * in the unsigned type (C99 7.20.1.4). Returning 1
+             * here -- which is what this did for a negative
+             * subject sequence -- was neither the wrap nor the
+             * clamp, and disagreed with every other libc.
+             */
+            sat = ULLONG_MAX;
+        else
+            sat = neg ? (unsigned long long)LLONG_MAX + 1
+                 : (unsigned long long)LLONG_MAX;
+        store_result(result, width, is_unsigned, sat);
+    } else if (!any) {
+        /*
+         * No digits converted. C99 7.20.1.4: the value is 0. It is also
+         * the only path that does not write *result at all, which is
+         * invisible through strtol (the caller passes a real variable)
+         * and a read of uninitialised stack through atoi, which passes
+         * `int result;` and ignores this function's return value.
+         */
+        store_result(result, width, is_unsigned, 0);
+        if (endptr)
+            *endptr = (char *)nptr;
+        return 0;
+    } else {
+        /*
+         * The sign is applied for the unsigned conversions too. C99
+         * 7.20.1.4: the subject sequence has the expected form and is
+         * converted, and "-1" converted to unsigned long is ULONG_MAX by
+         * the narrowing rule, not 1. The previous code applied
+         * `if (neg) acc = -acc` only in the signed branch.
+         */
+        if (neg)
+            acc = (unsigned long long)0 - acc;
+        store_result(result, width, is_unsigned, acc);
+    }
 
-	if (endptr)
-		*endptr = (char *)s;
-	return 1;
+    if (endptr)
+        *endptr = (char *)s;
+    return 1;
 }
 
 int atoi(const char *nptr)
 {
-	int result = 0;
-	strtoxx(nptr, NULL, 10, 0, &result, W_INT);
-	return result;
+    int result = 0;
+    strtoxx(nptr, NULL, 10, 0, &result, W_INT);
+    return result;
 }
 
 long atol(const char *nptr)
 {
-	long result = 0;
-	strtoxx(nptr, NULL, 10, 0, &result, W_LONG);
-	return result;
+    long result = 0;
+    strtoxx(nptr, NULL, 10, 0, &result, W_LONG);
+    return result;
 }
 
 long long atoll(const char *nptr)
 {
-	long long result = 0;
-	strtoxx(nptr, NULL, 10, 0, &result, W_LLONG);
-	return result;
+    long long result = 0;
+    strtoxx(nptr, NULL, 10, 0, &result, W_LLONG);
+    return result;
 }
 
 long strtol(const char *nptr, char **endptr, int base)
 {
-	long result;
-	strtoxx(nptr, endptr, base, 0, &result, W_LONG);
-	return result;
+    long result;
+    strtoxx(nptr, endptr, base, 0, &result, W_LONG);
+    return result;
 }
 
 long long strtoll(const char *nptr, char **endptr, int base)
 {
-	long long result;
-	strtoxx(nptr, endptr, base, 0, &result, W_LLONG);
-	return result;
+    long long result;
+    strtoxx(nptr, endptr, base, 0, &result, W_LLONG);
+    return result;
 }
 
 unsigned long strtoul(const char *nptr, char **endptr, int base)
 {
-	unsigned long result;
-	strtoxx(nptr, endptr, base, 1, &result, W_LONG);
-	return result;
+    unsigned long result;
+    strtoxx(nptr, endptr, base, 1, &result, W_LONG);
+    return result;
 }
 
 unsigned long long strtoull(const char *nptr, char **endptr, int base)
 {
-	unsigned long long result;
-	strtoxx(nptr, endptr, base, 1, &result, W_LLONG);
-	return result;
+    unsigned long long result;
+    strtoxx(nptr, endptr, base, 1, &result, W_LLONG);
+    return result;
 }
 
 
@@ -336,15 +336,15 @@ static unsigned long long rand_state = 1;
 
 int rand(void)
 {
-	rand_state = rand_state * 6364136223846793005ULL + 1442695040888963407ULL;
-	return (int)((rand_state >> 33) & (unsigned long long)RAND_MAX);
+    rand_state = rand_state * 6364136223846793005ULL + 1442695040888963407ULL;
+    return (int)((rand_state >> 33) & (unsigned long long)RAND_MAX);
 }
 
 void srand(unsigned int seed)
 {
-	/* POSIX: srand(0) behaves as srand(1). A zero state would also make the
-	 * sequence start at a fixed point of the multiplier. */
-	rand_state = seed ? (unsigned long long)seed : 1ULL;
+    /* POSIX: srand(0) behaves as srand(1). A zero state would also make the
+     * sequence start at a fixed point of the multiplier. */
+    rand_state = seed ? (unsigned long long)seed : 1ULL;
 }
 
 /* ------------------------------ qsort/bsearch ------------------------------ */
@@ -362,120 +362,120 @@ void srand(unsigned int seed)
  * every small array -- which is why the bug was silent rather than rare.
  */
 static void insertion_sort(char *base, size_t nmemb, size_t size,
-			   int (*compar)(const void *, const void *))
+               int (*compar)(const void *, const void *))
 {
-	char key[64];
+    char key[64];
 
-	if (size <= sizeof(key)) {
-		for (size_t i = 1; i < nmemb; i++) {
-			size_t j = i;
+    if (size <= sizeof(key)) {
+        for (size_t i = 1; i < nmemb; i++) {
+            size_t j = i;
 
-			memcpy(key, base + i * size, size);
-			while (j > 0 && compar(key, base + (j - 1) * size) < 0) {
-				memcpy(base + j * size,
-				       base + (j - 1) * size, size);
-				j--;
-			}
-			if (j != i)
-				memcpy(base + j * size, key, size);
-		}
-		return;
-	}
+            memcpy(key, base + i * size, size);
+            while (j > 0 && compar(key, base + (j - 1) * size) < 0) {
+                memcpy(base + j * size,
+                       base + (j - 1) * size, size);
+                j--;
+            }
+            if (j != i)
+                memcpy(base + j * size, key, size);
+        }
+        return;
+    }
 
-	/*
-	 * Elements wider than the scratch buffer. Same algorithm, but the shift
-	 * is a memmove rather than a copy-through-key: moving the tail down by
-	 * one slot cannot clobber the element still waiting at base[i] because
-	 * it copies from strictly lower addresses upwards.
-	 */
-	/*
-	 * Compare against base + i * size -- but that slot stops holding the
-	 * element being inserted after the very first shift.
-	 *
-	 * The first iteration compares element i with element i-1 and then moves
-	 * element i-1 *into* slot i, overwriting the element being inserted. The
-	 * next iteration compares that overwritten slot against element i-2, so
-	 * the key being compared is the previous element, not the one being
-	 * placed. For a descending run the result is that the whole array is
-	 * shifted down one slot and the last element is duplicated at the end:
-	 * data is lost, silently, and qsort is the only caller.
-	 *
-	 * The fix is to find the insertion point first, then rotate the range
-	 * [k, i] right by one. Rotating rather than shifting means the element
-	 * being inserted is only ever moved once, at the end, from a slot nothing
-	 * else has touched.
-	 */
-	for (size_t i = 1; i < nmemb; i++) {
-		size_t k = i;
+    /*
+     * Elements wider than the scratch buffer. Same algorithm, but the shift
+     * is a memmove rather than a copy-through-key: moving the tail down by
+     * one slot cannot clobber the element still waiting at base[i] because
+     * it copies from strictly lower addresses upwards.
+     */
+    /*
+     * Compare against base + i * size -- but that slot stops holding the
+     * element being inserted after the very first shift.
+     *
+     * The first iteration compares element i with element i-1 and then moves
+     * element i-1 *into* slot i, overwriting the element being inserted. The
+     * next iteration compares that overwritten slot against element i-2, so
+     * the key being compared is the previous element, not the one being
+     * placed. For a descending run the result is that the whole array is
+     * shifted down one slot and the last element is duplicated at the end:
+     * data is lost, silently, and qsort is the only caller.
+     *
+     * The fix is to find the insertion point first, then rotate the range
+     * [k, i] right by one. Rotating rather than shifting means the element
+     * being inserted is only ever moved once, at the end, from a slot nothing
+     * else has touched.
+     */
+    for (size_t i = 1; i < nmemb; i++) {
+        size_t k = i;
 
-		while (k > 0 && compar(base + (k - 1) * size,
-					base + i * size) > 0)
-			k--;
+        while (k > 0 && compar(base + (k - 1) * size,
+                    base + i * size) > 0)
+            k--;
 
-		if (k == i)
-			continue;		/* already in place */
+        if (k == i)
+            continue;        /* already in place */
 
-		/*
-		 * Rotate [k, i] right by one, byte column at a time so no
-		 * scratch buffer the size of an element is needed.
-		 */
-		for (size_t off = 0; off < size; off++) {
-			char tmp = base[i * size + off];
+        /*
+         * Rotate [k, i] right by one, byte column at a time so no
+         * scratch buffer the size of an element is needed.
+         */
+        for (size_t off = 0; off < size; off++) {
+            char tmp = base[i * size + off];
 
-			for (size_t idx = i; idx > k; idx--)
-				base[idx * size + off] =
-					base[(idx - 1) * size + off];
-			base[k * size + off] = tmp;
-		}
-	}
+            for (size_t idx = i; idx > k; idx--)
+                base[idx * size + off] =
+                    base[(idx - 1) * size + off];
+            base[k * size + off] = tmp;
+        }
+    }
 }
 
 static void heapify(char *base, size_t n, size_t i, size_t size,
-		    int (*compar)(const void *, const void *))
+            int (*compar)(const void *, const void *))
 {
-	size_t largest = i;
-	size_t left = 2 * i + 1;
-	size_t right = 2 * i + 2;
+    size_t largest = i;
+    size_t left = 2 * i + 1;
+    size_t right = 2 * i + 2;
 
-	if (left < n && compar(base + left * size, base + largest * size) > 0)
-		largest = left;
-	if (right < n && compar(base + right * size, base + largest * size) > 0)
-		largest = right;
-	if (largest != i) {
-		/* Swap */
-		for (size_t k = 0; k < size; k++) {
-			char tmp = base[i * size + k];
-			base[i * size + k] = base[largest * size + k];
-			base[largest * size + k] = tmp;
-		}
-		heapify(base, n, largest, size, compar);
-	}
+    if (left < n && compar(base + left * size, base + largest * size) > 0)
+        largest = left;
+    if (right < n && compar(base + right * size, base + largest * size) > 0)
+        largest = right;
+    if (largest != i) {
+        /* Swap */
+        for (size_t k = 0; k < size; k++) {
+            char tmp = base[i * size + k];
+            base[i * size + k] = base[largest * size + k];
+            base[largest * size + k] = tmp;
+        }
+        heapify(base, n, largest, size, compar);
+    }
 }
 
 static void heapsort(char *base, size_t nmemb, size_t size,
-		     int (*compar)(const void *, const void *))
+             int (*compar)(const void *, const void *))
 {
-	/* Build max heap */
-	for (size_t i = nmemb / 2; i > 0; i--)
-		heapify(base, nmemb, i - 1, size, compar);
-	/* Extract elements */
-	for (size_t i = nmemb - 1; i > 0; i--) {
-		/* Swap root with last */
-		for (size_t k = 0; k < size; k++) {
-			char tmp = base[k];
-			base[k] = base[i * size + k];
-			base[i * size + k] = tmp;
-		}
-		heapify(base, i, 0, size, compar);
-	}
+    /* Build max heap */
+    for (size_t i = nmemb / 2; i > 0; i--)
+        heapify(base, nmemb, i - 1, size, compar);
+    /* Extract elements */
+    for (size_t i = nmemb - 1; i > 0; i--) {
+        /* Swap root with last */
+        for (size_t k = 0; k < size; k++) {
+            char tmp = base[k];
+            base[k] = base[i * size + k];
+            base[i * size + k] = tmp;
+        }
+        heapify(base, i, 0, size, compar);
+    }
 }
 
 static int log2_int(int n)
 {
-	int r = 0;
-	while (n >>= 1)
-		r++;
-	return r;
+    int r = 0;
+    while (n >>= 1)
+        r++;
+    return r;
 }
 
 /*
@@ -500,30 +500,30 @@ static int log2_int(int n)
  * a large fraction of the 1/3 that median-of-three already misses.
  */
 static void *median_of_three(char *a, char *b, char *c,
-			     int (*compar)(const void *, const void *))
+                 int (*compar)(const void *, const void *))
 {
-	if (compar(a, b) > 0) {
-		if (compar(b, c) > 0)
-			return b;
-		if (compar(a, c) > 0)
-			return c;
-		return a;
-	}
-	if (compar(a, c) > 0)
-		return a;
-	if (compar(b, c) > 0)
-		return c;
-	return b;
+    if (compar(a, b) > 0) {
+        if (compar(b, c) > 0)
+            return b;
+        if (compar(a, c) > 0)
+            return c;
+        return a;
+    }
+    if (compar(a, c) > 0)
+        return a;
+    if (compar(b, c) > 0)
+        return c;
+    return b;
 }
 
 static void swap_bytes(char *a, char *b, size_t n)
 {
-	for (size_t k = 0; k < n; k++) {
-		char t = a[k];
+    for (size_t k = 0; k < n; k++) {
+        char t = a[k];
 
-		a[k] = b[k];
-		b[k] = t;
-	}
+        a[k] = b[k];
+        b[k] = t;
+    }
 }
 
 /*
@@ -544,88 +544,88 @@ static void swap_bytes(char *a, char *b, size_t n)
  * out-of-order pairs.
  */
 static size_t partition(char *base, size_t nmemb, size_t size,
-			int (*compar)(const void *, const void *))
+            int (*compar)(const void *, const void *))
 {
-	char *pivot = base + (nmemb - 1) * size;
-	size_t boundary = 0;
+    char *pivot = base + (nmemb - 1) * size;
+    size_t boundary = 0;
 
-	for (size_t k = 0; k + 1 < nmemb; k++) {
-		if (compar(base + k * size, pivot) <= 0) {
-			if (k != boundary)
-				swap_bytes(base + boundary * size,
-					   base + k * size, size);
-			boundary++;
-		}
-	}
-	if (boundary != nmemb - 1)
-		swap_bytes(base + boundary * size, pivot, size);
-	return boundary;
+    for (size_t k = 0; k + 1 < nmemb; k++) {
+        if (compar(base + k * size, pivot) <= 0) {
+            if (k != boundary)
+                swap_bytes(base + boundary * size,
+                       base + k * size, size);
+            boundary++;
+        }
+    }
+    if (boundary != nmemb - 1)
+        swap_bytes(base + boundary * size, pivot, size);
+    return boundary;
 }
 
 static void introsort_loop(char *base, size_t nmemb, size_t size,
-			   int (*compar)(const void *, const void *), int depth_limit)
+               int (*compar)(const void *, const void *), int depth_limit)
 {
-	while (nmemb > INSERTION_SORT_THRESHOLD) {
-		char *pivot_slot;
-		char tmp_pivot[64];
-		size_t mid;
+    while (nmemb > INSERTION_SORT_THRESHOLD) {
+        char *pivot_slot;
+        char tmp_pivot[64];
+        size_t mid;
 
-		if (depth_limit == 0) {
-			heapsort(base, nmemb, size, compar);
-			return;
-		}
-		depth_limit--;
+        if (depth_limit == 0) {
+            heapsort(base, nmemb, size, compar);
+            return;
+        }
+        depth_limit--;
 
-		/* Partition with a median-of-three pivot, moved to the end. */
-		pivot_slot = median_of_three(base, base + (nmemb / 2) * size,
-					     base + (nmemb - 1) * size, compar);
-		if (size <= sizeof(tmp_pivot)) {
-			memcpy(tmp_pivot, pivot_slot, size);
-			memcpy(pivot_slot, base + (nmemb - 1) * size, size);
-			memcpy(base + (nmemb - 1) * size, tmp_pivot, size);
-		}
+        /* Partition with a median-of-three pivot, moved to the end. */
+        pivot_slot = median_of_three(base, base + (nmemb / 2) * size,
+                         base + (nmemb - 1) * size, compar);
+        if (size <= sizeof(tmp_pivot)) {
+            memcpy(tmp_pivot, pivot_slot, size);
+            memcpy(pivot_slot, base + (nmemb - 1) * size, size);
+            memcpy(base + (nmemb - 1) * size, tmp_pivot, size);
+        }
 
-		mid = partition(base, nmemb, size, compar);
+        mid = partition(base, nmemb, size, compar);
 
-		/* Recurse on the smaller partition, loop on the larger one, so the
-		 * stack depth stays logarithmic regardless of the split. */
-		if (mid < nmemb - mid - 1) {
-			introsort_loop(base, mid, size, compar, depth_limit);
-			base += (mid + 1) * size;
-			nmemb -= mid + 1;
-		} else {
-			introsort_loop(base + (mid + 1) * size, nmemb - mid - 1,
-				       size, compar, depth_limit);
-			nmemb = mid;
-		}
-	}
-	insertion_sort(base, nmemb, size, compar);
+        /* Recurse on the smaller partition, loop on the larger one, so the
+         * stack depth stays logarithmic regardless of the split. */
+        if (mid < nmemb - mid - 1) {
+            introsort_loop(base, mid, size, compar, depth_limit);
+            base += (mid + 1) * size;
+            nmemb -= mid + 1;
+        } else {
+            introsort_loop(base + (mid + 1) * size, nmemb - mid - 1,
+                       size, compar, depth_limit);
+            nmemb = mid;
+        }
+    }
+    insertion_sort(base, nmemb, size, compar);
 }
 
 void qsort(void *base, size_t nmemb, size_t size,
-	   int (*compar)(const void *, const void *))
+       int (*compar)(const void *, const void *))
 {
-	if (nmemb < 2 || size == 0)
-		return;
-	int depth_limit = 2 * log2_int((int)nmemb);
-	introsort_loop(base, nmemb, size, compar, depth_limit);
+    if (nmemb < 2 || size == 0)
+        return;
+    int depth_limit = 2 * log2_int((int)nmemb);
+    introsort_loop(base, nmemb, size, compar, depth_limit);
 }
 
 void *bsearch(const void *key, const void *base, size_t nmemb, size_t size,
-	      int (*compar)(const void *, const void *))
+          int (*compar)(const void *, const void *))
 {
-	size_t low = 0, high = nmemb;
-	while (low < high) {
-		size_t mid = low + (high - low) / 2;
-		int cmp = compar(key, (const char *)base + mid * size);
-		if (cmp == 0)
-			return (void *)((const char *)base + mid * size);
-		else if (cmp < 0)
-			high = mid;
-		else
-			low = mid + 1;
-	}
-	return NULL;
+    size_t low = 0, high = nmemb;
+    while (low < high) {
+        size_t mid = low + (high - low) / 2;
+        int cmp = compar(key, (const char *)base + mid * size);
+        if (cmp == 0)
+            return (void *)((const char *)base + mid * size);
+        else if (cmp < 0)
+            high = mid;
+        else
+            low = mid + 1;
+    }
+    return NULL;
 }
 
 
@@ -637,53 +637,53 @@ void *bsearch(const void *key, const void *base, size_t nmemb, size_t size,
  */
 int abs(int j)
 {
-	unsigned int mag = (unsigned int)j;
+    unsigned int mag = (unsigned int)j;
 
-	if (j < 0)
-		mag = 0u - mag;
-	return (int)mag;
+    if (j < 0)
+        mag = 0u - mag;
+    return (int)mag;
 }
 
 long labs(long j)
 {
-	unsigned long mag = (unsigned long)j;
+    unsigned long mag = (unsigned long)j;
 
-	if (j < 0)
-		mag = 0ul - mag;
-	return (long)mag;
+    if (j < 0)
+        mag = 0ul - mag;
+    return (long)mag;
 }
 
 long long llabs(long long j)
 {
-	unsigned long long mag = (unsigned long long)j;
+    unsigned long long mag = (unsigned long long)j;
 
-	if (j < 0)
-		mag = 0ull - mag;
-	return (long long)mag;
+    if (j < 0)
+        mag = 0ull - mag;
+    return (long long)mag;
 }
 
 div_t div(int numer, int denom)
 {
-	div_t result;
-	result.quot = numer / denom;
-	result.rem = numer % denom;
-	return result;
+    div_t result;
+    result.quot = numer / denom;
+    result.rem = numer % denom;
+    return result;
 }
 
 ldiv_t ldiv(long numer, long denom)
 {
-	ldiv_t result;
-	result.quot = numer / denom;
-	result.rem = numer % denom;
-	return result;
+    ldiv_t result;
+    result.quot = numer / denom;
+    result.rem = numer % denom;
+    return result;
 }
 
 lldiv_t lldiv(long long numer, long long denom)
 {
-	lldiv_t result;
-	result.quot = numer / denom;
-	result.rem = numer % denom;
-	return result;
+    lldiv_t result;
+    result.quot = numer / denom;
+    result.rem = numer % denom;
+    return result;
 }
 
 /* ------------------------------ environment ------------------------------- */
@@ -696,14 +696,14 @@ lldiv_t lldiv(long long numer, long long denom)
 
 char *getenv(const char *name)
 {
-	if (!environ || !name)
-		return NULL;
-	size_t len = strlen(name);
-	for (char **ep = environ; *ep; ep++) {
-		if (strncmp(*ep, name, len) == 0 && (*ep)[len] == '=')
-			return *ep + len + 1;
-	}
-	return NULL;
+    if (!environ || !name)
+        return NULL;
+    size_t len = strlen(name);
+    for (char **ep = environ; *ep; ep++) {
+        if (strncmp(*ep, name, len) == 0 && (*ep)[len] == '=')
+            return *ep + len + 1;
+    }
+    return NULL;
 }
 
 /*
@@ -715,35 +715,35 @@ char *getenv(const char *name)
  */
 int setenv(const char *name, const char *value, int overwrite)
 {
-	if (!name || !*name || strchr(name, '=')) {
-		__errno = EINVAL;
-		return -1;
-	}
-	if (!value) {
-		__errno = EINVAL;
-		return -1;
-	}
-	if (!overwrite && getenv(name))
-		return 0;
-	/* Not implemented: would need to reallocate environ */
-	__errno = ENOSYS;
-	return -1;
+    if (!name || !*name || strchr(name, '=')) {
+        __errno = EINVAL;
+        return -1;
+    }
+    if (!value) {
+        __errno = EINVAL;
+        return -1;
+    }
+    if (!overwrite && getenv(name))
+        return 0;
+    /* Not implemented: would need to reallocate environ */
+    __errno = ENOSYS;
+    return -1;
 }
 
 int unsetenv(const char *name)
 {
-	if (!name || !*name || strchr(name, '=')) {
-		__errno = EINVAL;
-		return -1;
-	}
-	/* Not implemented */
-	__errno = ENOSYS;
-	return -1;
+    if (!name || !*name || strchr(name, '=')) {
+        __errno = EINVAL;
+        return -1;
+    }
+    /* Not implemented */
+    __errno = ENOSYS;
+    return -1;
 }
 
 int system(const char *command)
 {
-	(void)command;
-	__errno = ENOSYS;
-	return -1;
+    (void)command;
+    __errno = ENOSYS;
+    return -1;
 }

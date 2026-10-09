@@ -27,22 +27,22 @@
 typedef unsigned long u64;
 
 struct wide {
-	u64 a[8];
-	double d[4];
-	float f[8];
+    u64 a[8];
+    double d[4];
+    float f[8];
 };
 
 void copy64(struct wide *dst, const struct wide *src)
 {
-	*dst = *src;
+    *dst = *src;
 }
 
 u64 sum_a(const struct wide *p)
 {
-	u64 s = 0;
-	for (int i = 0; i < 8; i++)
-		s += p->a[i];
-	return s;
+    u64 s = 0;
+    for (int i = 0; i < 8; i++)
+        s += p->a[i];
+    return s;
 }
 
 /*
@@ -59,18 +59,18 @@ u64 sum_a(const struct wide *p)
 #ifdef __SSE__
 void sum_d(const struct wide *p, double *out)
 {
-	double s = 0;
-	for (int i = 0; i < 4; i++)
-		s += p->d[i];
-	*out = s;
+    double s = 0;
+    for (int i = 0; i < 4; i++)
+        s += p->d[i];
+    *out = s;
 }
 
 void sum_f(const struct wide *p, float *out)
 {
-	float s = 0;
-	for (int i = 0; i < 8; i++)
-		s += p->f[i];
-	*out = s;
+    float s = 0;
+    for (int i = 0; i < 8; i++)
+        s += p->f[i];
+    *out = s;
 }
 #endif /* __SSE__ */
 
@@ -79,23 +79,23 @@ void sum_f(const struct wide *p, float *out)
  * and the multiplier match the public domain MurmurHash3 fmix64. */
 u64 mix(u64 x)
 {
-	x ^= x >> 33;
-	x *= 0xff51afd7ed558ccdUL;
-	x ^= x >> 29;
-	return x;
+    x ^= x >> 33;
+    x *= 0xff51afd7ed558ccdUL;
+    x ^= x >> 29;
+    return x;
 }
 
 #ifdef __SSE__
 long convert(u64 a, long b, int c, long *out)
 {
-	/*
-	 * The cast through double is lossy for values above 2^53, but this is an
-	 * ISA probe: the result is only used to exercise the SSE path, not to
-	 * carry real data. Compute the integer part once rather than twice.
-	 */
-	long base = b + c;
+    /*
+     * The cast through double is lossy for values above 2^53, but this is an
+     * ISA probe: the result is only used to exercise the SSE path, not to
+     * carry real data. Compute the integer part once rather than twice.
+     */
+    long base = b + c;
 
-	*out = base;
-	return base + (long)(double)a;
+    *out = base;
+    return base + (long)(double)a;
 }
 #endif /* __SSE__ */

@@ -40,29 +40,29 @@
  * array index lives here.
  */
 struct percpu_data {
-	volatile u32 cpu_id;          /* identity of this CPU, 0-based */
-	volatile bool online;         /* registered with the scheduler */
-	volatile bool in_scheduler;
+    volatile u32 cpu_id;          /* identity of this CPU, 0-based */
+    volatile bool online;         /* registered with the scheduler */
+    volatile bool in_scheduler;
 
-	/* Scheduler. */
-	void *current;                /* struct task * */
-	void *idle_task;
+    /* Scheduler. */
+    void *current;                /* struct task * */
+    void *idle_task;
 
-	/* Interrupt bookkeeping: the flags word saved by every
-	 * spinlock_irqsave() on this CPU. */
-	u64 saved_irq_flags;
+    /* Interrupt bookkeeping: the flags word saved by every
+     * spinlock_irqsave() on this CPU. */
+    u64 saved_irq_flags;
 
-	/* Preemption depth. Non-zero means preemption is disabled, either by an
-	 * explicit disable or by holding a lock. */
-	u32 preempt_count;
+    /* Preemption depth. Non-zero means preemption is disabled, either by an
+     * explicit disable or by holding a lock. */
+    u32 preempt_count;
 
-	/* Scratch for the console lock, which has to be released with the exact
-	 * interrupt state it was acquired under. */
-	u64 console_irq_flags;
+    /* Scratch for the console lock, which has to be released with the exact
+     * interrupt state it was acquired under. */
+    u64 console_irq_flags;
 
-	/* Per-CPU idle statistics, for the scheduler's load balancer. */
-	u64 idle_ticks;
-	u64 ctx_switches;
+    /* Per-CPU idle statistics, for the scheduler's load balancer. */
+    u64 idle_ticks;
+    u64 ctx_switches;
 };
 
 /* The array itself. */
@@ -114,7 +114,7 @@ extern struct percpu_data percpu_data[MAX_CPUS];
  */
 static inline struct percpu_data *this_cpu(void)
 {
-	return (struct percpu_data *)(uintptr_t)rdmsr(MSR_GS_BASE);
+    return (struct percpu_data *)(uintptr_t)rdmsr(MSR_GS_BASE);
 }
 
 #define this_cpu_id()      (this_cpu()->cpu_id)
@@ -124,7 +124,7 @@ static inline struct percpu_data *this_cpu(void)
 
 /* Per-CPU storage for a variable declared with DEFINE_PER_CPU. */
 #define DEFINE_PER_CPU(type, name) \
-	__attribute__((section(".per_cpu"))) type per_cpu_##name
+    __attribute__((section(".per_cpu"))) type per_cpu_##name
 
 /* Access a DEFINE_PER_CPU variable on this CPU. */
 #define get_var(var) (per_cpu_##var)

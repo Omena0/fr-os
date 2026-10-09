@@ -98,10 +98,10 @@
 #include <stdint.h>
 
 struct e820_entry {
-	uint64_t base;
-	uint64_t length;
-	uint32_t type;
-	uint32_t acpi_extended;
+    uint64_t base;
+    uint64_t length;
+    uint32_t type;
+    uint32_t acpi_extended;
 } __attribute__((packed));
 
 /*
@@ -125,14 +125,14 @@ struct e820_entry {
  * is not accepted.
  */
 struct framebuffer_info {
-	uint64_t address;
-	uint32_t pitch;
-	uint32_t width;
-	uint32_t height;
-	uint8_t  bpp;
-	uint8_t  red_shift;
-	uint8_t  green_shift;
-	uint8_t  blue_shift;
+    uint64_t address;
+    uint32_t pitch;
+    uint32_t width;
+    uint32_t height;
+    uint8_t  bpp;
+    uint8_t  red_shift;
+    uint8_t  green_shift;
+    uint8_t  blue_shift;
 } __attribute__((packed));
 
 /* Bits in struct bootinfo::flags. */
@@ -140,24 +140,24 @@ struct framebuffer_info {
 #define BOOT_FLAG_HAS_ACPI        (1u << 1)
 
 struct bootinfo {
-	uint64_t magic;
-	uint32_t version;
-	uint32_t flags;
+    uint64_t magic;
+    uint32_t version;
+    uint32_t flags;
 
-	uint64_t kernel_phys_base;    /* where stage2 copied the ELF image */
-	uint64_t kernel_virt_base;    /* where the kernel was linked */
-	uint64_t kernel_entry;        /* ELF entry point, virtual */
+    uint64_t kernel_phys_base;    /* where stage2 copied the ELF image */
+    uint64_t kernel_virt_base;    /* where the kernel was linked */
+    uint64_t kernel_entry;        /* ELF entry point, virtual */
 
-	uint64_t e820_addr;           /* physical address of the E820 array */
-	uint32_t e820_count;
-	uint32_t _pad0;
+    uint64_t e820_addr;           /* physical address of the E820 array */
+    uint32_t e820_count;
+    uint32_t _pad0;
 
-	struct framebuffer_info fb;
-	uint64_t rsdp_addr;
-	uint64_t acpi_version;
+    struct framebuffer_info fb;
+    uint64_t rsdp_addr;
+    uint64_t acpi_version;
 
-	uint64_t boot_drive;
-	char     cmdline[128];
+    uint64_t boot_drive;
+    char     cmdline[128];
 } __attribute__((packed));
 #endif /* !__ASSEMBLER__ */
 

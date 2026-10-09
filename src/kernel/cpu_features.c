@@ -23,11 +23,11 @@ struct cpu_features cpu_features;
  * ordinary register on x86-64, so CPUID can write it directly.
  */
 static inline void cpuid_raw(uint32_t leaf, uint32_t sub,
-			     uint32_t *a, uint32_t *b, uint32_t *c, uint32_t *d)
+                 uint32_t *a, uint32_t *b, uint32_t *c, uint32_t *d)
 {
-	__asm__ volatile("cpuid"
-			 : "=a"(*a), "=b"(*b), "=c"(*c), "=d"(*d)
-			 : "a"(leaf), "c"(sub));
+    __asm__ volatile("cpuid"
+             : "=a"(*a), "=b"(*b), "=c"(*c), "=d"(*d)
+             : "a"(leaf), "c"(sub));
 }
 
 /*
@@ -41,8 +41,8 @@ static inline void cpuid_raw(uint32_t leaf, uint32_t sub,
  */
 static inline void feat_set(uint64_t *f, uint32_t reg, uint32_t bit, uint64_t id)
 {
-	if (reg & (1u << bit))
-		*f |= id;
+    if (reg & (1u << bit))
+        *f |= id;
 }
 
 #define FEAT(reg, bit, id) feat_set(&f, (reg), (bit), (id))
@@ -88,367 +88,367 @@ static inline void feat_set(uint64_t *f, uint32_t reg, uint32_t bit, uint64_t id
 
 static uint64_t calibrate_tsc_against_pit(void)
 {
-	uint8_t gate;
-	uint64_t tsc_before, tsc_after, elapsed_us, delta;
-	uint64_t deadline;
-	unsigned long spin;
-	bool timed_out = false;
+    uint8_t gate;
+    uint64_t tsc_before, tsc_after, elapsed_us, delta;
+    uint64_t deadline;
+    unsigned long spin;
+    bool timed_out = false;
 
-	/*
-	 * Port 0x61 bit 0 is GATE2 and must be low for the channel to count, and
-	 * bit 1 is the PC speaker enable and must be left as it was. Saving and
-	 * restoring the whole byte is what keeps this from muting the speaker
-	 * permanently on a machine that has one.
-	 */
-	gate = inb(PIT_GATE_PORT);
-	outb(PIT_GATE_PORT, (uint8_t)((gate & ~0x01) | 0x02));
+    /*
+     * Port 0x61 bit 0 is GATE2 and must be low for the channel to count, and
+     * bit 1 is the PC speaker enable and must be left as it was. Saving and
+     * restoring the whole byte is what keeps this from muting the speaker
+     * permanently on a machine that has one.
+     */
+    gate = inb(PIT_GATE_PORT);
+    outb(PIT_GATE_PORT, (uint8_t)((gate & ~0x01) | 0x02));
 
-	outb(PIT_CMD_PORT, PIT_CH2_MODE0);
-	outb(PIT_CH2_PORT, (uint8_t)(PIT_CAL_COUNT & 0xFF));
-	outb(PIT_CH2_PORT, (uint8_t)((PIT_CAL_COUNT >> 8) & 0xFF));
+    outb(PIT_CMD_PORT, PIT_CH2_MODE0);
+    outb(PIT_CH2_PORT, (uint8_t)(PIT_CAL_COUNT & 0xFF));
+    outb(PIT_CH2_PORT, (uint8_t)((PIT_CAL_COUNT >> 8) & 0xFF));
 
-	tsc_before = rdtsc();
-	deadline = tsc_before + PIT_CAL_DEADLINE_TICKS;
+    tsc_before = rdtsc();
+    deadline = tsc_before + PIT_CAL_DEADLINE_TICKS;
 
-	/* The channel is already running, so the only wait is for the edge. */
-	for (spin = 0; spin < PIT_CAL_MAX_SPIN; spin++) {
-		/* Read the whole port: it is a read-back register, and only bit 5
-		 * carries OUT2. */
-		if (inb(PIT_GATE_PORT) & 0x20)
-			break;
-		/* Emulated port I/O can make a spin-count loop arbitrarily
-		 * slow, so also bound the wait by wall-clock time. */
-		if (rdtsc() >= deadline) {
-			timed_out = true;
-			break;
-		}
-		__asm__ volatile("pause");
-	}
-	tsc_after = rdtsc();
+    /* The channel is already running, so the only wait is for the edge. */
+    for (spin = 0; spin < PIT_CAL_MAX_SPIN; spin++) {
+        /* Read the whole port: it is a read-back register, and only bit 5
+         * carries OUT2. */
+        if (inb(PIT_GATE_PORT) & 0x20)
+            break;
+        /* Emulated port I/O can make a spin-count loop arbitrarily
+         * slow, so also bound the wait by wall-clock time. */
+        if (rdtsc() >= deadline) {
+            timed_out = true;
+            break;
+        }
+        __asm__ volatile("pause");
+    }
+    tsc_after = rdtsc();
 
-	outb(PIT_GATE_PORT, gate);
+    outb(PIT_GATE_PORT, gate);
 
-	if (spin == PIT_CAL_MAX_SPIN || timed_out)
-		return 0;	/* no edge: say "unknown" rather than guess */
+    if (spin == PIT_CAL_MAX_SPIN || timed_out)
+        return 0;    /* no edge: say "unknown" rather than guess */
 
-	delta = tsc_after - tsc_before;
-	if (!delta)
-		return 0;
+    delta = tsc_after - tsc_before;
+    if (!delta)
+        return 0;
 
-	/* The PIT's own clock is the reference, so the window's length is known
-	 * exactly in microseconds and the TSC rate follows from the ratio. */
-	elapsed_us = (uint64_t)PIT_CAL_COUNT * 1000000ULL / PIT_INPUT_HZ;
-	if (!elapsed_us)
-		return 0;
+    /* The PIT's own clock is the reference, so the window's length is known
+     * exactly in microseconds and the TSC rate follows from the ratio. */
+    elapsed_us = (uint64_t)PIT_CAL_COUNT * 1000000ULL / PIT_INPUT_HZ;
+    if (!elapsed_us)
+        return 0;
 
-	return delta * 1000ULL / elapsed_us;
+    return delta * 1000ULL / elapsed_us;
 }
 
 void cpu_features_init(void)
 {
-	uint32_t a, b, c, d;
-	uint32_t max_leaf, max_ext;
+    uint32_t a, b, c, d;
+    uint32_t max_leaf, max_ext;
 
-	cpuid_raw(CPUID_MAX_LEAF, 0, &max_leaf, &b, &c, &d);
-	cpu_features.max_leaf = max_leaf;
+    cpuid_raw(CPUID_MAX_LEAF, 0, &max_leaf, &b, &c, &d);
+    cpu_features.max_leaf = max_leaf;
 
-	/* Vendor string, little-endian order per the SDM. */
-	cpuid_raw(CPUID_VENDOR, 0, &a, &b, &c, &d);
-	cpu_features.vendor[0] = (char)(b & 0xFF);
-	cpu_features.vendor[1] = (char)((b >> 8) & 0xFF);
-	cpu_features.vendor[2] = (char)((b >> 16) & 0xFF);
-	cpu_features.vendor[3] = (char)((b >> 24) & 0xFF);
-	cpu_features.vendor[4] = (char)(d & 0xFF);
-	cpu_features.vendor[5] = (char)((d >> 8) & 0xFF);
-	cpu_features.vendor[6] = (char)((d >> 16) & 0xFF);
-	cpu_features.vendor[7] = (char)((d >> 24) & 0xFF);
-	cpu_features.vendor[8] = (char)(c & 0xFF);
-	cpu_features.vendor[9] = (char)((c >> 8) & 0xFF);
-	cpu_features.vendor[10] = (char)((c >> 16) & 0xFF);
-	cpu_features.vendor[11] = (char)((c >> 24) & 0xFF);
-	cpu_features.vendor[12] = '\0';
+    /* Vendor string, little-endian order per the SDM. */
+    cpuid_raw(CPUID_VENDOR, 0, &a, &b, &c, &d);
+    cpu_features.vendor[0] = (char)(b & 0xFF);
+    cpu_features.vendor[1] = (char)((b >> 8) & 0xFF);
+    cpu_features.vendor[2] = (char)((b >> 16) & 0xFF);
+    cpu_features.vendor[3] = (char)((b >> 24) & 0xFF);
+    cpu_features.vendor[4] = (char)(d & 0xFF);
+    cpu_features.vendor[5] = (char)((d >> 8) & 0xFF);
+    cpu_features.vendor[6] = (char)((d >> 16) & 0xFF);
+    cpu_features.vendor[7] = (char)((d >> 24) & 0xFF);
+    cpu_features.vendor[8] = (char)(c & 0xFF);
+    cpu_features.vendor[9] = (char)((c >> 8) & 0xFF);
+    cpu_features.vendor[10] = (char)((c >> 16) & 0xFF);
+    cpu_features.vendor[11] = (char)((c >> 24) & 0xFF);
+    cpu_features.vendor[12] = '\0';
 
-	klog(KLOG_INFO, "cpu: %s, max leaf 0x%x\n", cpu_features.vendor, max_leaf);
+    klog(KLOG_INFO, "cpu: %s, max leaf 0x%x\n", cpu_features.vendor, max_leaf);
 
-	if (max_leaf >= CPUID_FEATURES_1) {
-		cpuid_raw(CPUID_FEATURES_1, 0, &a, &b, &c, &d);
-		cpu_features.basic_edx = d;
-		cpu_features.basic_ecx = c;
-		cpu_features.family = ((a >> 8) & 0xF) + ((a >> 20) & 0xF);
-		cpu_features.model = ((a >> 4) & 0xF) | ((a >> 16) & 0xF);
-		cpu_features.stepping = a & 0xF;
-	/*
-	 * EBX[23:16] is only defined when hyper-threading (EDX 28) is set; on a
-	 * machine without it the field is reserved and reads 0. Normalising here
-	 * rather than at the print site is deliberate: two printers of this field
-	 * (this file and main.c) must agree, or the two prints of one field
-	 * disagree within a single boot.
-	 */
-		cpu_features.logical_cpus = (b >> 16) & 0xFF;
+    if (max_leaf >= CPUID_FEATURES_1) {
+        cpuid_raw(CPUID_FEATURES_1, 0, &a, &b, &c, &d);
+        cpu_features.basic_edx = d;
+        cpu_features.basic_ecx = c;
+        cpu_features.family = ((a >> 8) & 0xF) + ((a >> 20) & 0xF);
+        cpu_features.model = ((a >> 4) & 0xF) | ((a >> 16) & 0xF);
+        cpu_features.stepping = a & 0xF;
+    /*
+     * EBX[23:16] is only defined when hyper-threading (EDX 28) is set; on a
+     * machine without it the field is reserved and reads 0. Normalising here
+     * rather than at the print site is deliberate: two printers of this field
+     * (this file and main.c) must agree, or the two prints of one field
+     * disagree within a single boot.
+     */
+        cpu_features.logical_cpus = (b >> 16) & 0xFF;
 
-		if (!cpu_features.logical_cpus)
-			cpu_features.logical_cpus = 1;
-	}
+        if (!cpu_features.logical_cpus)
+            cpu_features.logical_cpus = 1;
+    }
 
-	cpuid_raw(CPUID_MAX_EXT_LEAF, 0, &max_ext, &b, &c, &d);
-	cpu_features.max_ext_leaf = max_ext;
+    cpuid_raw(CPUID_MAX_EXT_LEAF, 0, &max_ext, &b, &c, &d);
+    cpu_features.max_ext_leaf = max_ext;
 
-	if (max_ext >= CPUID_EXT_FEATURES) {
-		cpuid_raw(CPUID_EXT_FEATURES, 0, &a, &b, &c, &d);
-		cpu_features.extended_ecx = c;
-		cpu_features.extended_edx = d;
-	}
+    if (max_ext >= CPUID_EXT_FEATURES) {
+        cpuid_raw(CPUID_EXT_FEATURES, 0, &a, &b, &c, &d);
+        cpu_features.extended_ecx = c;
+        cpu_features.extended_edx = d;
+    }
 
-	/*
-	 * Invariant TSC is CPUID.0x80000007 EDX bit 8, not leaf 1 EDX bit 8
-	 * (reserved, reads 0). The old code read the wrong leaf, so
-	 * invariant_tsc was permanently false and invisible because the only
-	 * print is inside the `if (tsc_khz)` branch, which was itself always
-	 * zero.
-	 */
-	if (max_ext >= 0x80000007u) {
-		cpuid_raw(0x80000007u, 0, &a, &b, &c, &d);
-		cpu_features.invariant_tsc = (d >> 8) & 1;
-	}
+    /*
+     * Invariant TSC is CPUID.0x80000007 EDX bit 8, not leaf 1 EDX bit 8
+     * (reserved, reads 0). The old code read the wrong leaf, so
+     * invariant_tsc was permanently false and invisible because the only
+     * print is inside the `if (tsc_khz)` branch, which was itself always
+     * zero.
+     */
+    if (max_ext >= 0x80000007u) {
+        cpuid_raw(0x80000007u, 0, &a, &b, &c, &d);
+        cpu_features.invariant_tsc = (d >> 8) & 1;
+    }
 
-	/* Structured extended features. Leaf 7 subleaf 0 reports the maximum
-	 * input value for the leaf in EAX, so the subleaf walk has to be bounded
-	 * rather than trusting a fixed count. Only subleaf 0 is kept; the walk
-	 * exists to learn the bound, and the features below are all subleaf 0. */
-	if (max_leaf >= 7) {
-		uint32_t sub = 0;
-		uint32_t max_sub;
+    /* Structured extended features. Leaf 7 subleaf 0 reports the maximum
+     * input value for the leaf in EAX, so the subleaf walk has to be bounded
+     * rather than trusting a fixed count. Only subleaf 0 is kept; the walk
+     * exists to learn the bound, and the features below are all subleaf 0. */
+    if (max_leaf >= 7) {
+        uint32_t sub = 0;
+        uint32_t max_sub;
 
-		cpuid_raw(7, 0, &max_sub, &b, &c, &d);
+        cpuid_raw(7, 0, &max_sub, &b, &c, &d);
 
-		if (max_sub > 0) {
-			uint32_t max_clamped = max_sub > 8 ? 8 : max_sub;
+        if (max_sub > 0) {
+            uint32_t max_clamped = max_sub > 8 ? 8 : max_sub;
 
-			while (sub <= max_clamped) {
-				cpuid_raw(7, sub, &a, &b, &c, &d);
-				if (sub == 0) {
-					cpu_features.leaf7_ebx = b;
-					cpu_features.leaf7_ecx = c;
-					cpu_features.leaf7_edx = d;
-				}
-				sub++;
-			}
-		}
-	}
+            while (sub <= max_clamped) {
+                cpuid_raw(7, sub, &a, &b, &c, &d);
+                if (sub == 0) {
+                    cpu_features.leaf7_ebx = b;
+                    cpu_features.leaf7_ecx = c;
+                    cpu_features.leaf7_edx = d;
+                }
+                sub++;
+            }
+        }
+    }
 
-	/* 5-level paging and CLZERO capability live in 0x80000008. */
-	if (max_ext >= 0x80000008u) {
-		cpuid_raw(0x80000008u, 0, &a, &b, &c, &d);
-		cpu_features.has_5level_paging = (c >> 16) & 1;
-	}
+    /* 5-level paging and CLZERO capability live in 0x80000008. */
+    if (max_ext >= 0x80000008u) {
+        cpuid_raw(0x80000008u, 0, &a, &b, &c, &d);
+        cpu_features.has_5level_paging = (c >> 16) & 1;
+    }
 
-	/* Topology: leaf 0xB reports the logical processor count and, on
-	 * subleaf 0, whether a level is the x2APIC enumeration. */
-	{
-		uint32_t sub = 0;
-		uint32_t max_sub = 0;
+    /* Topology: leaf 0xB reports the logical processor count and, on
+     * subleaf 0, whether a level is the x2APIC enumeration. */
+    {
+        uint32_t sub = 0;
+        uint32_t max_sub = 0;
 
-		if (max_leaf >= 0xB) {
-			cpuid_raw(0xB, 0, &max_sub, &b, &c, &d);
-			uint32_t nodes = 0;
-			for (sub = 0; sub <= max_sub && sub < 16; sub++) {
-				uint32_t type = 0;
-				cpuid_raw(0xB, sub, &a, &b, &type, &d);
-				if (type == 0)
-					continue;
-				if (type == 1)
-					nodes++;
-			}
-			cpu_features.numa_nodes = nodes ? nodes : 1;
-		} else {
-			cpu_features.numa_nodes = 1;
-		}
-	}
+        if (max_leaf >= 0xB) {
+            cpuid_raw(0xB, 0, &max_sub, &b, &c, &d);
+            uint32_t nodes = 0;
+            for (sub = 0; sub <= max_sub && sub < 16; sub++) {
+                uint32_t type = 0;
+                cpuid_raw(0xB, sub, &a, &b, &type, &d);
+                if (type == 0)
+                    continue;
+                if (type == 1)
+                    nodes++;
+            }
+            cpu_features.numa_nodes = nodes ? nodes : 1;
+        } else {
+            cpu_features.numa_nodes = 1;
+        }
+    }
 
-	/* TSC frequency. CPUID 0x15 reports a crystal ratio where available. */
-	cpu_features.tsc_khz = 0;
-	cpu_features.tsc_source = 0;
-	if (max_leaf >= CPUID_TSC) {
-		uint32_t denom = 0, numer = 0, ecx = 0;
+    /* TSC frequency. CPUID 0x15 reports a crystal ratio where available. */
+    cpu_features.tsc_khz = 0;
+    cpu_features.tsc_source = 0;
+    if (max_leaf >= CPUID_TSC) {
+        uint32_t denom = 0, numer = 0, ecx = 0;
 
-		cpuid_raw(CPUID_TSC, 0, &a, &denom, &numer, &ecx);
-		/*
-		 * Leaf 0x15: EAX is the crystal clock in Hz, EBX the denominator
-		 * and ECX the numerator of the TSC ratio.
-		 *
-		 * The old code read the multiplier from EDX, which this leaf does
-		 * not define and which comes back 0, so tsc_khz was 0 on every
-		 * machine and every klog timestamp read [    0.000 ...].
-		 */
-		if (a != 0 && denom != 0 && numer != 0) {
-			cpu_features.tsc_khz = (uint64_t)a * numer / denom;
-			cpu_features.tsc_source = 1;
-		}
-	}
+        cpuid_raw(CPUID_TSC, 0, &a, &denom, &numer, &ecx);
+        /*
+         * Leaf 0x15: EAX is the crystal clock in Hz, EBX the denominator
+         * and ECX the numerator of the TSC ratio.
+         *
+         * The old code read the multiplier from EDX, which this leaf does
+         * not define and which comes back 0, so tsc_khz was 0 on every
+         * machine and every klog timestamp read [    0.000 ...].
+         */
+        if (a != 0 && denom != 0 && numer != 0) {
+            cpu_features.tsc_khz = (uint64_t)a * numer / denom;
+            cpu_features.tsc_source = 1;
+        }
+    }
 
-	if (!cpu_features.tsc_khz) {
-		cpu_features.tsc_khz = calibrate_tsc_against_pit();
-		if (cpu_features.tsc_khz)
-			cpu_features.tsc_source = 2;
-	}
+    if (!cpu_features.tsc_khz) {
+        cpu_features.tsc_khz = calibrate_tsc_against_pit();
+        if (cpu_features.tsc_khz)
+            cpu_features.tsc_source = 2;
+    }
 
-	cpu_features.hypervisor = (cpu_features.basic_ecx >> 31) & 1;
-	cpu_features.apic = (cpu_features.basic_edx >> 9) & 1;
-	cpu_features.tsc_deadline_timer = (cpu_features.basic_ecx >> 24) & 1;
-	/*
-	 * 1 GiB pages live at 0x80000001 EDX bit 26. vmm.c reads
-	 * has_1gb_pages before mapping a PDPT entry with PS=1, and nothing ever
-	 * set the field, so the 1 GiB path was dead on every machine and main.c
-	 * printed has_1gb_pages=0 as though the CPU had been asked.
-	 */
-	cpu_features.has_1gb_pages = (cpu_features.extended_edx >> 26) & 1;
+    cpu_features.hypervisor = (cpu_features.basic_ecx >> 31) & 1;
+    cpu_features.apic = (cpu_features.basic_edx >> 9) & 1;
+    cpu_features.tsc_deadline_timer = (cpu_features.basic_ecx >> 24) & 1;
+    /*
+     * 1 GiB pages live at 0x80000001 EDX bit 26. vmm.c reads
+     * has_1gb_pages before mapping a PDPT entry with PS=1, and nothing ever
+     * set the field, so the 1 GiB path was dead on every machine and main.c
+     * printed has_1gb_pages=0 as though the CPU had been asked.
+     */
+    cpu_features.has_1gb_pages = (cpu_features.extended_edx >> 26) & 1;
 
-	/*
-	 * The feature mask: one bit per feature ID, grouped by the CPUID leaf
-	 * register. Each FEAT() line names the register and the CPUID bit
-	 * explicitly — the old code folded four leaves into one bit namespace by
-	 * reusing the CPUID bit number as the mask bit, so nine positions carried
-	 * two or three different meanings, and seven constants named registers
-	 * the code never read (AVX, SSE, SSE2, ERMS, ERMS2, FSRM, SHA), so those
-	 * bits reported unrelated features. See the block comment in
-	 * cpu_features.h.
-	 */
-	uint64_t f = 0;
+    /*
+     * The feature mask: one bit per feature ID, grouped by the CPUID leaf
+     * register. Each FEAT() line names the register and the CPUID bit
+     * explicitly — the old code folded four leaves into one bit namespace by
+     * reusing the CPUID bit number as the mask bit, so nine positions carried
+     * two or three different meanings, and seven constants named registers
+     * the code never read (AVX, SSE, SSE2, ERMS, ERMS2, FSRM, SHA), so those
+     * bits reported unrelated features. See the block comment in
+     * cpu_features.h.
+     */
+    uint64_t f = 0;
 
-	/* CPUID leaf 1, EDX */
-	FEAT(cpu_features.basic_edx, 0, CPU_FEATURE_FPU);
-	FEAT(cpu_features.basic_edx, 4, CPU_FEATURE_TSC);
-	FEAT(cpu_features.basic_edx, 5, CPU_FEATURE_MSR);
-	FEAT(cpu_features.basic_edx, 6, CPU_FEATURE_PAE);
-	FEAT(cpu_features.basic_edx, 7, CPU_FEATURE_MCE);
-	FEAT(cpu_features.basic_edx, 8, CPU_FEATURE_CX8);
-	FEAT(cpu_features.basic_edx, 9, CPU_FEATURE_APIC);
-	FEAT(cpu_features.basic_edx, 11, CPU_FEATURE_SEP);
-	FEAT(cpu_features.basic_edx, 12, CPU_FEATURE_MTRR);
-	FEAT(cpu_features.basic_edx, 13, CPU_FEATURE_PGE);
-	FEAT(cpu_features.basic_edx, 16, CPU_FEATURE_PAT);
-	FEAT(cpu_features.basic_edx, 19, CPU_FEATURE_CLFLUSH);
-	FEAT(cpu_features.basic_edx, 24, CPU_FEATURE_FXSR);
-	FEAT(cpu_features.basic_edx, 25, CPU_FEATURE_SSE);
-	FEAT(cpu_features.basic_edx, 26, CPU_FEATURE_SSE2);
-	FEAT(cpu_features.basic_edx, 28, CPU_FEATURE_HT);
+    /* CPUID leaf 1, EDX */
+    FEAT(cpu_features.basic_edx, 0, CPU_FEATURE_FPU);
+    FEAT(cpu_features.basic_edx, 4, CPU_FEATURE_TSC);
+    FEAT(cpu_features.basic_edx, 5, CPU_FEATURE_MSR);
+    FEAT(cpu_features.basic_edx, 6, CPU_FEATURE_PAE);
+    FEAT(cpu_features.basic_edx, 7, CPU_FEATURE_MCE);
+    FEAT(cpu_features.basic_edx, 8, CPU_FEATURE_CX8);
+    FEAT(cpu_features.basic_edx, 9, CPU_FEATURE_APIC);
+    FEAT(cpu_features.basic_edx, 11, CPU_FEATURE_SEP);
+    FEAT(cpu_features.basic_edx, 12, CPU_FEATURE_MTRR);
+    FEAT(cpu_features.basic_edx, 13, CPU_FEATURE_PGE);
+    FEAT(cpu_features.basic_edx, 16, CPU_FEATURE_PAT);
+    FEAT(cpu_features.basic_edx, 19, CPU_FEATURE_CLFLUSH);
+    FEAT(cpu_features.basic_edx, 24, CPU_FEATURE_FXSR);
+    FEAT(cpu_features.basic_edx, 25, CPU_FEATURE_SSE);
+    FEAT(cpu_features.basic_edx, 26, CPU_FEATURE_SSE2);
+    FEAT(cpu_features.basic_edx, 28, CPU_FEATURE_HT);
 
-	/* CPUID leaf 1, ECX */
-	FEAT(cpu_features.basic_ecx, 0, CPU_FEATURE_SSE3);
-	FEAT(cpu_features.basic_ecx, 13, CPU_FEATURE_CX16);
-	FEAT(cpu_features.basic_ecx, 23, CPU_FEATURE_POPCNT);
-	FEAT(cpu_features.basic_ecx, 24, CPU_FEATURE_TSC_DEADLINE);
-	FEAT(cpu_features.basic_ecx, 26, CPU_FEATURE_XSAVE);
-	/*
-	 * ECX bit 27 is AVX; bit 28 is OSXSAVE. These were the other way round,
-	 * which made every "can this CPU do X" question answer the wrong thing,
-	 * and one of the answers was load-bearing.
-	 *
-	 * stage2_long.S gates its XSETBV on ECX.27 && ECX.28. With the bits
-	 * swapped, cpu_features reported OSXSAVE=0 and AVX=1, so the loader's gate
-	 * was skipped and XCR0 was never written. Measured: the boot log's feature
-	 * mask has the OSXSAVE bit clear, CR4.OSXSAVE clear, and the exec trace
-	 * contains no xsetbv at all.
-	 *
-	 * Swapped this way, `cpu_has(CPU_FEATURE_AVX)` answers "can the OS use
-	 * XCR0", so a CPU with XSAVE and OSXSAVE but no AVX passes a check meant
-	 * to stop it. The other way round merely under-reports and disables
-	 * features, which is safe. The mask keeps its bit IDs; only the mapping
-	 * changes, so no stored mask is invalidated.
-	 */
-	FEAT(cpu_features.basic_ecx, 27, CPU_FEATURE_AVX);
-	FEAT(cpu_features.basic_ecx, 28, CPU_FEATURE_OSXSAVE);
-	FEAT(cpu_features.basic_ecx, 31, CPU_FEATURE_HYPERVISOR);
+    /* CPUID leaf 1, ECX */
+    FEAT(cpu_features.basic_ecx, 0, CPU_FEATURE_SSE3);
+    FEAT(cpu_features.basic_ecx, 13, CPU_FEATURE_CX16);
+    FEAT(cpu_features.basic_ecx, 23, CPU_FEATURE_POPCNT);
+    FEAT(cpu_features.basic_ecx, 24, CPU_FEATURE_TSC_DEADLINE);
+    FEAT(cpu_features.basic_ecx, 26, CPU_FEATURE_XSAVE);
+    /*
+     * ECX bit 27 is AVX; bit 28 is OSXSAVE. These were the other way round,
+     * which made every "can this CPU do X" question answer the wrong thing,
+     * and one of the answers was load-bearing.
+     *
+     * stage2_long.S gates its XSETBV on ECX.27 && ECX.28. With the bits
+     * swapped, cpu_features reported OSXSAVE=0 and AVX=1, so the loader's gate
+     * was skipped and XCR0 was never written. Measured: the boot log's feature
+     * mask has the OSXSAVE bit clear, CR4.OSXSAVE clear, and the exec trace
+     * contains no xsetbv at all.
+     *
+     * Swapped this way, `cpu_has(CPU_FEATURE_AVX)` answers "can the OS use
+     * XCR0", so a CPU with XSAVE and OSXSAVE but no AVX passes a check meant
+     * to stop it. The other way round merely under-reports and disables
+     * features, which is safe. The mask keeps its bit IDs; only the mapping
+     * changes, so no stored mask is invalidated.
+     */
+    FEAT(cpu_features.basic_ecx, 27, CPU_FEATURE_AVX);
+    FEAT(cpu_features.basic_ecx, 28, CPU_FEATURE_OSXSAVE);
+    FEAT(cpu_features.basic_ecx, 31, CPU_FEATURE_HYPERVISOR);
 
-	/* CPUID 0x80000001, ECX */
-	FEAT(cpu_features.extended_ecx, 0, CPU_FEATURE_LAHF_LAM);
-	FEAT(cpu_features.extended_ecx, 5, CPU_FEATURE_ABM);
-	FEAT(cpu_features.extended_ecx, 6, CPU_FEATURE_SSE4A);
-	FEAT(cpu_features.extended_ecx, 9, CPU_FEATURE_OSVW);
+    /* CPUID 0x80000001, ECX */
+    FEAT(cpu_features.extended_ecx, 0, CPU_FEATURE_LAHF_LAM);
+    FEAT(cpu_features.extended_ecx, 5, CPU_FEATURE_ABM);
+    FEAT(cpu_features.extended_ecx, 6, CPU_FEATURE_SSE4A);
+    FEAT(cpu_features.extended_ecx, 9, CPU_FEATURE_OSVW);
 
-	/*
-	 * CPUID 0x80000001, EDX. NX is bit 20 of THIS register. Testing bit 20 of
-	 * leaf 1 EDX instead — which is reserved and reads 0 on every part ever
-	 * made — is what made the kernel print "no NX support" on machines plainly
-	 * running with EFER.NXE set.
-	 */
-	FEAT(cpu_features.extended_edx, 11, CPU_FEATURE_SYSCALL);
-	FEAT(cpu_features.extended_edx, 19, CPU_FEATURE_MP);
-	FEAT(cpu_features.extended_edx, 20, CPU_FEATURE_NX);
-	FEAT(cpu_features.extended_edx, 22, CPU_FEATURE_MMXEXT);
-	FEAT(cpu_features.extended_edx, 25, CPU_FEATURE_FXSR_OPT);
-	FEAT(cpu_features.extended_edx, 26, CPU_FEATURE_GBPAGES);
-	FEAT(cpu_features.extended_edx, 27, CPU_FEATURE_RDTSCP);
-	FEAT(cpu_features.extended_edx, 29, CPU_FEATURE_LM);
+    /*
+     * CPUID 0x80000001, EDX. NX is bit 20 of THIS register. Testing bit 20 of
+     * leaf 1 EDX instead — which is reserved and reads 0 on every part ever
+     * made — is what made the kernel print "no NX support" on machines plainly
+     * running with EFER.NXE set.
+     */
+    FEAT(cpu_features.extended_edx, 11, CPU_FEATURE_SYSCALL);
+    FEAT(cpu_features.extended_edx, 19, CPU_FEATURE_MP);
+    FEAT(cpu_features.extended_edx, 20, CPU_FEATURE_NX);
+    FEAT(cpu_features.extended_edx, 22, CPU_FEATURE_MMXEXT);
+    FEAT(cpu_features.extended_edx, 25, CPU_FEATURE_FXSR_OPT);
+    FEAT(cpu_features.extended_edx, 26, CPU_FEATURE_GBPAGES);
+    FEAT(cpu_features.extended_edx, 27, CPU_FEATURE_RDTSCP);
+    FEAT(cpu_features.extended_edx, 29, CPU_FEATURE_LM);
 
-	/* CPUID leaf 7 subleaf 0, EBX */
-	FEAT(cpu_features.leaf7_ebx, 0, CPU_FEATURE_FSGSBASE);
-	FEAT(cpu_features.leaf7_ebx, 3, CPU_FEATURE_BMI1);
-	FEAT(cpu_features.leaf7_ebx, 4, CPU_FEATURE_HLE);
-	FEAT(cpu_features.leaf7_ebx, 5, CPU_FEATURE_AVX2);
-	FEAT(cpu_features.leaf7_ebx, 7, CPU_FEATURE_SMEP);
-	FEAT(cpu_features.leaf7_ebx, 8, CPU_FEATURE_BMI2);
-	FEAT(cpu_features.leaf7_ebx, 9, CPU_FEATURE_ERMS);
-	FEAT(cpu_features.leaf7_ebx, 10, CPU_FEATURE_INVPCID);
-	FEAT(cpu_features.leaf7_ebx, 11, CPU_FEATURE_RTM);
-	FEAT(cpu_features.leaf7_ebx, 16, CPU_FEATURE_AVX512F);
-	FEAT(cpu_features.leaf7_ebx, 17, CPU_FEATURE_AVX512DQ);
-	FEAT(cpu_features.leaf7_ebx, 23, CPU_FEATURE_CLFLUSHOPT);
-	FEAT(cpu_features.leaf7_ebx, 24, CPU_FEATURE_CLWB);
-	FEAT(cpu_features.leaf7_ebx, 29, CPU_FEATURE_SHA);
-	FEAT(cpu_features.leaf7_ebx, 30, CPU_FEATURE_AVX512BW);
-	FEAT(cpu_features.leaf7_ebx, 31, CPU_FEATURE_AVX512VL);
+    /* CPUID leaf 7 subleaf 0, EBX */
+    FEAT(cpu_features.leaf7_ebx, 0, CPU_FEATURE_FSGSBASE);
+    FEAT(cpu_features.leaf7_ebx, 3, CPU_FEATURE_BMI1);
+    FEAT(cpu_features.leaf7_ebx, 4, CPU_FEATURE_HLE);
+    FEAT(cpu_features.leaf7_ebx, 5, CPU_FEATURE_AVX2);
+    FEAT(cpu_features.leaf7_ebx, 7, CPU_FEATURE_SMEP);
+    FEAT(cpu_features.leaf7_ebx, 8, CPU_FEATURE_BMI2);
+    FEAT(cpu_features.leaf7_ebx, 9, CPU_FEATURE_ERMS);
+    FEAT(cpu_features.leaf7_ebx, 10, CPU_FEATURE_INVPCID);
+    FEAT(cpu_features.leaf7_ebx, 11, CPU_FEATURE_RTM);
+    FEAT(cpu_features.leaf7_ebx, 16, CPU_FEATURE_AVX512F);
+    FEAT(cpu_features.leaf7_ebx, 17, CPU_FEATURE_AVX512DQ);
+    FEAT(cpu_features.leaf7_ebx, 23, CPU_FEATURE_CLFLUSHOPT);
+    FEAT(cpu_features.leaf7_ebx, 24, CPU_FEATURE_CLWB);
+    FEAT(cpu_features.leaf7_ebx, 29, CPU_FEATURE_SHA);
+    FEAT(cpu_features.leaf7_ebx, 30, CPU_FEATURE_AVX512BW);
+    FEAT(cpu_features.leaf7_ebx, 31, CPU_FEATURE_AVX512VL);
 
-	/* CPUID leaf 7 subleaf 0, ECX */
-	FEAT(cpu_features.leaf7_ecx, 16, CPU_FEATURE_LA57);
-	FEAT(cpu_features.leaf7_ecx, 22, CPU_FEATURE_RDPID);
+    /* CPUID leaf 7 subleaf 0, ECX */
+    FEAT(cpu_features.leaf7_ecx, 16, CPU_FEATURE_LA57);
+    FEAT(cpu_features.leaf7_ecx, 22, CPU_FEATURE_RDPID);
 
-	/* CPUID leaf 7 subleaf 0, EDX */
-	FEAT(cpu_features.leaf7_edx, 4, CPU_FEATURE_FSRM);
-	FEAT(cpu_features.leaf7_edx, 14, CPU_FEATURE_SERIALIZE);
+    /* CPUID leaf 7 subleaf 0, EDX */
+    FEAT(cpu_features.leaf7_edx, 4, CPU_FEATURE_FSRM);
+    FEAT(cpu_features.leaf7_edx, 14, CPU_FEATURE_SERIALIZE);
 
-	cpu_features.feature_mask = f;
+    cpu_features.feature_mask = f;
 
-	klog(KLOG_INFO, "cpu: family %u model %u stepping %u, %u logical processors, %u numa nodes\n",
-	     cpu_features.family, cpu_features.model, cpu_features.stepping,
-	     cpu_features.logical_cpus, cpu_features.numa_nodes);
+    klog(KLOG_INFO, "cpu: family %u model %u stepping %u, %u logical processors, %u numa nodes\n",
+         cpu_features.family, cpu_features.model, cpu_features.stepping,
+         cpu_features.logical_cpus, cpu_features.numa_nodes);
 
-	if (cpu_features.hypervisor)
-		klog(KLOG_DEBUG, "cpu: running under a hypervisor\n");
+    if (cpu_features.hypervisor)
+        klog(KLOG_DEBUG, "cpu: running under a hypervisor\n");
 
-	if (cpu_features.tsc_khz)
-		klog(KLOG_INFO, "cpu: tsc %llu kHz (%s), invariant=%d\n",
-		     (unsigned long long)cpu_features.tsc_khz,
-		     cpu_features.tsc_source == 1 ? "crystal ratio"
-		     : cpu_features.tsc_source == 2 ? "measured against PIT"
-						     : "unknown source",
-		     cpu_features.invariant_tsc);
-	else
-		/*
-		 * Worth saying out loud. Without a frequency, klog prints no
-		 * timestamp on any line, and a reader who does not know that will
-		 * read the missing numbers as "the whole boot took no time".
-		 */
-		klog(KLOG_WARN,
-		     "cpu: tsc frequency unknown; kernel log lines will carry no "
-		     "timestamp\n");
+    if (cpu_features.tsc_khz)
+        klog(KLOG_INFO, "cpu: tsc %llu kHz (%s), invariant=%d\n",
+             (unsigned long long)cpu_features.tsc_khz,
+             cpu_features.tsc_source == 1 ? "crystal ratio"
+             : cpu_features.tsc_source == 2 ? "measured against PIT"
+                             : "unknown source",
+             cpu_features.invariant_tsc);
+    else
+        /*
+         * Worth saying out loud. Without a frequency, klog prints no
+         * timestamp on any line, and a reader who does not know that will
+         * read the missing numbers as "the whole boot took no time".
+         */
+        klog(KLOG_WARN,
+             "cpu: tsc frequency unknown; kernel log lines will carry no "
+             "timestamp\n");
 
-	klog(KLOG_INFO, "cpu: avx2=%d bmi2=%d erms=%d fsrm=%d clwb=%d rdpid=%d nx=%d\n",
-	     cpu_has(CPU_FEATURE_AVX2), cpu_has(CPU_FEATURE_BMI2),
-	     cpu_has(CPU_FEATURE_ERMS), cpu_has(CPU_FEATURE_FSRM),
-	     cpu_has(CPU_FEATURE_CLWB), cpu_has(CPU_FEATURE_RDPID),
-	     cpu_has(CPU_FEATURE_NX));
+    klog(KLOG_INFO, "cpu: avx2=%d bmi2=%d erms=%d fsrm=%d clwb=%d rdpid=%d nx=%d\n",
+         cpu_has(CPU_FEATURE_AVX2), cpu_has(CPU_FEATURE_BMI2),
+         cpu_has(CPU_FEATURE_ERMS), cpu_has(CPU_FEATURE_FSRM),
+         cpu_has(CPU_FEATURE_CLWB), cpu_has(CPU_FEATURE_RDPID),
+         cpu_has(CPU_FEATURE_NX));
 
-	/* Fail loudly rather than triple-fault later. Every subsystem in this
-	 * kernel assumes long mode with PAE, and there is no useful degraded
-	 * path that does not involve rewriting the memory manager. */
-	if (!cpu_has(CPU_FEATURE_PAE))
-		klog(KLOG_FATAL, "cpu: PAE is required and not present\n");
-	if (!cpu_has(CPU_FEATURE_NX))
-		klog(KLOG_WARN, "cpu: no NX support; user/kernel separation is weaker than intended\n");
+    /* Fail loudly rather than triple-fault later. Every subsystem in this
+     * kernel assumes long mode with PAE, and there is no useful degraded
+     * path that does not involve rewriting the memory manager. */
+    if (!cpu_has(CPU_FEATURE_PAE))
+        klog(KLOG_FATAL, "cpu: PAE is required and not present\n");
+    if (!cpu_has(CPU_FEATURE_NX))
+        klog(KLOG_WARN, "cpu: no NX support; user/kernel separation is weaker than intended\n");
 }
 
 const char *cpu_vendor(void)
 {
-	return cpu_features.vendor;
+    return cpu_features.vendor;
 }

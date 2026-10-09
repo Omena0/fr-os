@@ -10,31 +10,31 @@
  * would defeat the point of having a gate at all.
  */
 
-	.text
-	.globl exempt
+    .text
+    .globl exempt
 exempt:
-	/* allowed: state management, moves 512 bytes, interprets none of them */
-	fxsave	(%rdi)
-	fxrstor	(%rdi)
+    /* allowed: state management, moves 512 bytes, interprets none of them */
+    fxsave    (%rdi)
+    fxrstor    (%rdi)
 
-	/* --- everything below must be reported by the kernel profile --- */
+    /* --- everything below must be reported by the kernel profile --- */
 
-	flds	(%rdi)
-	fstps	(%rdi)
-	fildl	(%rdi)
-	fistpl	(%rdi)
-	fldenv	(%rdi)
-	fnstenv	(%rdi)
-	fadds	(%rdi)
-	fmul	%st(1)
-	fchs
-	fnstsw	%ax
-	fxsave64	(%rdi)
-	fxrstor64	(%rdi)
-	ldmxcsr	(%rdi)
-	stmxcsr	(%rdi)
-	emms
-	cvtsi2sd	%rax, %xmm0
-	cvtsi2ss	%rax, %xmm0
-	movaps	%xmm0, %xmm1
-	ret
+    flds    (%rdi)
+    fstps    (%rdi)
+    fildl    (%rdi)
+    fistpl    (%rdi)
+    fldenv    (%rdi)
+    fnstenv    (%rdi)
+    fadds    (%rdi)
+    fmul    %st(1)
+    fchs
+    fnstsw    %ax
+    fxsave64    (%rdi)
+    fxrstor64    (%rdi)
+    ldmxcsr    (%rdi)
+    stmxcsr    (%rdi)
+    emms
+    cvtsi2sd    %rax, %xmm0
+    cvtsi2ss    %rax, %xmm0
+    movaps    %xmm0, %xmm1
+    ret

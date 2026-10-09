@@ -181,29 +181,29 @@ static int test_gettid_positive(void) {
 /* ===== clone ===== */
 
 static int test_clone_basic(void) {
-	/* Simple clone without CLONE_VM - creates a new process. The child
-	 * stack is a static array rather than a malloc'd block: this is a
-	 * kernel test and the kernel does not own the userspace allocator, so
-	 * a malloc failure here would be a false positive about the clone. */
-	unsigned char stack[65536];
-	int child_tid = 0;
-	int flags = 0; /* No CLONE_VM = new process */
-	long ret = syscall5(SYS_clone, flags,
-			    (long)(stack + sizeof(stack)), 0,
-			    (long)&child_tid, 0);
+    /* Simple clone without CLONE_VM - creates a new process. The child
+     * stack is a static array rather than a malloc'd block: this is a
+     * kernel test and the kernel does not own the userspace allocator, so
+     * a malloc failure here would be a false positive about the clone. */
+    unsigned char stack[65536];
+    int child_tid = 0;
+    int flags = 0; /* No CLONE_VM = new process */
+    long ret = syscall5(SYS_clone, flags,
+                (long)(stack + sizeof(stack)), 0,
+                (long)&child_tid, 0);
 
-	TEST_ASSERT(ret >= 0, "clone should not fail");
+    TEST_ASSERT(ret >= 0, "clone should not fail");
 
-	if (ret == 0) {
-		/* Child */
-		syscall1(SYS_exit, 0);
-	} else {
-		/* Parent */
-		int wstatus = 0;
-		syscall4(SYS_wait4, ret, (long)&wstatus, 0, 0);
-		TEST_ASSERT(WIFEXITED(wstatus), "cloned child should exit normally");
-	}
-	return TEST_PASS;
+    if (ret == 0) {
+        /* Child */
+        syscall1(SYS_exit, 0);
+    } else {
+        /* Parent */
+        int wstatus = 0;
+        syscall4(SYS_wait4, ret, (long)&wstatus, 0, 0);
+        TEST_ASSERT(WIFEXITED(wstatus), "cloned child should exit normally");
+    }
+    return TEST_PASS;
 }
 
 /* ===== kill ===== */
@@ -320,17 +320,17 @@ static int test_getgid_nonnegative(void) {
 /* ===== arch_prctl ===== */
 
 static int test_arch_prctl_get_fs(void) {
-	uint64_t addr = 0;
-	long ret = syscall2(SYS_arch_prctl, ARCH_GET_FS, (long)&addr);
-	TEST_ASSERT(ret == 0 || ret == -EINVAL, "ARCH_GET_FS should work or return -EINVAL");
-	return TEST_PASS;
+    uint64_t addr = 0;
+    long ret = syscall2(SYS_arch_prctl, ARCH_GET_FS, (long)&addr);
+    TEST_ASSERT(ret == 0 || ret == -EINVAL, "ARCH_GET_FS should work or return -EINVAL");
+    return TEST_PASS;
 }
 
 static int test_arch_prctl_get_gs(void) {
-	uint64_t addr = 0;
-	long ret = syscall2(SYS_arch_prctl, ARCH_GET_GS, (long)&addr);
-	TEST_ASSERT(ret == 0 || ret == -EINVAL, "ARCH_GET_GS should work or return -EINVAL");
-	return TEST_PASS;
+    uint64_t addr = 0;
+    long ret = syscall2(SYS_arch_prctl, ARCH_GET_GS, (long)&addr);
+    TEST_ASSERT(ret == 0 || ret == -EINVAL, "ARCH_GET_GS should work or return -EINVAL");
+    return TEST_PASS;
 }
 
 /* ===== Test Suite Registration ===== */

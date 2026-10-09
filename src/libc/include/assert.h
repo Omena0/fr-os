@@ -13,12 +13,12 @@
 #else
 
 extern void __assert_fail(const char *assertion, const char *file,
-			 int line, const char *function);
+             int line, const char *function);
 
 #define assert(expr)                                                    \
-	((expr)                                                         \
-	     ? (void)0                                                   \
-	     : __assert_fail(#expr, __FILE__, __LINE__, __func__))
+    ((expr)                                                         \
+         ? (void)0                                                   \
+         : __assert_fail(#expr, __FILE__, __LINE__, __func__))
 
 #endif /* NDEBUG */
 
