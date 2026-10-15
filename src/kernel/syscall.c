@@ -60,6 +60,16 @@ void syscall_abandon_frame(void)
     syscall_cpus[this_cpu_id()].ret_to_user = 0;
 }
 
+u64 syscall_ret_to_user_get(void)
+{
+    return syscall_cpus[this_cpu_id()].ret_to_user;
+}
+
+void syscall_ret_to_user_set(u64 v)
+{
+    syscall_cpus[this_cpu_id()].ret_to_user = v;
+}
+
 __noreturn void syscall_lost_frame(void)
 {
     /*
@@ -1029,6 +1039,14 @@ long syscall_dispatch(struct syscall_regs *regs)
     struct task *t = current_task();
 
     if (t) {
+        /*
+         * Mirror the same fact on the task. The per-CPU slot is what the
+         * entry path reads, but it is this task's attribute, and a context
+         * switch has to be able to give it back after some other task has
+         * used the CPU in between.
+         */
+        t->in_syscall_frame = true;
+
         /*
          * Mark the task as FPU-dirty when it is about to go back to
          * user mode with CR0.TS clear, which is exactly the condition

@@ -168,7 +168,7 @@ fi
 # mux=on makes the stdio chardev bidirectional so input from the terminal
 # reaches the guest's COM1 receive interrupt.
 QEMU_ARGS+=(
-    -chardev stdio,id=ser0,signal=off,logfile=$LOG
+    -chardev stdio,id=ser0,signal=off,mux=on,logfile=$LOG
     -serial chardev:ser0
 )
 

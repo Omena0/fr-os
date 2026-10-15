@@ -16,8 +16,8 @@ void test_log(const char *fmt, ...) {
     char buf[512];
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
-    write(STDERR_FILENO, buf, strlen(buf));
-    write(STDERR_FILENO, "\n", 1);
+    write(STDOUT_FILENO, buf, strlen(buf));
+    write(STDOUT_FILENO, "\n", 1);
 }
 
 void test_fail(const char *file, int line, const char *cond, const char *msg) {

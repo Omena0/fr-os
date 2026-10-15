@@ -263,6 +263,23 @@ struct task {
     bool fpu_dirty;       /* x87/SSE state must be saved on switch-out */
 
     /*
+     * Whether this task is currently sitting in a syscall frame it may
+     * return to user mode from.
+     *
+     * This is per-task, not per-CPU, and that is the whole point. A task
+     * that exits abandons the frame it is in — sys_exit() never returns —
+     * and the per-CPU slot was left holding that "abandoned" state. The
+     * next task to run then inherited it, and the first syscall it tried
+     * to return from was judged abandoned, which is a panic describing
+     * the wrong task: the parent blocked in wait4() reaped its child,
+     * returned cleanly, and was killed by the child's exit bookkeeping.
+     *
+     * The value is saved and restored across a context switch, so the
+     * per-CPU slot always describes the task that is actually running.
+     */
+    bool in_syscall_frame;
+
+    /*
      * The task's FS base, and the only reason MSR_FS_BASE is not simply a
      * per-CPU constant.
      *

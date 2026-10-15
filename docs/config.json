@@ -289,7 +289,7 @@
     "backlinks": true,
     "related": true,
     "auto_link": true,
-    "versioning": true,
+    "versioning": false,
     "search": true,
     "code_references": true,
     "link_preview": true,

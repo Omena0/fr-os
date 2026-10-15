@@ -97,6 +97,22 @@
 /* offsetof(struct syscall_regs, rsp) — where the user RSP is parked. */
 #define REG_RSP_OFF       88
 
+/*
+ * Field offsets into struct syscall_regs, for the return path's restore.
+ *
+ * The frame is laid out by the pushes above, which run backwards through the
+ * struct's field list, so field n sits at offset n * 8 from &regs. These are
+ * spelled out rather than derived because the assembler cannot evaluate
+ * offsetof(). RAX has no offset on purpose: it carries the return value and is
+ * the one field the restore must not touch.
+ */
+#define REG_RDI_OFF       8
+#define REG_RSI_OFF       16
+#define REG_RDX_OFF       24
+#define REG_R10_OFF       32
+#define REG_R8_OFF        40
+#define REG_R9_OFF        48
+
 /* After REG_FRAME_BYTES and the eight pops, RSP sits one padding slot below
  * the top of the frame, so the user RSP is this far below it. */
 #define USER_RSP_DISP  (-(FRAME_BYTES - 8 - REG_RSP_OFF))     /* -80 */
@@ -115,12 +131,14 @@ syscall_entry:
      * saved six are on the stack. Both instructions are RIP-relative and
      * therefore clobber nothing.
      *
-     * The parked user RSP is only needed eleven instructions later, once
-     * R11 is dead. Nothing can observe the scratch in between: a syscall
-     * can only be entered from CPL 3, and SFMASK cleared IF on entry, so
-     * neither an interrupt nor a nested syscall can run here.
+     * The parked user RSP and user RFLAGS are only needed later, and the
+     * R11 that carried the RFLAGS in is about to be reused as scratch.
+     * Nothing can observe the scratch in between: a syscall can only be
+     * entered from CPL 3, and SFMASK cleared IF on entry, so neither an
+     * interrupt nor a nested syscall can run here.
      */
     movq    %rsp, syscall_user_rsp_scratch(%rip)
+    movq    %r11, syscall_user_rflags_scratch(%rip)
     movq    kernel_tss+TSS_RSP0_OFF(%rip), %rsp
 
     /* The return path's half of the frame, pushed from the top down. */
@@ -153,12 +171,18 @@ syscall_entry:
      * and regs->rcx are both the user's RIP: SYSCALL destroyed the user's
      * own RCX and R11, so those fields record what the instruction put
      * there rather than what the user had.
+     *
+     * R11 no longer holds the RFLAGS — it was reloaded with the user RSP
+     * above and is the scratch register from here on — so both fields that
+     * describe the RFLAGS are pushed from the parked copy instead. Pushing
+     * R11 for `rflags` used to store the user RSP there, and a forked child
+     * then resumed in user mode with the RSP as its RFLAGS.
      */
-    pushq    %r11            /* rsp    */
-    pushq    %r11            /* rflags */
-    pushq    %rcx            /* rip    */
-    pushq    %r11            /* r11    */
-    pushq    %rcx            /* rcx    */
+    pushq    %r11                        /* rsp    */
+    pushq    syscall_user_rflags_scratch(%rip) /* rflags */
+    pushq    %rcx                        /* rip    */
+    pushq    syscall_user_rflags_scratch(%rip) /* r11    */
+    pushq    %rcx                        /* rcx    */
     pushq    %r9
     pushq    %r8
     pushq    %r10
@@ -243,6 +267,38 @@ syscall_entry:
     cmpl    $0, SC_RET_TO_USER(%rbp)
     je    .Lsyscall_lost
 
+    /*
+     * The register frame is restored in full, not just the half SYSRET needs.
+     *
+     * The SysV syscall ABI — the one glibc's inline asm and every hand-written
+     * wrapper in this tree document — clobbers exactly RCX and R11 and nothing
+     * else, because the kernel puts every other register back. Restoring only
+     * the callee-saved six and the SYSRET pair leaves RDI, RSI, RDX, R10, R8
+     * and R9 holding whatever the handler happened to leave in them, which is
+     * kernel state: a caller that keeps a live value in an argument register
+     * across a syscall reads a kernel address back out of it.
+     *
+     * That is not hypothetical. test_fork_basic() holds the fork'd pid in RDI
+     * across wait4(), compares it on return, and got 0xffff8000bdca9428 — a
+     * pointer into the task arena — instead of 4. The comparison failed and
+     * read as "wait4 returned the wrong pid" when wait4 had returned correctly
+     * and the *other* operand was the corrupt one.
+     *
+     * RAX is skipped on purpose: it carries the return value.
+     *
+     * The anchor is &regs itself, which is still at RSP on entry to this
+     * block — the push sequence ended with RAX at the lowest address, so the
+     * struct pointer is simply RSP. Stepping RSP forward by the whole frame
+     * first would put every offset below past the struct's end and into the
+     * padding and callee-saved slots above it.
+     */
+    movq    REG_RDI_OFF(%rsp), %rdi
+    movq    REG_RSI_OFF(%rsp), %rsi
+    movq    REG_RDX_OFF(%rsp), %rdx
+    movq    REG_R10_OFF(%rsp), %r10
+    movq    REG_R8_OFF(%rsp), %r8
+    movq    REG_R9_OFF(%rsp), %r9
+
     addq    $REG_FRAME_BYTES, %rsp
 
     popq    %r15
@@ -282,6 +338,10 @@ syscall_entry:
  * syscall_cpus[cpu].user_rsp: that field lives in the per-CPU array, whose
  * index is the very thing that cannot be computed until after the stack
  * switch.
+ *
+ * The RFLAGS has its own word for the same reason and a second one: R11
+ * carries it in and is then immediately reused as scratch for the user RSP,
+ * so the value has to be parked or it is gone by the time the frame is built.
  */
     .section .bss
     .align 8
@@ -289,5 +349,11 @@ syscall_entry:
     .type    syscall_user_rsp_scratch, @object
     .size    syscall_user_rsp_scratch, 8
 syscall_user_rsp_scratch:
+    .zero    8
+    .align 8
+    .local    syscall_user_rflags_scratch
+    .type    syscall_user_rflags_scratch, @object
+    .size    syscall_user_rflags_scratch, 8
+syscall_user_rflags_scratch:
     .zero    8
     .section .text

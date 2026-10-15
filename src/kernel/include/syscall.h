@@ -116,6 +116,17 @@ __noreturn void syscall_lost_frame(void);
  */
 void syscall_abandon_frame(void);
 
+/*
+ * Read and write the per-CPU slot the syscall entry path reads.
+ *
+ * These exist so the scheduler can carry the flag across a context switch:
+ * the flag is per-task state that the per-CPU slot only ever mirrors, and a
+ * switch has to install the incoming task's copy rather than inherit the
+ * outgoing task's. See struct task::in_syscall_frame.
+ */
+u64 syscall_ret_to_user_get(void);
+void syscall_ret_to_user_set(u64 v);
+
 /* ------------------------------------------------------------- helpers ------ */
 
 /* Argument accessors. Each one reads through the saved frame, so a handler

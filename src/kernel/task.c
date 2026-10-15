@@ -487,6 +487,7 @@ __noreturn void task_exit_current(int code)
      * is no longer running.
      */
     klog_emit(KLOG_DEBUG, "task", "task %u about to abandon frame", t->pid);
+    t->in_syscall_frame = false;
     syscall_abandon_frame();
 
     klog_emit(KLOG_DEBUG, "task", "task %u about to stop current", t->pid);

@@ -370,24 +370,22 @@ static void *user_page(struct address_space *mm, virt_addr_t vaddr, bool write)
      * the two have not yet collided, but this is a user-supplied address and
      * the cost of being wrong is reading a kernel frame.
      */
-    if (!vmm_lookup_page(mm->pgd, vaddr, &phys, NULL))
-        return NULL;
+    if (!vmm_lookup_page(mm->pgd, vaddr, &phys, NULL)) {
+        uint64_t error = PTE_PRESENT | PTE_USER;
 
-    return phys_to_virt(phys);
+        if (write)
+            error |= PTE_WRITE;
 
-    uint64_t error = PTE_PRESENT | PTE_USER;
+        /* `mm`, not the current address space: this runs from the ELF loader
+         * during execve, where the image is being built in a new address space
+         * while the CPU is still on the old PML4. */
+        if (vmm_handle_page_fault(mm, vaddr, error) != 0)
+            return NULL;
 
-    if (write)
-        error |= PTE_WRITE;
+        if (!vmm_lookup_page(mm->pgd, vaddr, &phys, NULL))
+            return NULL;
+    }
 
-    /* `mm`, not the current address space: this runs from the ELF loader
-     * during execve, where the image is being built in a new address space
-     * while the CPU is still on the old PML4. */
-    if (vmm_handle_page_fault(mm, vaddr, error) != 0)
-        return NULL;
-
-    if (!vmm_lookup_page(mm->pgd, vaddr, &phys, NULL))
-        return NULL;
     return phys_to_virt(phys);
 }
 
@@ -727,6 +725,10 @@ long sys_wait4(s64 pid, u64 wstatus, u64 options, u64 rusage)
                 if (rc < 0)
                     return rc;
             }
+            klog_emit(KLOG_DEBUG, "process",
+                  "sys_wait4: reaped pid=%u status=%#x wstatus=%p rp=%u",
+                  (unsigned)reaped->pid, status, (void *)(intptr_t)wstatus,
+                  (unsigned)rp);
             task_put(reaped);
             return (long)rp;
         }
@@ -777,6 +779,9 @@ static phys_addr_t clone_table(phys_addr_t src, unsigned level)
     phys_addr_t nphys = page_to_phys(np);
     u64 *dst = (u64 *)phys_to_virt(nphys);
     u64 *src_tbl = (u64 *)phys_to_virt(src);
+    klog_emit(KLOG_DEBUG, "process",
+          "clone_table: level=%u src=%p dst=%p",
+          level, (void *)(intptr_t)src, (void *)(intptr_t)nphys);
 
     for (unsigned i = 0; i < 512; i++) {
         u64 e = src_tbl[i];

@@ -292,6 +292,11 @@ struct address_space *mm_create(void)
     for (unsigned n = 0; n < sizeof(mm_shared_pml4) / sizeof(*mm_shared_pml4); n++)
         dst[mm_shared_pml4[n]] = src[mm_shared_pml4[n]];
 
+    klog(KLOG_DEBUG, "mm_create: mm=%p pgd=%#lx kernel_pgd=%#lx dst[256]=%#lx dst[384]=%#lx dst[511]=%#lx\n",
+         mm, (unsigned long)pgd, (unsigned long)kernel_pgd,
+         (unsigned long)dst[256], (unsigned long)dst[384],
+         (unsigned long)dst[511]);
+
     memset(mm, 0, sizeof(*mm));
     mm->pgd = pgd;
     spinlock_init(&mm->lock);
@@ -371,6 +376,10 @@ static void free_page_table(phys_addr_t table, unsigned level)
 static void mm_free_page_tables(phys_addr_t pgd)
 {
     uint64_t *entries = (uint64_t *)phys_to_virt(pgd);
+
+    klog(KLOG_DEBUG, "mm: freeing page tables pgd=%#lx pml4[256]=%#lx pml4[384]=%#lx pml4[511]=%#lx\n",
+         (unsigned long)pgd, (unsigned long)entries[256],
+         (unsigned long)entries[384], (unsigned long)entries[511]);
 
     for (unsigned i = 0; i < 512; i++) {
         uint64_t e = entries[i];

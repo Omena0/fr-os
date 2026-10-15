@@ -179,6 +179,22 @@ struct task *sched_idle_task(void)
     return (struct task *)this_cpu()->idle_task;
 }
 
+/*
+ * Is this the idle task for the CPU we are running on?
+ *
+ * The idle task is never on a run queue: it is the task that runs when the
+ * queue is empty, so putting it on the queue would make "the queue is empty"
+ * unobservable and rq_pick_locked() would hand the CPU to a task that is
+ * already running. Two separate paths used to enqueue it by mistake -- the
+ * requeue of the outgoing task in schedule(), and any wakeup that happened
+ * to name it -- and both deadlocked the system, so the test now lives at the
+ * single choke point every link operation goes through.
+ */
+static inline bool task_is_idle(const struct task *t)
+{
+    return t && t == (const struct task *)this_cpu()->idle_task;
+}
+
 /* Forward: the idle task consults it before every hlt. */
 static bool rq_has_work_locked(const struct runqueue *rq, const struct task *ignore);
 
@@ -301,6 +317,17 @@ static inline int rt_bitmap_highest(const struct rt_prio_array *rt)
  */
 static void rq_enqueue_locked(struct runqueue *rq, struct task *t, bool head)
 {
+    /*
+     * The idle task is not a schedulable entity: it is what runs when the
+     * queue is empty. Linking it here would make an empty queue
+     * unobservable, rq_pick_locked() would hand the CPU to the task that
+     * already holds it, and the system would spin through schedule() in a
+     * tight loop without any task making progress -- the failure mode this
+     * check exists to catch, because every one of its symptoms is invisible
+     * in the log except as a repeating "switching from X to X" pair.
+     */
+    BUG_ON(task_is_idle(t));
+
     /*
      * Detach from the migration list before linking into this one. rq_node is
      * a single link and cannot be in two lists, and linking it without
@@ -797,7 +824,7 @@ static void sched_drain_global(struct runqueue *rq)
 
 void sched_wake(struct task *t)
 {
-	if (!t || t->detached)
+	if (!t || t->detached || task_is_idle(t))
 		return;
 
 	/* A task that is already runnable does not need waking: it is on a
@@ -896,6 +923,18 @@ static u64 sched_switch_frame(struct task *prev, struct task *next)
      */
     syscall_set_kernel_stack((void *)((u64)next->kernel_stack +
                       TASK_KERNEL_STACK_SIZE));
+
+    /*
+     * Same for the "may this frame sysretq" flag. The slot is per-CPU, but
+     * the fact belongs to the task: a task that exited set it false and
+     * never returns, so the next task to run must not inherit that. Save
+     * the outgoing task's copy and install the incoming task's, which is
+     * what makes a task blocked in a syscall — wait4() being the one that
+     * bites — able to return to user mode after the task that woke it has
+     * had the CPU in between.
+     */
+    prev->in_syscall_frame = syscall_ret_to_user_get() != 0;
+    syscall_ret_to_user_set(next->in_syscall_frame ? 1 : 0);
 
     /*
      * The same value goes into the TSS RSP0, which is where an interrupt
@@ -1023,20 +1062,44 @@ if (!next) {
 		 * `next` is TASK_RUNNABLE, not TASK_RUNNING: it is already on
 		 * the CPU and must not be requeued, or it spins in a
 		 * schedule() loop forever. */
-		if (prev->state == TASK_RUNNING && !prev->detached) {
+		if (prev->state == TASK_RUNNING && !prev->detached &&
+		    !task_is_idle(prev)) {
 			prev->state = TASK_RUNNABLE;
 			prev->last_run = now_ticks();
 			flags = spinlock_irqsave(&rq->lock);
 			rq_enqueue_locked(rq, prev, false);
 			spinlock_unlock_irqrestore(&rq->lock, flags);
+			return;
 		}
-		return;
+		/* The idle task keeps the CPU: it is the one thing that is
+		 * runnable when nothing is, so returning here drops it back
+		 * into its own hlt loop. */
+		if (task_is_idle(prev))
+			return;
+		/*
+		 * A task that *blocked* is a different case and must not take
+		 * that return either. It is TASK_BLOCKED and off the queue, so
+		 * returning would resume the syscall that just asked to sleep
+		 * and spin it against an empty queue until an interrupt
+		 * happens to fire. Hand it the CPU to the idle task instead;
+		 * the wakeup that unblocks this task is what switches back.
+		 *
+		 * A task that just resumed here as `next` is TASK_RUNNING and
+		 * already took the requeue-and-return above, so it never
+		 * reaches this test.
+		 */
+		if (prev->state != TASK_BLOCKED)
+			return;
+		klog_emit(KLOG_DEBUG, "sched",
+			  "schedule: blocked prev pid=%u yields cpu to idle",
+			  prev->pid);
+		next = rq->idle;
 	}
 
     klog_emit(KLOG_DEBUG, "sched", "schedule: switching from pid=%u to pid=%u",
           prev->pid, next->pid);
 
-    if (prev->state == TASK_RUNNING && !prev->detached) {
+    if (prev->state == TASK_RUNNING && !prev->detached && !task_is_idle(prev)) {
         prev->state = TASK_RUNNABLE;
         /* The aging pass measures the wait from the moment a task left
          * the CPU, so the timestamp is taken here rather than only in
@@ -1080,10 +1143,21 @@ __noreturn void sched_stop_current(void)
 	 * being scheduled is that it is on no queue and `detached` is set, not
 	 * the state.
 	 */
-	t->detached = true;
+ 	t->detached = true;
+
+ 	/*
+ 	 * The task's own copy is false (task_exit_current() cleared it before
+ 	 * calling here), and the per-CPU slot must agree with the task that is
+ 	 * about to run rather than the one that is leaving. The idle task is
+ 	 * the incoming one, so its copy is what gets installed — and since it
+ 	 * is false, the idle task must never be switched to from a syscall
+ 	 * entry expecting a sysretq.
+ 	 */
+ 	rq->idle->in_syscall_frame = false;
+ 	syscall_ret_to_user_set(0);
 
 klog_emit(KLOG_DEBUG, "sched", "sched_stop_current: pid=%u switching to idle=%p idle_pid=%u idle_context_rsp=%p",
-		  t->pid, (void *)rq->idle, rq->idle->pid, (void *)rq->idle->context_rsp);
+ 		  t->pid, (void *)rq->idle, rq->idle->pid, (void *)rq->idle->context_rsp);
 
 	u64 flags = spinlock_irqsave(&rq->lock);
 
