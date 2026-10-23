@@ -82,10 +82,5 @@ When an NX violation occurs (instruction fetch from a non-executable page):
 - [kernel/privilege-levels.md](../kernel/privilege-levels.md)
 - [architecture/security-model.md](../architecture/security-model.md)
 
-## References
-
-- [Intel 64 and IA-32 Architectures Software Developer's Manual, Volume 3A — Paging and NX][intel-sdm-vol3a]
-- [AMD64 Architecture Programmer's Manual, Volume 2 — System Programming][amd-apm-vol2]
-
 [intel-sdm-vol3a]: https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html#vol3a "Intel SDM Volume 3A: System Programming Guide, Part 1"
 [amd-apm-vol2]: https://www.amd.com/en/developer/architecture-programmer-manuals.html "AMD64 Architecture Programmer's Manual Volume 2"

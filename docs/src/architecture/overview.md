@@ -74,14 +74,6 @@ This OS is a POSIX-compatible[^posix-2017], Linux-like operating system targetin
 - [memory-layout.md](memory-layout.md) — physical and virtual address space layout
 - [security-model.md](security-model.md) — threat model and security architecture
 
-## References
-
-- [Intel 64 and IA-32 Architectures Software Developer's Manual][intel-sdm]
-- [AMD64 Architecture Programmer's Manual][amd-apm]
-- [POSIX.1-2017 (IEEE Std 1003.1-2017)][posix-2017]
-- [System V Application Binary Interface AMD64 Architecture Processor Supplement][sysv-abi]
-- [Linux Kernel Documentation — Memory Management][linux-mm]
-
 [intel-sdm]: https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html "Intel 64 and IA-32 Architectures Software Developer's Manual"
 [amd-apm]: https://www.amd.com/en/developer/architecture-programmer-manuals.html "AMD64 Architecture Programmer's Manual"
 [posix-2017]: https://pubs.opengroup.org/onlinepubs/9699919799/ "The Open Group Base Specifications Issue 7, 2018 edition (POSIX.1-2017)"

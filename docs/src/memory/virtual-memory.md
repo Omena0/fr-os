@@ -147,13 +147,6 @@ Shootdown is batched: multiple address invalidations are collected and sent in a
 - [huge-pages.md](huge-pages.md)
 - [security/aslr.md](../security/aslr.md)
 
-## References
-
-- [Intel 64 and IA-32 Architectures Software Developer's Manual, Volume 3A — Paging][intel-sdm-vol3a]
-- [Intel 64 and IA-32 Architectures Software Developer's Manual, Volume 3A — Interrupts and Exceptions][intel-sdm-interrupts]
-- [AMD64 Architecture Programmer's Manual, Volume 2 — System Programming][amd-apm-vol2]
-- [Linux Kernel Documentation — Memory Management][linux-mm]
-
 [intel-sdm-vol3a]: https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html#vol3a "Intel SDM Volume 3A: System Programming Guide, Part 1"
 [intel-sdm-interrupts]: https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html#vol3a "Intel SDM Volume 3A: Interrupts and Exceptions"
 [amd-apm-vol2]: https://www.amd.com/en/developer/architecture-programmer-manuals.html "AMD64 Architecture Programmer's Manual Volume 2"

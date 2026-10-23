@@ -77,16 +77,6 @@ struct BootInfo {
 - [serial-output.md](serial-output.md)
 - [build.md](build.md)
 
-## References
-
-- [Intel 64 and IA-32 Architectures Software Developer's Manual, Volume 3A — Real Mode & Protected Mode][intel-sdm-vol3a]
-- [AMD64 Architecture Programmer's Manual, Volume 2 — Long Mode][amd-apm-vol2]
-- [Multiboot Specification][multiboot-spec]
-- [BIOS Boot Specification][bios-boot-spec]
-- [E820 Memory Map — ACPI Specification][acpi-e820]
-- [ACPI Specification — RSDP and RSDT][acpi-rsdp]
-- [ELF Specification][elf-spec]
-
 [intel-sdm-vol3a]: https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html#vol3a "Intel SDM Volume 3A: System Programming Guide, Part 1"
 [amd-apm-vol2]: https://www.amd.com/en/developer/architecture-programmer-manuals.html "AMD64 Architecture Programmer's Manual Volume 2"
 [multiboot-spec]: https://www.gnu.org/software/grub/manual/multiboot/multiboot.html "GNU Multiboot Specification"

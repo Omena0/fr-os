@@ -67,13 +67,6 @@ ASLR is only effective if the randomized addresses are not disclosed[^aslr-effec
 - [hardened-allocator.md](hardened-allocator.md)
 - [memory/virtual-memory.md](../memory/virtual-memory.md)
 
-## References
-
-- [PaX ASLR Documentation][pax-aslr]
-- [Linux Kernel ASLR Implementation][linux-aslr]
-- [Address Space Layout Randomization — Wikipedia][aslr-wiki]
-- [Effectiveness of ASLR on 64-bit Linux][aslr-effectiveness]
-
 [pax-aslr]: https://pax.grsecurity.net/docs/aslr.txt "PaX ASLR Design and Implementation"
 [linux-aslr]: https://www.kernel.org/doc/html/latest/admin-guide/aslr.html "Linux Kernel ASLR Documentation"
 [aslr-wiki]: https://en.wikipedia.org/wiki/Address_space_layout_randomization "Address Space Layout Randomization - Wikipedia"

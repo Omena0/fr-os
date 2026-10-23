@@ -63,17 +63,6 @@ In QEMU, the network device is `virtio-net-pci`. The kernel driver:
 - [socket-subsystem.md](socket-subsystem.md)
 - [performance.md](performance.md)
 
-## References
-
-- [RFC 791 — Internet Protocol (IPv4)][rfc791]
-- [RFC 793 — Transmission Control Protocol (TCP)][rfc793]
-- [RFC 768 — User Datagram Protocol (UDP)][rfc768]
-- [RFC 1122 — Requirements for Internet Hosts][rfc1122]
-- [RFC 1123 — Requirements for Internet Hosts — Application and Support][rfc1123]
-- [RFC 5681 — TCP Congestion Control][rfc5681]
-- [Linux Kernel Networking Documentation][linux-net]
-- [The Linux Kernel Module Programming Guide — Networking][lkmpg-net]
-
 [rfc791]: https://www.rfc-editor.org/rfc/rfc791 "RFC 791: Internet Protocol"
 [rfc793]: https://www.rfc-editor.org/rfc/rfc793 "RFC 793: Transmission Control Protocol"
 [rfc768]: https://www.rfc-editor.org/rfc/rfc768 "RFC 768: User Datagram Protocol"

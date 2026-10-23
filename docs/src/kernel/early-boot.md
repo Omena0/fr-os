@@ -162,13 +162,6 @@ If any step fails before `klog_init`, `early_panic()` is used (serial + halt). A
 - [memory/physical-allocator.md](../memory/physical-allocator.md)
 - [architecture/boot-sequence.md](../architecture/boot-sequence.md)
 
-## References
-
-- [Intel 64 and IA-32 Architectures Software Developer's Manual, Volume 3A — System Programming][intel-sdm-vol3a]
-- [AMD64 Architecture Programmer's Manual, Volume 2 — System Initialization][amd-apm-init]
-- [Multiboot Specification — Boot Information][multiboot-bootinfo]
-- [ACPI Specification — RSDP and RSDT][acpi-rsdp]
-
 [intel-sdm-vol3a]: https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html#vol3a "Intel SDM Volume 3A: System Programming Guide, Part 1"
 [amd-apm-init]: https://www.amd.com/en/developer/architecture-programmer-manuals.html "AMD64 Architecture Programmer's Manual Volume 2"
 [multiboot-bootinfo]: https://www.gnu.org/software/grub/manual/multiboot/multiboot.html#Boot-information "Multiboot Specification - Boot Information"

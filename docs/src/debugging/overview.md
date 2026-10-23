@@ -33,10 +33,5 @@ This section documents the facilities available for debugging and observing syst
 - [serial-diagnostics.md](serial-diagnostics.md)
 - [observability-api.md](observability-api.md)
 
-## References
-
-- [Intel 64 and IA-32 Architectures Software Developer's Manual, Volume 3B — Performance Monitoring][intel-sdm-pmu]
-- [Linux Kernel Documentation — Perf][linux-perf]
-
 [intel-sdm-pmu]: https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html#vol3b "Intel SDM Volume 3B: Performance Monitoring"
 [linux-perf]: https://www.kernel.org/doc/html/latest/core-api/perf.html "Linux Kernel Perf API"

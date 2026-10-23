@@ -32,15 +32,6 @@ implementation. Many pages describe subsystems that do not yet exist in code.
 For the verified current state, see [`STATE.md`](../STATE.md) and
 [`MEGA_AUDIT.md`](../../MEGA_AUDIT.md).
 
-## References
-
-- [Intel 64 and IA-32 Architectures Software Developer's Manual][intel-sdm]
-- [AMD64 Architecture Programmer's Manual][amd-apm]
-- [POSIX.1-2017 (IEEE Std 1003.1-2017)][posix-2017]
-- [System V Application Binary Interface AMD64 Architecture Processor Supplement][sysv-abi]
-- [Multiboot Specification][multiboot-spec]
-- [QEMU Documentation][qemu-docs]
-
 [intel-sdm]: https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html "Intel 64 and IA-32 Architectures Software Developer's Manual"
 [amd-apm]: https://www.amd.com/en/developer/architecture-programmer-manuals.html "AMD64 Architecture Programmer's Manual"
 [posix-2017]: https://pubs.opengroup.org/onlinepubs/9699919799/ "The Open Group Base Specifications Issue 7, 2018 edition (POSIX.1-2017)"

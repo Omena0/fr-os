@@ -158,13 +158,6 @@ The intended memory layout includes:
 - [memory/physical-allocator.md](../memory/physical-allocator.md)
 - [security/aslr.md](../security/aslr.md)
 
-## References
-
-- [Intel 64 and IA-32 Architectures Software Developer's Manual, Volume 3A — Paging][intel-sdm-vol3a]
-- [AMD64 Architecture Programmer's Manual, Volume 2 — System Programming][amd-apm-vol2]
-- [System V Application Binary Interface AMD64 Architecture Processor Supplement — Memory Layout][sysv-abi-memory]
-- [Linux Kernel Documentation — Memory Management][linux-mm]
-
 [intel-sdm-vol3a]: https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html#vol3a "Intel SDM Volume 3A: System Programming Guide, Part 1"
 [amd-apm-vol2]: https://www.amd.com/en/developer/architecture-programmer-manuals.html "AMD64 Architecture Programmer's Manual Volume 2"
 [sysv-abi-memory]: https://gitlab.com/x86-psABIs/x86-64-ABI/-/blob/master/abi.md#memory-layout "System V AMD64 ABI - Memory Layout"

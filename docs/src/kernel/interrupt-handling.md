@@ -196,14 +196,6 @@ IPIs are sent via LAPIC ICR (Interrupt Command Register)[^intel-sdm-interrupts][
 - [scheduling/overview.md](../scheduling/overview.md)
 - [kernel/early-boot.md](early-boot.md)
 
-## References
-
-- [Intel 64 and IA-32 Architectures Software Developer's Manual, Volume 3A — Interrupts and Exceptions][intel-sdm-interrupts]
-- [AMD64 Architecture Programmer's Manual, Volume 2 — Interrupts and Exceptions][amd-apm-interrupts]
-- [Advanced Configuration and Power Interface (ACPI) Specification — APIC][acpi-apic]
-- [Intel MultiProcessor Specification (MPS)][intel-mps]
-- [System V Application Binary Interface AMD64 Architecture Processor Supplement — Interrupt Handling][sysv-abi-interrupts]
-
 [intel-sdm-interrupts]: https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html#vol3a "Intel SDM Volume 3A: Interrupts and Exceptions"
 [amd-apm-interrupts]: https://www.amd.com/en/developer/architecture-programmer-manuals.html "AMD64 Architecture Programmer's Manual Volume 2: Interrupts and Exceptions"
 [acpi-apic]: https://uefi.org/specs/ACPI/6.5/05_ACPI_Software_Programming_Model/ACPI_Software_Programming_Model.html#advanced-programmable-interrupt-controller-apic "ACPI 6.5 - Advanced Programmable Interrupt Controller (APIC)"
