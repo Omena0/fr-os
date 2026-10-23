@@ -3,6 +3,7 @@
   "project_name": "Fr os",
   "copyright_holder": "Omena0",
   "project_url": "https://github.com/Omena0/fr-os",
+  "site_url": "https://omena0.dev/fr-os",
   "site_path_prefix": "/fr-os",
   "src_dir": "src",
   "out_dir": "site",

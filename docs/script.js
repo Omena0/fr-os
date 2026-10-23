@@ -1,4 +1,4 @@
-// version: 1
+// version: 2
 document.addEventListener('DOMContentLoaded', () => {
   const STORAGE_KEY = 'pjb-sidebar-state';
   const sitePrefixRaw = (document.documentElement.getAttribute('data-site-prefix') || '').trim();

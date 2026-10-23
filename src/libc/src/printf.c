@@ -151,14 +151,11 @@ static void emit_padded(struct fmt_state *st, const char *body, size_t len,
         sink_repeat(st, ' ', pad);
 }
 
-static void handle_string(struct fmt_state *st, va_list ap, int width, int left_align,
+static void handle_string(struct fmt_state *st, int width, int left_align,
               int precision, int has_precision)
 {
-    va_list temp_ap;
-    va_copy(temp_ap, st->ap);
-    const char *s = va_arg(temp_ap, const char *);
-    va_end(temp_ap);
-    (void)va_arg(st->ap, const char *);
+    const char *s = va_arg(st->ap, const char *);
+
     size_t len;
 
     if (!s)
@@ -528,14 +525,15 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
                     alt_prefix);
             break;
         }
-        case 'c': {
+case 'c': {
             va_list ap_copy;
 
             va_copy(ap_copy, st.ap);
             char ch = (char)va_arg(ap_copy, int);
+            va_arg(st.ap, int);
             va_end(ap_copy);
 
-            /* The '0' flag is defined only for the numeric
+            /* The \'0\' flag is defined only for the numeric
              * conversions, so %05c pads with spaces like %5c. */
             zero_pad = 0;
 
@@ -543,22 +541,14 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
             break;
         }
         case 's': {
-            va_list ap_copy;
-
-            va_copy(ap_copy, st.ap);
             zero_pad = 0;
-            handle_string(&st, ap_copy, width, left_align, precision,
-                      has_precision);
-            va_end(ap_copy);
+            handle_string(&st, width, left_align, precision,
+                          has_precision);
             break;
         }
         case 'p': {
-            va_list ap_copy;
-
-            va_copy(ap_copy, st.ap);
             unsigned long long v =
-                (unsigned long long)(uintptr_t)va_arg(ap_copy, void *);
-            va_end(ap_copy);
+                (unsigned long long)(uintptr_t)va_arg(st.ap, void *);
             char buf[DIGITS_MAX];
             size_t len = utoa(buf, sizeof(buf), v, 16, 0);
             size_t digits = 16;
