@@ -138,6 +138,9 @@ void process_set_fork_context(u64 rip, u64 rsp, u64 rflags);
 /* fork(2): a full page-table copy (see the trade-off note in process.c). */
 long sys_fork(void);
 
+/* clone(2): create a child task. flags use the Linux CLONE_* bitmask. */
+long sys_clone(u64 flags, u64 child_stack, u64 parent_tid, u64 child_tid, u64 tls, u64 caller_rip, u64 caller_rsp, u64 caller_rflags);
+
 /* execve(2) over the embedded init image. */
 long sys_execve(u64 path, u64 argv, u64 envp);
 

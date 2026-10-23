@@ -196,6 +196,13 @@ void vmm_init(void);
 void vmm_switch_to_kernel_pgd(void);
 
 /*
+ * The kernel's master PML4 (physical address). Exported once the static was
+ * relaxed in vmm.c so mm_create() can name it directly instead of reading CR3,
+ * which during a syscall is the *process's* PML4, not the kernel's.
+ */
+extern phys_addr_t kernel_pgd;
+
+/*
  * Physical to virtual through the direct map. This is a pure computation, not a
  * lookup, which is what makes it usable from contexts where taking a lock is not
  * allowed.
@@ -395,6 +402,13 @@ long vmm_handle_page_fault(struct address_space *mm, virt_addr_t addr,
  * task exists. The #PF handler uses it; nothing else should assume the current
  * address space is the interesting one. */
 struct address_space *current_mm(void);
+
+/* Debug: dump the 4-level page table walk for a given pgd and virtual address. */
+void vmm_debug_walk(phys_addr_t pgd, virt_addr_t virt);
+
+/* Flush the TLB entry for `virt` from `pgd`'s address space if the current
+ * CR3 shares the top-level table with it (i.e. the translation is live). */
+void vmm_tlb_flush_entry(phys_addr_t pgd, virt_addr_t virt);
 
 /* -------------------------------------------------------- kernel stacks ---- */
 

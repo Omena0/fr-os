@@ -676,17 +676,68 @@ static bool child_matches(struct task *child, s64 pid, u64 options)
     return true;
 }
 
+/*
+ * Does this process have any child that could ever match `pid`?
+ *
+ * The distinction matters because wait4 has two quite different "nothing to
+ * do" answers. POSIX draws the line between them like this:
+ *
+ *   - the requested child does not exist at all -> ECHILD, immediately;
+ *   - the requested child exists but has not exited yet -> block.
+ *
+ * A wait4(-1) from a process with no children at all is the first case, and
+ * so is a wait4(specific_pid) for a pid that is not among the children --
+ * including a pid that is not even a live process, which is what a caller
+ * that mistyped a pid gets.
+ *
+ * The second case is the one that has to block. A child that exists and is
+ * running will become a zombie when it exits, and task_exit_current() wakes
+ * the parent then, so blocking is bounded by the child's own lifetime.
+ */
+static bool has_matching_child(struct task *me, s64 pid)
+{
+    struct list_head *pos;
+
+    list_for_each(pos, &me->children) {
+        struct task *c = list_entry(pos, struct task, sibling);
+
+        if (child_matches(c, pid, 0))
+            return true;
+    }
+    return false;
+}
+
 long sys_wait4(s64 pid, u64 wstatus, u64 options, u64 rusage)
 {
     struct task *me = current_task();
 
     if (!me)
         return -ESRCH;
-    klog_emit(KLOG_DEBUG, "process", "sys_wait4: called, pid=%d me->pid=%ld", (int)pid, (long)me->pid);
+    klog_emit(KLOG_DEBUG, "process", "sys_wait4: called, pid=%ld me->pid=%ld", pid, (long)me->pid);
     if (rusage != 0)
         /* No accounting subsystem yet; claiming success would make a
          * caller believe it got zeros it never received. */
         return -ENOSYS;
+
+    /*
+     * Fast path: the caller asked for a specific child that does not exist,
+     * or asked for any child but has none. POSIX says return ECHILD
+     * immediately in both cases.
+     *
+     * The kernel returns -1 and stores ECHILD in the caller's thread-local
+     * errno rather than returning -ECHILD. libc's wrapper does that
+     * translation for a libc caller, but the raw-syscall ABI this kernel
+     * documents is "negative errno in the return register", and a caller
+     * that issues the syscall itself sees the raw value. Both spellings
+     * have to be right for the same call: -1 in the return register is
+     * what a POSIX caller checks, and errno is what a caller that wants
+     * the reason checks.
+     */
+    if (!has_matching_child(me, pid)) {
+        if (me->fs_base)
+            copy_to_user(me->fs_base - 8, (const int[]){ECHILD}, sizeof(int));
+        return -1;
+    }
 
     for (;;) {
         struct task *reaped = NULL;
@@ -737,10 +788,10 @@ long sys_wait4(s64 pid, u64 wstatus, u64 options, u64 rusage)
             return 0;
 
         /*
-         * Nothing to reap. Block; task_exit_current() wakes the parent
-         * of a task that exits, so the wakeup is the loop's only exit
-         * condition and no re-check race is possible — the re-check
-         * happens with the child list locked.
+         * A matching child exists but none is a zombie yet. Block; the
+         * wakeup comes from task_exit_current() when that child exits,
+         * so the re-check race is impossible — the loop re-locks the
+         * child list before looking again.
          */
         klog_emit(KLOG_DEBUG, "process", "wait4: blocking, pid=%d child_pid=%ld",
               pid, (long)me->pid);
@@ -966,6 +1017,21 @@ long sys_fork(void)
     child->user_rip = fork_ctx[this_cpu_id()][0];
     child->user_rsp = fork_ctx[this_cpu_id()][1];
     child->user_rflags = fork_ctx[this_cpu_id()][2];
+    /*
+     * The user RFLAGS the parent's SYSCALL frame carries has IF clear:
+     * SFMASK clears it on entry, and nothing re-sets it. A forked child
+     * resumes through ret_to_user(), which does not run the user's
+     * instructions first, so the bit stays clear and the child enters
+     * ring 3 with interrupts off. The timer cannot fire, nothing can
+     * preempt it, and the child never returns from its own syscall --
+     * the parent blocks in wait4 forever.
+     *
+     * The bit is restored by iretq on every normal return to user space,
+     * which is why the parent is fine: it runs its own instructions,
+     * hits its own SYSCALL, and the entry path re-clears IF from the
+     * RFLAGS the CPU itself loads. The child has no such trip.
+     */
+    child->user_rflags |= (1ULL << 9);
     child->thread_fn = fork_child_start;
     child->thread_arg = child;
 
@@ -979,6 +1045,112 @@ long sys_fork(void)
     /* The child does not run until the parent blocks or is preempted, so
      * the parent's return value is not yet at risk. */
     sched_add(child);
+    return (long)child->pid;
+}
+
+/* ----------------------------------------------------------------- clone ----- */
+
+long sys_clone(u64 flags, u64 child_stack, u64 parent_tid, u64 child_tid, u64 tls,
+               u64 caller_rip, u64 caller_rsp, u64 caller_rflags)
+{
+    struct task *me = current_task();
+    struct address_space *new_mm;
+    struct task *child;
+    int do_copy = !(flags & CLONE_VM);
+
+    if (!me || !me->mm)
+        return -EFAULT;
+
+    if (do_copy) {
+        new_mm = mm_create();
+        if (!new_mm)
+            return -ENOMEM;
+
+        {
+            u64 *src = (u64 *)phys_to_virt(me->mm->pgd);
+            u64 *dst = (u64 *)phys_to_virt(new_mm->pgd);
+
+            for (unsigned i = 0; i < 256; i++) {
+                if (!(src[i] & PTE_PRESENT))
+                    continue;
+                phys_addr_t p = clone_table(src[i] & PTE_ADDR_MASK, 3);
+                if (!p) {
+                    mm_put(new_mm);
+                    return -ENOMEM;
+                }
+                dst[i] = (src[i] & ~(PTE_ADDR_MASK | PTE_PRESENT)) | p |
+                     PTE_PRESENT | PTE_USER;
+            }
+        }
+
+        if (clone_vmas(new_mm, me->mm) < 0) {
+            mm_put(new_mm);
+            return -ENOMEM;
+        }
+
+        new_mm->start_brk = me->mm->start_brk;
+        new_mm->brk = me->mm->brk;
+        new_mm->stack_top = me->mm->stack_top;
+        new_mm->mmap_base = me->mm->mmap_base;
+        new_mm->mmap_next = me->mm->mmap_next;
+        new_mm->start_code = me->mm->start_code;
+        new_mm->end_code = me->mm->end_code;
+        new_mm->start_data = me->mm->start_data;
+        new_mm->end_data = me->mm->end_data;
+    } else {
+        new_mm = me->mm;
+        mm_get(new_mm);
+    }
+
+    child = task_alloc(me->comm, new_mm);
+    if (!child) {
+        mm_put(new_mm);
+        return -ENOMEM;
+    }
+
+    if (flags & CLONE_FILES) {
+        for (u32 i = 0; i < me->fd_count; i++) {
+            child->fds[i] = me->fds[i];
+            if (child->fds[i])
+                file_get(child->fds[i]);
+        }
+    } else {
+        for (u32 i = 0; i < me->fd_count; i++) {
+            if (me->fds[i]) {
+                child->fds[i] = me->fds[i];
+                file_get(child->fds[i]);
+            }
+        }
+    }
+
+    task_inherit(child, me);
+    child->ppid = me->pid;
+    child->pgid = me->pgid;
+    child->sid = me->sid;
+    child->parent = me;
+
+    if (tls && (flags & CLONE_SETTLS))
+        child->fs_base = tls;
+
+    child->user_rip = caller_rip;
+    child->user_rsp = child_stack ? child_stack : caller_rsp;
+    child->user_rflags = caller_rflags | (1ULL << 9);
+
+    child->thread_fn = fork_child_start;
+    child->thread_arg = child;
+
+    u64 cflags = spinlock_irqsave(&task_all_lock);
+    list_add_tail(&child->sibling, &me->children);
+    refcount_inc(&child->refs);
+    spinlock_unlock_irqrestore(&task_all_lock, cflags);
+
+    sched_add(child);
+
+    if (child_tid)
+        copy_to_user(child_tid, &child->tid, sizeof(child->tid));
+    if (parent_tid)
+        copy_to_user(parent_tid, &child->tid, sizeof(child->tid));
+
     return (long)child->pid;
 }
 
@@ -1705,6 +1877,7 @@ struct task *process_create_init(void)
     t->pgid = 1;
     t->sid = 1;
     t->ppid = 0;
+    t->parent = t;  /* init is its own parent */
     t->state = TASK_NEW;
 
     sched_add(t);

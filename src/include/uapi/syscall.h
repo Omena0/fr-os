@@ -77,6 +77,8 @@
 #define SYS_brk          35u
 #define SYS_madvise      36u
 #define SYS_get_tls_base 37u
+#define SYS_mremap       38u
+#define SYS_mlock        39u
 
 /* Files. */
 #define SYS_open         64u

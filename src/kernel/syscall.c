@@ -200,16 +200,20 @@ static long sc_nanosleep(struct syscall_regs *r)
 static long sc_clock_gettime(struct syscall_regs *r)
 {
     struct timespec ts;
+    int clock = (int)(s32)arg0(r);
 
-    UNUSED(r);
+    /* Only CLOCK_REALTIME (0) and CLOCK_MONOTONIC (1) are valid. */
+    if (clock != 0 && clock != 1)
+        return -EINVAL;
+
     /* Both clocks are the same counter. There is no RTC driver, so
      * CLOCK_REALTIME is uptime. */
     {
         /*
          * Read the clock once. Two reads can straddle a tick; the second
-         * read is the later one, so if it lands in the next second the pair
-         * reconstructs as sec=N, nsec=small, which is *earlier* than the
-         * N-1 the previous call returned. A backwards step underflows
+         * read can land in the next second, so if it lands in the next second
+         * the pair reconstructs as sec=N, nsec=small, which is *earlier* than
+         * the N-1 the previous call returned. A backwards step underflows
          * init's unsigned ms computation and prints a number in the
          * billions.
          */
@@ -218,7 +222,10 @@ static long sc_clock_gettime(struct syscall_regs *r)
         ts.tv_sec = (s64)(now / 1000000000ULL);
         ts.tv_nsec = (s64)(now % 1000000000ULL);
     }
-    return copy_to_user(arg1(r), &ts, sizeof(ts));
+    long rc = copy_to_user(arg1(r), &ts, sizeof(ts));
+    if (rc < 0)
+        return -EFAULT;
+    return 0;
 }
 
 /* ------------------------------------------------------------- files ------- */
@@ -930,7 +937,10 @@ static long sc_arch_prctl(struct syscall_regs *r)
     case ARCH_GET_FS: {
         u64 val = rdmsr(MSR_FS_BASE);
 
-        return copy_to_user(addr, &val, sizeof(val));
+        long rc = copy_to_user(addr, &val, sizeof(val));
+        if (rc < 0)
+            return -EINVAL;
+        return 0;
     }
     default:
         /*
@@ -970,7 +980,85 @@ static long sc_get_tls_base(struct syscall_regs *r)
     return (long)mm->tls_ptr;
 }
 
-/* ---------------------------------------------------------------- misc ----- */
+/* ----------------------------------------------------------------- mremap -- */
+
+static long sc_mremap(struct syscall_regs *r)
+{
+    struct address_space *mm = syscall_user_mm();
+    u64 old_addr = arg0(r);
+    u64 old_size = arg1(r);
+    u64 new_size = arg2(r);
+    u64 flags = arg3(r);
+    u64 new_addr = arg4(r);
+    int rc;
+
+    if (!mm)
+        return -EFAULT;
+    if (!user_range_ok(mm, old_addr, old_size))
+        return -EINVAL;
+    if (flags & ~(u64)0x0FU)
+        return -EINVAL;
+
+    old_size = ALIGN_UP(old_size, PAGE_SIZE);
+    new_size = ALIGN_UP(new_size, PAGE_SIZE);
+
+    if ((flags & 0x2) && new_addr) {  /* MREMAP_FIXED with new address */
+        if (!user_range_ok(mm, new_addr, new_size))
+            return -EINVAL;
+        rc = mm_remove_vma(mm, (virt_addr_t)old_addr, (virt_addr_t)(old_addr + old_size));
+        if (rc < 0)
+            return rc;
+        rc = mm_add_vma(mm, (virt_addr_t)new_addr, (virt_addr_t)(new_addr + new_size),
+                VM_READ | VM_WRITE | VM_USER, VM_ANON);
+        if (rc < 0)
+            return rc;
+        if (new_addr + new_size > mm->mmap_next)
+            mm->mmap_next = new_addr + new_size;
+        return (long)new_addr;
+    }
+
+    rc = mm_remove_vma(mm, (virt_addr_t)old_addr, (virt_addr_t)(old_addr + old_size));
+    if (rc < 0)
+        return rc;
+    virt_addr_t vaddr = mm_find_free(mm, new_size, PAGE_SIZE);
+    if (!vaddr)
+        return -ENOMEM;
+    rc = mm_add_vma(mm, vaddr, vaddr + new_size, VM_READ | VM_WRITE | VM_USER, VM_ANON);
+    if (rc < 0)
+        return rc;
+    if (vaddr + new_size > mm->mmap_next)
+        mm->mmap_next = vaddr + new_size;
+    return (long)vaddr;
+}
+
+/* ---------------------------------------------------------------- mlock -- */
+
+static long sc_mlock(struct syscall_regs *r)
+{
+    struct address_space *mm = syscall_user_mm();
+    u64 addr = arg0(r);
+    u64 len = arg1(r);
+
+    if (!mm)
+        return -EFAULT;
+    if (!user_range_ok(mm, addr, len))
+        return -EINVAL;
+    /* mlock is a no-op in this kernel; accept valid user ranges. */
+    return 0;
+}
+
+/* ---------------------------------------------------------------- clone -- */
+
+#define SIGKILL 9
+#define SIGCHLD 17
+
+static long sc_clone(struct syscall_regs *r)
+{
+    process_set_fork_context(r->rip, r->rsp, r->rflags);
+    return sys_clone(arg0(r), arg1(r), arg2(r), arg3(r), arg4(r), r->rip, r->rsp, r->rflags);
+}
+
+/* ------------------------------------------------------------------- getpgid --- */
 
 static long sc_getpgid(struct syscall_regs *r)
 {
@@ -983,6 +1071,63 @@ static long sc_getpgid(struct syscall_regs *r)
     struct task *o = task_find_by_pid((u32)pid);
 
     return o ? (long)o->pgid : -ESRCH;
+}
+
+static long sc_setpgid(struct syscall_regs *r)
+{
+    struct task *t = caller();
+    s64 pid = (s64)arg0(r);
+    s64 pgid = (s64)arg1(r);
+    struct task *target;
+
+    UNUSED(r);
+    if (!t)
+        return -ESRCH;
+    if (pid == 0)
+        pid = (s64)t->pid;
+    target = task_find_by_pid((u32)pid);
+    if (!target)
+        return -ESRCH;
+    if (pgid == 0)
+        pgid = pid;
+    /* Allow setting pgid only for self or children in the same session. */
+    if (target != t && target->parent != t && target->sid != t->sid)
+        return -EPERM;
+    target->pgid = (u32)pgid;
+    return 0;
+}
+
+static long sc_setsid(struct syscall_regs *r)
+{
+    struct task *t = caller();
+
+    UNUSED(r);
+    if (!t)
+        return -EPERM;
+    /* A process group leader (pgid == pid) may not start a new session. */
+    if (t->pgid == t->pid)
+        return -EPERM;
+    t->pgid = t->pid;
+    t->sid = t->pid;
+    return (long)t->sid;
+}
+
+static long sc_kill(struct syscall_regs *r)
+{
+    s64 pid = (s64)arg0(r);
+    s64 sig = (s64)arg1(r);
+    struct task *target;
+
+    UNUSED(r);
+    if (sig < 1 || sig > 64)
+        return -EINVAL;
+    target = task_find_by_pid((u32)pid);
+    if (!target)
+        return -ESRCH;
+    /* Signal delivery is not implemented yet; accept valid signals. */
+    if (sig == SIGKILL)
+        task_exit_current(-sig);
+    return 0;
 }
 
 static long sc_getuid(struct syscall_regs *r)
@@ -1074,6 +1219,10 @@ void syscall_init(void)
     syscall_table[SYS_getppid] = sc_getppid;
     syscall_table[SYS_gettid] = sc_gettid;
     syscall_table[SYS_getpgid] = sc_getpgid;
+    syscall_table[SYS_clone] = sc_clone;
+    syscall_table[SYS_kill] = sc_kill;
+    syscall_table[SYS_setpgid] = sc_setpgid;
+    syscall_table[SYS_setsid] = sc_setsid;
     syscall_table[SYS_getuid] = sc_getuid;
     syscall_table[SYS_getgid] = sc_getgid;
     syscall_table[SYS_arch_prctl] = sc_arch_prctl;
@@ -1097,6 +1246,8 @@ void syscall_init(void)
     syscall_table[SYS_pipe] = sc_pipe;
     syscall_table[SYS_sched_yield] = sc_sched_yield;
     syscall_table[SYS_getcpu] = sc_getcpu;
+    syscall_table[SYS_mremap] = sc_mremap;
+    syscall_table[SYS_mlock] = sc_mlock;
 
     /*
      * STAR carries both selector bases. SYSCALL loads CS from bits 47:32

@@ -37,7 +37,10 @@
 #include <task.h>
 #include <vmm.h>
 #include <interrupt.h>
+#include <drivers/serial.h>
 #include <uapi/errno.h>
+
+extern phys_addr_t kernel_pgd;
 
 KLOG_SUBSYSTEM("mm");
 
@@ -196,28 +199,6 @@ struct vma *mm_find_vma(struct address_space *mm, virt_addr_t addr)
 /* ------------------------------------------------- address spaces ----------- */
 
 /*
- * The kernel's own PML4, as a physical address.
- *
- * vmm.c keeps its PML4 in a file-static and does not export it, which is the
- * right encapsulation for everything that uses the recursive map: those callers
- * never name the PML4 at all. mm_create() does have to name it, and it can
- * read it out of CR3 instead. That is exactly as authoritative as the static —
- * CR3 is where the running kernel's PML4 physically is — and it stays correct
- * for the case that matters most: mm_create() is called from a syscall, where
- * the CPU is running on the *process's* PML4. That PML4 was itself cloned
- * from the kernel's, so copying its high-half entries reproduces the kernel
- * window and the direct map, which is precisely what the new address space
- * needs in order to be able to serve a syscall at all.
- *
- * The low 12 bits are PCID, not address, and are cleared here so the value can
- * be used with phys_to_virt() unconditionally.
- */
-static phys_addr_t kernel_pgd_from_cr3(void)
-{
-    return read_cr3() & ~0xFFFULL;
-}
-
-/*
  * The PML4 entries every address space shares with the kernel's, and the only
  * three it has:
  *
@@ -247,7 +228,6 @@ static bool pml4_is_shared(unsigned i)
 
 struct address_space *mm_create(void)
 {
-    phys_addr_t kernel_pgd = kernel_pgd_from_cr3();
     phys_addr_t pgd;
     struct address_space *mm;
     uint64_t *src, *dst;
@@ -280,22 +260,71 @@ struct address_space *mm_create(void)
      * three populated PML4 entries, 256/384/511, and the process PGD had two.
      *
      * Note what that failure looks like: the fault address is a perfectly
-     * ordinary kernel stack, the page tables are valid, and nothing about the
-     * page that faulted is unusual. The missing entry is in a fourth-level
+     * ordinary kernel stack, the page tables are valid, and nothing about
+     * the page that faulted is unusual. The missing entry is in a fourth-level
      * table belonging to a different PGD than the one being walked.
      *
      * The entries are shared, not copied; see mm_shared_pml4 above, which is
      * also why the teardown must leave them alone.
+     *
+     * The source is the kernel's own PML4 (vmm.c's kernel_pgd), not CR3.
+     * mm_create() is called from sys_fork, where the CPU is running on the
+     * parent's PML4 -- a process PML4, and a process PML4 is a snapshot of
+     * the kernel's shared entries taken when that process was created.
+     * vmalloc_grow() adds new VMALLOC_AREA mappings to the kernel PML4 after
+     * the process already has its copy, so a snapshot is stale: the new
+     * address space would inherit whatever vmalloc mappings happened to exist
+     * at its parent's creation time, and any later kernel allocation would be
+     * invisible to it. The canonical kernel_pgd is always current.
+     *
+     * Before copying, make sure every shared entry exists in kernel_pgd.
+     * vmalloc (384) is built on first use; if no vmalloc has happened yet,
+     * the entry is zero and the process would inherit nothing. Creating the
+     * PDPT here is cheap (one page) and means the process always shares a
+     * live chain -- later vmalloc_grow() calls add PD/PT entries under it
+     * that the process sees because the PDPT itself is shared.
      */
     src = (uint64_t *)phys_to_virt(kernel_pgd);
+    for (unsigned n = 0; n < sizeof(mm_shared_pml4) / sizeof(*mm_shared_pml4); n++) {
+        unsigned idx = mm_shared_pml4[n];
+
+        if (!(src[idx] & PTE_PRESENT)) {
+            phys_addr_t pdpt = pt_alloc_zeroed(1);
+
+            if (!pdpt)
+                goto fail;
+            src[idx] = pdpt | PTE_PRESENT | PTE_WRITE;
+        }
+    }
     dst = (uint64_t *)phys_to_virt(pgd);
     for (unsigned n = 0; n < sizeof(mm_shared_pml4) / sizeof(*mm_shared_pml4); n++)
         dst[mm_shared_pml4[n]] = src[mm_shared_pml4[n]];
+
+    /*
+     * Copy the PDPT contents from kernel_pgd so the process inherits the
+     * kernel's page table mappings (direct map, vmalloc, kernel window).
+     * The new pgd's PML4 entries now point to a freshly allocated PDPT page,
+     * but that page is zeroed; we must copy the entries from kernel_pgd so
+     * the address space is immediately functional.
+     */
+    for (unsigned n = 0; n < sizeof(mm_shared_pml4) / sizeof(*mm_shared_pml4); n++) {
+        unsigned idx = mm_shared_pml4[n];
+        if (src[idx] & PTE_PRESENT) {
+            phys_addr_t src_pdpt = src[idx] & PTE_ADDR_MASK;
+            phys_addr_t dst_pdpt = dst[idx] & PTE_ADDR_MASK;
+            memcpy(phys_to_virt(dst_pdpt), phys_to_virt(src_pdpt), PAGE_SIZE);
+        }
+    }
 
     klog(KLOG_DEBUG, "mm_create: mm=%p pgd=%#lx kernel_pgd=%#lx dst[256]=%#lx dst[384]=%#lx dst[511]=%#lx\n",
          mm, (unsigned long)pgd, (unsigned long)kernel_pgd,
          (unsigned long)dst[256], (unsigned long)dst[384],
          (unsigned long)dst[511]);
+
+    klog(KLOG_DEBUG, "mm: walk kernel_pgd mm@%p\n", mm);
+    vmm_debug_walk(kernel_pgd, (virt_addr_t)(uintptr_t)mm);
+    klog(KLOG_DEBUG, "mm: walk cr3 mm@%p\n", mm);
+    vmm_debug_walk(read_cr3() & ~0xFFFULL, (virt_addr_t)(uintptr_t)mm);
 
     memset(mm, 0, sizeof(*mm));
     mm->pgd = pgd;
@@ -313,6 +342,13 @@ struct address_space *mm_create(void)
     klog(KLOG_DEBUG, "mm: address space pgd %#lx (kernel pgd %#lx)\n",
          (unsigned long)pgd, (unsigned long)kernel_pgd);
     return mm;
+
+fail:
+    /* Clean up on pt_alloc_zeroed failure for a shared PDPT. The pgd page
+     * is freshly allocated and unmapped, mm is vmalloc'd but still empty. */
+    pt_free(pgd, 1);
+    klog(KLOG_ERROR, "mm_create: failed to allocate shared PDPT\n");
+    return NULL;
 }
 
 void mm_get(struct address_space *mm)
@@ -755,8 +791,27 @@ static bool vma_allows(const struct vma *vma, uint64_t error_code)
     return true;
 }
 
+/*
+ * Print a 64-bit value in hex directly to the serial port, bypassing the
+ * klog writer, which corrupts its output with NUL runs under QEMU.
+ */
+static void serial_puthex(u64 v)
+{
+    static const char hex[] = "0123456789abcdef";
+    char buf[18];
+    int i;
+
+    buf[0] = '0';
+    buf[1] = 'x';
+    for (i = 17; i >= 2; i--) {
+        buf[i] = hex[v & 0xf];
+        v >>= 4;
+    }
+    serial_puts(buf);
+}
+
 long vmm_handle_page_fault(struct address_space *mm, virt_addr_t addr,
-               uint64_t error_code)
+                uint64_t error_code)
 {
     struct vma *vma;
     struct page *page;
@@ -767,10 +822,60 @@ long vmm_handle_page_fault(struct address_space *mm, virt_addr_t addr,
     virt = addr & PAGE_MASK;
 
     /* The kernel half is described by the shared PML4 entries, never by a
-     * VMA. Rejecting it here rather than after a list walk keeps a kernel
-     * fault from resolving against a user VMA that happens to be nearby. */
-    if (virt >= MM_USER_LIMIT)
+     * VMA. If the fault is on a kernel address, check the canonical
+     * kernel_pgd for a mapping. If present there, the shared page tables
+     * should already be visible - flush TLB and retry. */
+    if (virt >= MM_USER_LIMIT) {
+        phys_addr_t have = 0;
+        if (vmm_lookup_page(kernel_pgd, virt, &have, NULL)) {
+            /* Mapping exists in kernel_pgd; the shared PML4 entries
+             * should make it visible. Flush TLB for current CR3 and retry. */
+            vmm_tlb_flush_entry(kernel_pgd, virt);
+            return 0;
+        }
+
+        serial_puts("PF: kernel addr not present in kernel_pgd; ");
+        serial_puts("walk current CR3:\n");
+
+        /* Walk current CR3's page tables to find where it breaks. */
+        {
+            phys_addr_t cur = read_cr3() & ~0xFFFULL;
+            uint64_t *pml4 = (uint64_t *)phys_to_virt(cur);
+            unsigned pml4_idx = PML4_ENTRY_OF(virt);
+            uint64_t pml4e = pml4[pml4_idx];
+            serial_puts("  pml4e=");
+            serial_puthex(pml4e);
+            serial_puts("\n");
+            if (pml4e & PTE_PRESENT) {
+                uint64_t *pdpt = (uint64_t *)phys_to_virt(pml4e & PTE_ADDR_MASK);
+                unsigned pdpt_idx = PDPT_ENTRY_OF(virt);
+                uint64_t pdpte = pdpt[pdpt_idx];
+                serial_puts("  pdpte=");
+                serial_puthex(pdpte);
+                serial_puts("\n");
+                if (pdpte & PTE_PRESENT) {
+                    uint64_t *pd = (uint64_t *)phys_to_virt(pdpte & PTE_ADDR_MASK);
+                    unsigned pd_idx = PD_ENTRY_OF(virt);
+                    uint64_t pde = pd[pd_idx];
+                    serial_puts("  pde=");
+                    serial_puthex(pde);
+                    serial_puts("\n");
+                    if (!(pde & PTE_PS)) {
+                        uint64_t *pt = (uint64_t *)phys_to_virt(pde & PTE_ADDR_MASK);
+                        unsigned pt_idx = PT_ENTRY_OF(virt);
+                        uint64_t pte = pt[pt_idx];
+                        serial_puts("  pte=");
+                        serial_puthex(pte);
+                        serial_puts("\n");
+                    } else {
+                        serial_puts("  large page\n");
+                    }
+                }
+            }
+        }
+
         return -EFAULT;
+    }
 
     if (!mm)
         return -EFAULT;

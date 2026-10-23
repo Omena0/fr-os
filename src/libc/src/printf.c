@@ -151,10 +151,10 @@ static void emit_padded(struct fmt_state *st, const char *body, size_t len,
         sink_repeat(st, ' ', pad);
 }
 
-static void handle_string(struct fmt_state *st, int width, int left_align,
+static void handle_string(struct fmt_state *st, va_list ap, int width, int left_align,
               int precision, int has_precision)
 {
-    const char *s = va_arg(st->ap, const char *);
+    const char *s = va_arg(ap, const char *);
     size_t len;
 
     if (!s)
@@ -525,7 +525,11 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
             break;
         }
         case 'c': {
-            char ch = (char)va_arg(st.ap, int);
+            va_list ap_copy;
+
+            va_copy(ap_copy, st.ap);
+            char ch = (char)va_arg(ap_copy, int);
+            va_end(ap_copy);
 
             /* The '0' flag is defined only for the numeric
              * conversions, so %05c pads with spaces like %5c. */
@@ -534,14 +538,23 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
             emit_padded(&st, &ch, 1, 0, 0, width, left_align, 0, NULL);
             break;
         }
-        case 's':
+        case 's': {
+            va_list ap_copy;
+
+            va_copy(ap_copy, st.ap);
             zero_pad = 0;
-            handle_string(&st, width, left_align, precision,
+            handle_string(&st, ap_copy, width, left_align, precision,
                       has_precision);
+            va_end(ap_copy);
             break;
+        }
         case 'p': {
+            va_list ap_copy;
+
+            va_copy(ap_copy, st.ap);
             unsigned long long v =
-                (unsigned long long)(uintptr_t)va_arg(st.ap, void *);
+                (unsigned long long)(uintptr_t)va_arg(ap_copy, void *);
+            va_end(ap_copy);
             char buf[DIGITS_MAX];
             size_t len = utoa(buf, sizeof(buf), v, 16, 0);
             size_t digits = 16;
@@ -655,8 +668,11 @@ static void buffer_put(void *ctx, const char *data, size_t n)
 
 int vsnprintf(char *str, size_t size, const char *format, va_list ap)
 {
+    va_list ap_copy;
+    va_copy(ap_copy, ap);
     struct buffer_sink bs = { .buf = str, .size = size, .written = 0 };
-    size_t total = __libc_vformat(buffer_put, &bs, format, ap);
+    size_t total = __libc_vformat(buffer_put, &bs, format, ap_copy);
+    va_end(ap_copy);
 
     if (str && size)
         str[bs.written] = '\0';

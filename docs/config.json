@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/Omena0/fr-docs/main/config.schema.json",
-  "project_name": "Fr OS",
+  "project_name": "Fr os",
   "copyright_holder": "Omena0",
-  "project_url": "https://github.io/Omena0/Fr-OS",
+  "project_url": "https://github.com/Omena0/fr-os",
   "site_path_prefix": "/fr-os",
   "src_dir": "src",
   "out_dir": "site",
@@ -267,7 +267,7 @@
     ]
   ],
   "build": {
-    "workers": 8,
+    "workers": 16,
     "minify_html": true,
     "optimize_html": true,
     "zstd_level": 22,
@@ -289,7 +289,7 @@
     "backlinks": true,
     "related": true,
     "auto_link": true,
-    "versioning": false,
+    "versioning": true,
     "search": true,
     "code_references": true,
     "link_preview": true,

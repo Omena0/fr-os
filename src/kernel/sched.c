@@ -170,8 +170,8 @@ u64 sched_now_ticks(void)
 
 u64 sched_now_ns(void)
 {
-    /* 1 kHz tick, so a tick is a millisecond. */
-    return now_ticks() * 1000000ULL;
+    /* PIT runs at 100 Hz, so a tick is 10 ms. */
+    return now_ticks() * 10000000ULL;
 }
 
 struct task *sched_idle_task(void)

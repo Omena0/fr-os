@@ -1,7 +1,6 @@
 #include "test_framework.h"
 #include <stdio.h>
 #include <stdarg.h>
-#include <string.h>
 #include <unistd.h>
 #include <syscall.h>
 
@@ -14,9 +13,9 @@ void test_log(const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
     char buf[512];
-    vsnprintf(buf, sizeof(buf), fmt, ap);
+    size_t len = vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
-    write(STDOUT_FILENO, buf, strlen(buf));
+    write(STDOUT_FILENO, buf, len);
     write(STDOUT_FILENO, "\n", 1);
 }
 

@@ -30,7 +30,7 @@ extern char __kernel_stack_top[];
 
 /* The PML4 the kernel runs on. Per-CPU CR3 values are only needed once processes
  * exist, and those PML4s are built from copies of this one. */
-static phys_addr_t kernel_pgd;
+phys_addr_t kernel_pgd;
 
 /*
  * Physical extent of the direct map.
@@ -138,8 +138,26 @@ static phys_addr_t boot_table_alloc(void)
 
 static void tlb_flush_entry(phys_addr_t pgd, virt_addr_t virt)
 {
-    if ((read_cr3() & ~0xFFFULL) == pgd)
+    phys_addr_t cur_cr3 = read_cr3() & ~0xFFFULL;
+    if (cur_cr3 == pgd) {
         invlpg(virt);
+        return;
+    }
+    /* Check if the current CR3 shares the top-level entry (PML4) with the
+       target pgd for this virtual address. Shared PML4 indices are:
+       256 (direct map), 384 (vmalloc), 511 (kernel window). */
+    unsigned idx = PML4_ENTRY_OF(virt);
+    uint64_t *cur_pml4 = phys_to_virt(cur_cr3);
+    uint64_t *target_pml4 = phys_to_virt(pgd);
+    if (cur_pml4[idx] == target_pml4[idx]) {
+        invlpg(virt);
+    }
+}
+
+/* Public wrapper for callers outside vmm.c (the page-fault handler). */
+void vmm_tlb_flush_entry(phys_addr_t pgd, virt_addr_t virt)
+{
+    tlb_flush_entry(pgd, virt);
 }
 
 /* ------------------------------------------------- table walking ----------- */
@@ -195,6 +213,57 @@ static phys_addr_t walk(phys_addr_t pgd, virt_addr_t virt, unsigned level,
         *leaf = &entries[PT_ENTRY_OF(virt)];
     }
     return table;
+}
+
+/* Debug: walk 4-level page table and dump all PTEs/PDEs */
+void vmm_debug_walk(phys_addr_t pgd, virt_addr_t virt)
+{
+    uint64_t *pml4 = phys_to_virt(pgd);
+    unsigned pml4_idx = PML4_ENTRY_OF(virt);
+    uint64_t pml4e = pml4[pml4_idx];
+
+    klog(KLOG_DEBUG, "vmm: debug walk va=%lx pml4e=%lx ", (unsigned long)virt, (unsigned long)pml4e);
+
+    if (!(pml4e & PTE_PRESENT)) {
+        klog(KLOG_DEBUG, "pml4 not present\n");
+        return;
+    }
+
+    phys_addr_t pdpt = pml4e & PTE_ADDR_MASK;
+    uint64_t *pdpt_entries = phys_to_virt(pdpt);
+    unsigned pdpt_idx = PDPT_ENTRY_OF(virt);
+    uint64_t pdpte = pdpt_entries[pdpt_idx];
+
+    klog(KLOG_DEBUG, "pdpte=%lx ", (unsigned long)pdpte);
+
+    if (!(pdpte & PTE_PRESENT)) {
+        klog(KLOG_DEBUG, "pdpt not present\n");
+        return;
+    }
+
+    phys_addr_t pd = pdpte & PTE_ADDR_MASK;
+    uint64_t *pd_entries = phys_to_virt(pd);
+    unsigned pd_idx = PD_ENTRY_OF(virt);
+    uint64_t pde = pd_entries[pd_idx];
+
+    klog(KLOG_DEBUG, "pde=%lx ", (unsigned long)pde);
+
+    if (!(pde & PTE_PRESENT)) {
+        klog(KLOG_DEBUG, "pd not present\n");
+        return;
+    }
+
+    if (pde & PTE_PS) {
+        klog(KLOG_DEBUG, "large page, phys=%lx\n", (unsigned long)(pde & PTE_ADDR_MASK));
+        return;
+    }
+
+    phys_addr_t pt = pde & PTE_ADDR_MASK;
+    uint64_t *pt_entries = phys_to_virt(pt);
+    unsigned pt_idx = PT_ENTRY_OF(virt);
+    uint64_t pte = pt_entries[pt_idx];
+
+    klog(KLOG_DEBUG, "pte=%lx pa=%lx\n", (unsigned long)pte, (unsigned long)(pte & PTE_ADDR_MASK));
 }
 
 /* ------------------------------------------------- bootstrap mapping ------- */
@@ -596,6 +665,8 @@ static int block_insert(unsigned at, virt_addr_t start, virt_addr_t end,
     vmalloc_blocks[at].start = start;
     vmalloc_blocks[at].end = end;
     vmalloc_blocks[at].used = used;
+    vmalloc_blocks[at].frame = 0;
+    vmalloc_blocks[at].order = 0;
     vmalloc_block_count++;
     return 0;
 }
@@ -693,6 +764,73 @@ static bool vmalloc_grow(size_t size)
     return true;
 }
 
+/*
+ * Make sure the block at `idx` has real pages behind it.
+ *
+ * vmalloc_grow() maps the pages as it creates the block, so a block that has
+ * never been freed is already backed. A block that has been through vfree()
+ * is not: vfree() unmaps every page in the span and hands the frames back to
+ * pmm, because a stale pointer into a freed range should fault rather than
+ * read whatever got mapped next.
+ *
+ * The first-fit pass in vmalloc() then hands that same block out again, and
+ * the caller writes to it immediately. Without a re-backing step the pages are
+ * still unmapped, so the write faults on a kernel address that the caller was
+ * told was valid -- and the fault looks like a page table bug, because the
+ * page tables are indeed missing a mapping that somebody believes exists.
+ *
+ * Re-backing means a fresh physical run and a fresh set of PTEs, which is
+ * what vfree() took away. A block that is still mapped is left alone: it is
+ * either freshly grown or the tail of a split, and both already have pages.
+ */
+static bool vmalloc_back_block(unsigned idx)
+{
+    struct vmalloc_block *b = &vmalloc_blocks[idx];
+    size_t span = b->end - b->start;
+    size_t pages = (span + PAGE_SIZE - 1u) / PAGE_SIZE;
+    unsigned order = 0;
+    struct page *pg;
+    phys_addr_t base;
+    phys_addr_t have = 0;
+
+    if (vmm_lookup_page(kernel_pgd, b->start, &have, NULL)) {
+        /*
+         * Still mapped. A split tail carries the parent's frame, and a
+         * freshly grown block carries its own; in both cases the recorded
+         * frame is already right. Only the split *head* loses it, and the
+         * head is the first page of the run, so the physical address of the
+         * first page is the frame.
+         */
+        if (!b->frame)
+            b->frame = have & ~(phys_addr_t)(PAGE_SIZE - 1);
+        return true;
+    }
+
+    while (((size_t)1u << order) < pages)
+        order++;
+
+    pg = pmm_alloc_pages(order, GFP_KERNEL);
+    if (!pg)
+        return false;
+
+    base = page_to_phys(pg);
+
+    for (size_t off = 0; off < span; off += PAGE_SIZE) {
+        if (vmm_map_page(kernel_pgd, b->start + off,
+                     base + off, VM_READ | VM_WRITE)) {
+            /* Undo the partial mapping, then give the frames back. */
+            for (size_t r = off; r; r -= PAGE_SIZE)
+                vmm_unmap_page(kernel_pgd, b->start + r - PAGE_SIZE);
+            pmm_free_pages(pg, order);
+            return false;
+        }
+    }
+
+    b->frame = base;
+    b->order = order;
+    return true;
+}
+
 void *vmalloc_raw(size_t size)
 {
     /*
@@ -734,11 +872,15 @@ void *vmalloc(size_t size)
             virt = b->start;
             if (b->end - b->start == size) {
                 b->used = true;
+                if (!vmalloc_back_block(i))
+                    goto out_fail;
             } else {
                 /* Split the front off; the tail stays with the
                  * free entry it came from. */
                 b->start += size;
                 if (block_insert(i, virt, virt + size, true))
+                    goto out_fail;
+                if (!vmalloc_back_block(i))
                     goto out_fail;
             }
             spinlock_unlock_irqrestore(&vmalloc_lock, flags);
@@ -861,6 +1003,9 @@ void vfree(void *addr)
 
     if (frame)
         pmm_free_pages(phys_to_page(frame), order);
+
+    vmalloc_blocks[i].frame = 0;
+    vmalloc_blocks[i].order = 0;
 }
 
 /* ------------------------------------------------- kernel stacks ----------- */
