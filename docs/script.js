@@ -1,3 +1,4 @@
+// version: 1
 document.addEventListener('DOMContentLoaded', () => {
   const STORAGE_KEY = 'pjb-sidebar-state';
   const sitePrefixRaw = (document.documentElement.getAttribute('data-site-prefix') || '').trim();
@@ -42,11 +43,42 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ── Highlight current page ──────────────────────────────────
-  const currentPage = location.pathname.split('/').pop() || 'index.html';
+  const currentPath = location.pathname;
+  const currentPage = currentPath.split('/').pop() || 'index.html';
+  // Normalize the current path relative to the site root (strip site prefix if present)
+  const sitePrefix = (document.querySelector('meta[name="site-prefix"]') || {}).content || '';
+  const currentRelative = sitePrefix && currentPath.startsWith(sitePrefix)
+    ? currentPath.slice(sitePrefix.length).replace(/^\//, '') || 'index.html'
+    : currentPath.replace(/^\//, '') || 'index.html';
+// Resolve a relative href (e.g. '../index.html' or 'core/entity.html') to a
+    // site-root-relative path so we can compare with currentRelative.
+    function resolveHrefToRoot(href) {
+      if (!href || href.startsWith('#') || href.startsWith('http') || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('javascript:')) {
+        return null;
+      }
+      // Strip query/hash
+      const clean = href.split('?')[0].split('#')[0];
+      if (!clean) return null;
+      // Resolve relative to current page's directory
+      const currentDir = currentRelative.includes('/')
+        ? currentRelative.slice(0, currentRelative.lastIndexOf('/') + 1)
+        : '';
+      const parts = (currentDir + clean).split('/');
+      const resolved = [];
+      for (const p of parts) {
+        if (p === '' || p === '.') continue;
+        if (p === '..') resolved.pop();
+        else resolved.push(p);
+      }
+      return resolved.join('/') || 'index.html';
+    }
   document.querySelectorAll('.sidebar-links a').forEach(a => {
     const href = a.getAttribute('href');
     if (href && !href.startsWith('#')) {
-      if (href.split('/').pop() === currentPage) a.classList.add('active');
+      const resolved = resolveHrefToRoot(href);
+      if (resolved === currentRelative || href.split('/').pop() === currentPage) {
+        a.classList.add('active');
+      }
     }
   });
 
@@ -700,7 +732,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Backlinks & Related pages ───────────────────────────────
   function renderBacklinksAndRelated() {
     if (!searchIndex || !searchIndex.length) return;
-    const me = searchIndex.find(p => (p.url || '').split('/').pop() === currentPage);
+    // Match current page by full relative path (handles directory-tree output)
+    const me = searchIndex.find(p => {
+      const pUrl = (p.url || '').replace(/^\//, '');
+      return pUrl === currentRelative || pUrl.split('/').pop() === currentPage;
+    });
     if (!me) return;
     const content = document.querySelector('.content');
     if (!content) return;
@@ -819,10 +855,12 @@ document.addEventListener('DOMContentLoaded', () => {
       document.querySelectorAll('.sidebar-links a').forEach(a => {
         const href = a.getAttribute('href') || '';
         if (!href || href.startsWith('#')) return;
-        const page = href.split('/').pop().split('?')[0].split('#')[0];
+        // Match by full relative path (handles directory-tree output like 'core/entity.html')
+        const page = href.replace(/^\//, '').split('?')[0].split('#')[0];
         const base = page.replace(/\.html$/, '');
         const li = a.closest('li') || a.parentElement;
-        if (!allowed.has(base)) {
+        // Match by full slug or basename (basename for backwards compat)
+        if (!allowed.has(base) && !allowed.has(base.replace(/.*\//, ''))) {
           if (li) li.style.display = 'none'; else a.style.display = 'none';
         }
         else if (li) li.style.display = '';
@@ -857,7 +895,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // fetching the source markdown and render it client-side using
     // `marked` (included via CDN in the template).
     if (!meta.repo) return;
-    const page = currentPage || 'index.html';
+    const page = currentRelative || 'index.html';
     // Use the site path embedded by the builder (e.g. "site", "docs/site",
     // or a custom build.out_dir value) instead of a hardcoded "docs/site".
     const sitePath = meta.site_path || 'docs/site';
@@ -896,10 +934,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Markdown fallback: attempt to fetch the source markdown for this
     // page at that commit. The build embeds a `src_map` in `git_meta`
-    // mapping page basenames to their docs/src path.
+    // mapping page slugs to their docs/src path.
     try {
       const key = page.replace(/\.html$/, '');
-      const srcPath = meta.src_map && meta.src_map[key];
+      // src_map keys are slugs (e.g. 'core/entity'); look up by full
+      // relative path first, then fall back to basename for legacy builds.
+      let srcPath = (meta.src_map && meta.src_map[key]);
+      if (!srcPath && meta.src_map) {
+        const base = key.replace(/.*\//, '');
+        srcPath = meta.src_map[base];
+      }
       if (srcPath) {
         const mdUrl = `https://raw.githubusercontent.com/${meta.repo}/${commit}/${srcPath}`;
         try {
@@ -965,14 +1009,15 @@ document.addEventListener('DOMContentLoaded', () => {
       // If the builder provided pages_by_commit info, only include versions
       // whose commit contains the current page.
       const pagesByCommit = meta.pages_by_commit || {};
-      const pageBase = (currentPage || 'index.html').replace(/\.html$/, '');
+      const pageBase = (currentRelative || currentPage || 'index.html').replace(/\.html$/, '');
+      const pageBaseName = pageBase.replace(/.*\//, '');
       const useFilter = pagesByCommit && Object.keys(pagesByCommit).length > 0;
       for (const v of list) {
         if (!v || !v.commit || !v.code) continue;
         if (!codeRE.test(String(v.code))) continue;
         if (useFilter) {
           const avail = pagesByCommit[v.commit] || pagesByCommit[v.commit.slice(0, 8)];
-          if (!avail || !avail.includes(pageBase)) continue;
+          if (!avail || (!avail.includes(pageBase) && !avail.includes(pageBaseName))) continue;
         }
         const opt = document.createElement('option');
         // Use the short version code as the option value so ?ver=1A is compact
@@ -987,16 +1032,19 @@ document.addEventListener('DOMContentLoaded', () => {
       // Fallback: show latest commit and recent commits (but filter by availability if possible)
       const commits = meta.commits || [];
       const pagesByCommit = meta.pages_by_commit || {};
-      const pageBase = (currentPage || 'index.html').replace(/\.html$/, '');
+      const pageBase = (currentRelative || currentPage || 'index.html').replace(/\.html$/, '');
+      const pageBaseName = pageBase.replace(/.*\//, '');
       const useFilter = pagesByCommit && Object.keys(pagesByCommit).length > 0;
       if (commits.length) {
         const latest = commits[commits.length - 1];
-        if (!useFilter || (pagesByCommit[latest] && pagesByCommit[latest].includes(pageBase))) {
+        const availLatest = pagesByCommit[latest] || [];
+        if (!useFilter || availLatest.includes(pageBase) || availLatest.includes(pageBaseName)) {
           const opt = document.createElement('option'); opt.value = latest; opt.textContent = latest.slice(0, 8); opt.dataset.commit = latest.slice(0, 8); sel.appendChild(opt);
         }
         const recent = commits.slice(-10).reverse();
         for (const c of recent) {
-          if (useFilter && (!(pagesByCommit[c] && pagesByCommit[c].includes(pageBase)))) continue;
+          const avail = pagesByCommit[c] || [];
+          if (useFilter && !avail.includes(pageBase) && !avail.includes(pageBaseName)) continue;
           const o = document.createElement('option'); o.value = c; o.textContent = c.slice(0, 8); o.dataset.commit = c.slice(0, 8); sel.appendChild(o);
         }
       }
@@ -1498,11 +1546,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function hidePreviewTooltip() {
     if (previewHideTimeout) clearTimeout(previewHideTimeout);
-    previewHideTimeout = setTimeout(() => {
-      if (previewTooltip && !previewTooltip.matches(':hover')) {
-        previewTooltip.style.opacity = '0';
-      }
-    }, 200);
+    previewHideTimeout = null;
+    if (previewTooltip) {
+      previewTooltip.style.opacity = '0';
+      // Remove from DOM after fade completes so it doesn't block
+      // pointer events on the page below.
+      const el = previewTooltip;
+      setTimeout(() => {
+        if (el.parentNode && el.style.opacity === '0') {
+          el.parentNode.removeChild(el);
+          previewTooltip = null;
+        }
+      }, 200);
+    }
   }
 
   function initLinkPreviews() {
@@ -1560,6 +1616,7 @@ document.addEventListener('DOMContentLoaded', () => {
       link.addEventListener('mouseenter', async (e) => {
         lastMouseX = e.clientX;
         lastMouseY = e.clientY;
+        if (hoverTimeout) clearTimeout(hoverTimeout);
         hoverTimeout = setTimeout(async () => {
           if (isCodeRef) {
             const refId = link.dataset.coderefId;
@@ -1617,6 +1674,22 @@ document.addEventListener('DOMContentLoaded', () => {
             }
           }
         }, 300); // 300ms delay before showing preview
+      });
+
+      // Hide the tooltip when the link loses hover (with a small delay to
+      // allow moving the mouse into the tooltip itself).
+      link.addEventListener('mouseleave', () => {
+        if (hoverTimeout) {
+          clearTimeout(hoverTimeout);
+          hoverTimeout = null;
+        }
+        // Small delay so the user can move the mouse into the tooltip
+        // without it disappearing.
+        setTimeout(() => {
+          if (previewTooltip && previewTooltip.style.opacity === '1') {
+            hidePreviewTooltip();
+          }
+        }, 150);
       });
     });
   }
