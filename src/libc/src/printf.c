@@ -154,7 +154,11 @@ static void emit_padded(struct fmt_state *st, const char *body, size_t len,
 static void handle_string(struct fmt_state *st, va_list ap, int width, int left_align,
               int precision, int has_precision)
 {
-    const char *s = va_arg(ap, const char *);
+    va_list temp_ap;
+    va_copy(temp_ap, st->ap);
+    const char *s = va_arg(temp_ap, const char *);
+    va_end(temp_ap);
+    (void)va_arg(st->ap, const char *);
     size_t len;
 
     if (!s)
