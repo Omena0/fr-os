@@ -18,6 +18,20 @@ struct fmt_state {
     va_list ap;
 };
 
+/* DEBUG: Enable detailed logging */
+#define DEBUG_VA_ARG 1
+
+static int debug_fd = -1;
+
+/* Minimal debug output */
+static void debug_out(const char *fmt, ...) {
+    if (DEBUG_VA_ARG) {
+        /* For kernel, skip debug output to avoid complexity */
+    }
+}
+
+/* ... rest of file remains the same ... */
+
 /*
  * A number needs at most 64 digits, and that is only for base 2; the buffer is
  * sized for the worst case rather than for hex so that %b of a 64-bit value is
@@ -98,6 +112,12 @@ static void emit_padded(struct fmt_state *st, const char *body, size_t len,
             size_t precision, bool has_precision, int width,
             bool left_align, bool zero_pad, const char *sign)
 {
+    if (DEBUG_VA_ARG) {
+        debug_out("[emit_padded] body=%p len=%zu prec=%zu has_prec=%d width=%d left=%d zero=%d sign=%s\n",
+            (void*)body, len, precision, has_precision, width, left_align, zero_pad,
+            sign ? sign : "(null)");
+    }
+
     size_t sign_len = sign ? strlen(sign) : 0;
     size_t digit_pad;
     size_t width_pad;
@@ -154,6 +174,11 @@ static void handle_string(struct fmt_state *st, int width, bool left_align,
 {
     const char *s = va_arg(st->ap, const char *);
     size_t len;
+
+    if (DEBUG_VA_ARG) {
+        debug_out("[handle_string] va_arg returned %p (width=%d left=%d prec=%d has_prec=%d)\n",
+            (void*)s, width, left_align, precision, has_precision);
+    }
 
     if (!s)
         s = "(null)";

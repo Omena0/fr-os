@@ -1,6 +1,7 @@
 #include "test_framework.h"
 #include <stdio.h>
 #include <stdarg.h>
+#include <string.h>
 #include <unistd.h>
 #include <syscall.h>
 
@@ -12,14 +13,26 @@ static const char *current_test = NULL;
 void test_log(const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
-    fprintf(stderr, "DEBUG test_log: fmt='%s'\n", fmt);
-    /* Print the arguments being passed */
-    /* We can't easily print variadic args generically, but we can print the format */
+    /* DEBUG: Log that test_log is called with arguments */
+    write(STDOUT_FILENO, "[DEBUG] test_log called with fmt: ", 40);
+    write(STDOUT_FILENO, fmt, strlen(fmt));
+    write(STDOUT_FILENO, "\n", 1);
+    
     char buf[512];
     size_t len = vsnprintf(buf, sizeof(buf), fmt, ap);
+    
+    /* DEBUG: Log completion */
+    {
+        char len_str[32];
+        int n = snprintf(len_str, sizeof(len_str), "[DEBUG] vsnprintf completed, len=%zu\n", len);
+        if (n > 0) write(STDOUT_FILENO, len_str, (size_t)n);
+    }
+    
     va_end(ap);
     write(STDOUT_FILENO, buf, len);
     write(STDOUT_FILENO, "\n", 1);
+    
+    write(STDOUT_FILENO, "[DEBUG] test_log finished\n", 27);
 }
 
 void test_fail(const char *file, int line, const char *cond, const char *msg) {
