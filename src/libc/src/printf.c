@@ -155,11 +155,17 @@ static void handle_string(struct fmt_state *st, int width, int left_align,
               int precision, int has_precision)
 {
     const char *s = va_arg(st->ap, const char *);
-
     size_t len;
-
-    if (!s)
-        s = "(null)";
+    /*
+     * If va_arg returns a garbage pointer (near NULL), emit a visible
+     * marker instead of crashing. This can happen if va_list copying
+     * goes wrong. Better to show "<bad-ptr>" than panic the kernel.
+     */
+    if ((uintptr_t)s < 0x1000) {
+        char dbg[] = "<bad-ptr>";
+        emit_padded(st, dbg, sizeof(dbg)-1, 0, 0, width, left_align, 0, NULL);
+        return;
+    }
     /*
      * strnlen, not strlen followed by a clamp. `%.4s` is specified to
      * read at most four bytes and stop: a bounded field is how a program
@@ -525,7 +531,7 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
                     alt_prefix);
             break;
         }
-case 'c': {
+        case 'c': {
             va_list ap_copy;
 
             va_copy(ap_copy, st.ap);
@@ -662,12 +668,8 @@ static void buffer_put(void *ctx, const char *data, size_t n)
 
 int vsnprintf(char *str, size_t size, const char *format, va_list ap)
 {
-    va_list ap_copy;
-    va_copy(ap_copy, ap);
     struct buffer_sink bs = { .buf = str, .size = size, .written = 0 };
-    size_t total = __libc_vformat(buffer_put, &bs, format, ap_copy);
-    va_end(ap_copy);
-
+    size_t total = __libc_vformat(buffer_put, &bs, format, ap);
     if (str && size)
         str[bs.written] = '\0';
     /* The return value is what the format *would* have produced, so the
