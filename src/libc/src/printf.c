@@ -19,6 +19,8 @@
 #include <stddef.h>
 #include <stdarg.h>
 #include <string.h>
+#include <stdio.h>
+#include <unistd.h>
 
 /* Length modifier encoding. */
 #define LEN_INT        0
@@ -154,7 +156,10 @@ static void emit_padded(struct fmt_state *st, const char *body, size_t len,
 static void handle_string(struct fmt_state *st, int width, int left_align,
               int precision, int has_precision)
 {
+    write(STDERR_FILENO, "DEBUG handle_string: entering\n", 28);
+
     const char *s = va_arg(st->ap, const char *);
+
     size_t len;
     /*
      * If va_arg returns a garbage pointer (near NULL), emit a visible
@@ -323,6 +328,7 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
 {
     struct fmt_state st = { .sink = sink, .ctx = ctx, .total = 0 };
     const char *p = fmt;
+
 
     /*
      * The caller's va_list is consumed by an unknown number of arguments,

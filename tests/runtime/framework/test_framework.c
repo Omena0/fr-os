@@ -12,6 +12,9 @@ static const char *current_test = NULL;
 void test_log(const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
+    fprintf(stderr, "DEBUG test_log: fmt='%s'\n", fmt);
+    /* Print the arguments being passed */
+    /* We can't easily print variadic args generically, but we can print the format */
     char buf[512];
     size_t len = vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
@@ -66,6 +69,7 @@ int test_run_suite(const struct test_suite *suite) {
     test_failed = 0;
     test_skipped = 0;
 
+    fprintf(stderr, "DEBUG test_run_suite: suite->name=%p ('%s')\n", (void*)suite->name, suite->name);
     test_log("=== Test Suite: %s ===", suite->name);
     
     if (suite->setup) {
@@ -100,6 +104,8 @@ int test_run_suite(const struct test_suite *suite) {
         suite->teardown();
     }
     
+    fprintf(stderr, "DEBUG test_run_suite: suite->name=%p ('%s'), passed=%d, failed=%d, skipped=%d\n",
+            (void*)suite->name, suite->name, test_passed, test_failed, test_skipped);
     test_log("=== Suite %s: %d passed, %d failed, %d skipped ===",
              suite->name, test_passed, test_failed, test_skipped);
     
