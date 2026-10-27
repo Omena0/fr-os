@@ -574,6 +574,14 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
             break;
         }
         case 'c': {
+            /*
+             * On x86-64 the character argument is promoted to int in registers,
+             * so a single va_arg(..., int) moves the cursor exactly once and
+             * nothing else touches st.ap. The prior code va_copied to a private
+             * list and then drove an extra va_arg off st.ap, shifting every
+             * subsequent conversion by one slot (so the next %s/%p read
+             * 0xa). Do not do that.
+             */
             char ch = (char)va_arg(st.ap, int);
 
             /* The '0' flag is defined only for the numeric
