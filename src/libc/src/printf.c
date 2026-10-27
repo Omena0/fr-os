@@ -532,14 +532,9 @@ size_t __libc_vformat(void (*sink)(void *ctx, const char *data, size_t n),
             break;
         }
         case 'c': {
-            va_list ap_copy;
+            char ch = (char)va_arg(st.ap, int);
 
-            va_copy(ap_copy, st.ap);
-            char ch = (char)va_arg(ap_copy, int);
-            va_arg(st.ap, int);
-            va_end(ap_copy);
-
-            /* The \'0\' flag is defined only for the numeric
+            /* The '0' flag is defined only for the numeric
              * conversions, so %05c pads with spaces like %5c. */
             zero_pad = 0;
 
