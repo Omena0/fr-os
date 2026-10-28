@@ -54,5 +54,6 @@
 #define ENOBUFS         105
 #define EADDRINUSE      98
 #define EOVERFLOW       75
+#define EUNKNOWN        999
 
 #endif /* UAPI_ERRNO_H */

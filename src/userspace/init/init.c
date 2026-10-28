@@ -16,6 +16,9 @@
 #include <version.h>
 #include <sys/auxv.h>
 
+/* Internal libc syscall wrapper */
+extern int sys_shutdown(int fn);
+
 /* Wait status macros */
 #define WIFEXITED(wstatus)   (((wstatus) & 0xFF) == 0)
 #define WEXITSTATUS(wstatus)  (((wstatus) & 0xFF00) >> 8)
@@ -447,9 +450,8 @@ static int dispatch(int argc, char **argv)
             say("run: program was killed by signal %d", WTERMSIG(status));
         }
     } else if (strcmp(argv[0], "exit") == 0) {
-        say("exit: reboot syscall is not implemented yet");
-        say("exit: the kernel exposes no power-management interface");
-        say("exit: refusing to halt, continuing the REPL");
+        say("exit: Shutting down.");
+        sys_shutdown(1);  /* halt the CPU */
     } else {
         say("unknown command '%s' - try 'help'", argv[0]);
     }

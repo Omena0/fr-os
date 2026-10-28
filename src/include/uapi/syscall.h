@@ -105,8 +105,9 @@
 #define SYS_getcpu      201u
 #define SYS_gfx_info    202u
 #define SYS_gfx_present 203u
-#define SYS_screen_claim 204u
+#define SYS_screen_claim  204u
 #define SYS_screen_release 205u
+#define SYS_shutdown        206u
 
 /* Highest number the kernel will accept before returning -ENOSYS without
  * consulting the dispatch table. Bounds-checking this is what keeps a garbage

@@ -291,6 +291,23 @@ static long sc_clock_gettime(struct syscall_regs *r)
     return 0;
 }
 
+static long sc_shutdown(struct syscall_regs *r)
+{
+    uint16_t fn = (uint16_t)(s16)arg0(r);
+
+    switch (fn) {
+        case 0: /* ACPI power-off via port 0xB2, bit 0. */
+            outb(0xB2, 0x01);
+            break;
+        case 1: /* Halt the CPU: HLT loop so even a wrong port does not reboot. */
+            __asm__ __volatile__("hlt" ::: "memory");
+            return -EUNKNOWN; // Unknown error
+        default:
+            return -EINVAL;
+        }
+    return 0;
+}
+
 /* ------------------------------------------------------------- files ------- */
 
 static long sc_open(struct syscall_regs *r)
@@ -1337,6 +1354,7 @@ void syscall_init(void)
     syscall_table[SYS_gfx_present] = sc_gfx_present;
     syscall_table[SYS_mremap] = sc_mremap;
     syscall_table[SYS_mlock] = sc_mlock;
+    syscall_table[SYS_shutdown] = sc_shutdown;
 
     /*
      * STAR carries both selector bases. SYSCALL loads CS from bits 47:32

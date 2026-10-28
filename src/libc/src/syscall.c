@@ -302,3 +302,8 @@ long sys_get_tls_base(void)
 {
     return __syscall0(SYS_get_tls_base);
 }
+
+int sys_shutdown(int fn)
+{
+    return (int)check0(__syscall1(SYS_shutdown, fn));
+}
