@@ -48,7 +48,7 @@ bool tty_screen_owned(void);
 u32 tty_screen_owner_pid(void);
 
 /*
- * Attach the ring storage, install the keyboard handler and turn scanning on.
+ * Attach the ring storage, bring up the PS/2 keyboard driver, and unmask COM1.
  *
  * Must be called from kmain after idt_init() -- it calls idt_set_handler(), and
  * it deliberately installs the keyboard handler *before* unmasking the line, so
@@ -67,6 +67,9 @@ void tty_write(const char *buf, size_t count);
 /* Bytes dropped since the last call, reported once per burst. */
 u64 tty_write_dropped(void);
 u64 tty_read_dropped(void);
+
+/* Push one byte into the tty input ring. Called from interrupt context. */
+void tty_in_push(char c);
 
 #endif /* TTY_H */
 

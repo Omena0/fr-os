@@ -28,5 +28,6 @@ void gfx_fill_triangle(struct gfx_canvas *canvas, int x0, int y0, int x1, int y1
                        int x2, int y2, uint32_t color);
 int gfx_present(struct gfx_canvas *canvas);
 int gfx_claim_screen(void);
+void gfx_claim_screen_release(void);
 
 #endif

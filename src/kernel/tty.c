@@ -26,6 +26,8 @@
 #include <types.h>
 #include <cpu_features.h>
 #include <drivers/serial.h>
+#include <drivers/ps2kbd.h>
+#include <drivers/ps2kbd.h>
 
 KLOG_SUBSYSTEM("tty");
 
@@ -305,7 +307,7 @@ static struct task *tty_waiter;
  * overwritten loses data it had already consumed; the newest is the one no
  * reader has committed to yet.
  */
-static void tty_in_push(char c)
+void tty_in_push(char c)
 {
     struct task *wake = NULL;
     u64 flags = spinlock_irqsave(&in_lock);
@@ -421,7 +423,6 @@ static void tty_poll_serial(void)
  * idt.c left both lines masked; IRQ1 is bit 1 of that byte and IRQ4 is bit 4.
  */
 #define PIC1_DATA_PORT       0x21
-#define PIC1_IRQ_KEYBOARD_BIT 0x02
 #define PIC1_IRQ_COM1_BIT    0x10
 
 /*
@@ -654,425 +655,31 @@ u64 tty_read_dropped(void)
     return n;
 }
 
-/* --------------------------------------------------------- PS/2 keyboard ---- */
-
+/* ------------------------------------------------------- PS/2 keyboard ---- */
 /*
- * 8042 controller ports. There is no ps2_8042 helper in io.h — only the raw
- * inb/outb pair — so the three registers and the status bits they share are
- * named here.
+ * Keystroke delivery callback for the PS/2 keyboard driver.
+ * The driver translates scancodes and calls this with the resulting ASCII char;
+ * this wrapper feeds it into the tty input ring, where tty_read() will pick it up
+ * and the echo logic in tty_in_push() will display it.
  */
-#define PS2_DATA     0x60
-#define PS2_STATUS   0x64
-#define PS2_CMD      0x64
-
-#define PS2_STATUS_OBF  0x01   /* output buffer full: a byte is waiting */
-#define PS2_STATUS_IBF  0x02   /* input buffer full: the controller is busy */
-#define PS2_STATUS_SYS  0x04   /* the byte came from the aux port, not the kbd */
-
-/* 8042 commands. */
-#define PS2_CMD_READ_CONFIG   0x20
-#define PS2_CMD_WRITE_CONFIG  0x60
-#define PS2_CMD_ENABLE_KBD    0xAE
-#define PS2_CMD_DISABLE_KBD   0xAD
-#define PS2_CMD_SELF_TEST     0xAA
-
-/* Keyboard commands, sent to the data port. */
-#define KBD_CMD_ENABLE_SCAN   0xF4
-#define KBD_CMD_DISABLE_SCAN  0xF5
-#define KBD_CMD_RESET         0xFF
-
-/* Configuration byte bits. */
-#define PS2_CFG_KBD_INT   0x01   /* raise IRQ1 for keyboard bytes */
-#define PS2_CFG_KBD_CLOCK 0x10   /* 1 = keyboard clock held low, silent */
-#define PS2_CFG_TRANSLATE 0x40   /* translate set 2 into set 1 scancodes */
-
-/*
- * Every 8042 handshake here is a poll, and a poll with no bound is a hang: a
- * controller that is absent, wedged, or a machine with no PS/2 at all answers
- * nothing and never will. Every wait below is therefore a wait that can fail,
- * and the caller reports the failure and carries on with the terminal half
- * working rather than the machine stopped.
- */
-#define PS2_SPIN_LIMIT (1u << 20)
-
-/*
- * How long a 8042 handshake is waited for, in microseconds.
- *
- * This used to be a spin count -- 1 << 20 iterations, each with a port write in
- * `io_wait()` -- which is not a bound on anything. Under emulation a port write
- * is not free, and one timed-out wait was measured at **7.2 seconds**, with the
- * kernel stalled between `syscall entry installed` and the first `tty:` line.
- * Everything after it looked like a hang, and a boot that appears to freeze in
- * tty_init is indistinguishable from one that froze for a reason worth looking
- * at.
- *
- * A deadline in real time is what the caller actually means by "bounded", and it
- * behaves the same on every machine and under every accelerator. A millisecond is
- * far longer than any real 8042 takes to answer -- the parts are specified in
- * microseconds -- and far shorter than anyone can notice if it expires.
- */
-#define PS2_WAIT_US 1000
-
-/* Microseconds to TSC ticks, from the frequency cpu_features_init() measured.
- *
- * Falls back to a plausible constant when the frequency is unknown rather than
- * returning 0: a zero-length deadline would turn every wait into an immediate
- * failure, which looks like a missing controller rather than a missing
- * measurement. */
-static u64 ps2_us_to_tsc(u64 us)
+static void keyboard_callback(char c)
 {
-    if (!cpu_features.tsc_khz)
-        return us * 3000;    /* ~3 GHz, the common case */
-    return us * cpu_features.tsc_khz / 1000;
+    tty_in_push(c);
 }
-
-static bool ps2_wait(uint8_t mask, bool set)
-{
-    u64 deadline = rdtsc() + (u64)ps2_us_to_tsc(PS2_WAIT_US);
-
-    for (;;) {
-        uint8_t status = inb(PS2_STATUS);
-
-        if (!!(status & mask) == set)
-            return true;
-        if (rdtsc() >= deadline)
-            return false;
-        io_wait();
-    }
-}
-
-static bool ps2_write_port(uint16_t port, uint8_t value)
-{
-    if (!ps2_wait(PS2_STATUS_IBF, false))
-        return false;
-    outb(port, value);
-    return true;
-}
-
-/* Read one byte from the data port, assuming the caller has already established
- * that the output buffer is full. Returns 0 if it is not, so a spurious IRQ
- * cannot turn into a phantom keystroke. */
-static uint8_t ps2_read_data(void)
-{
-    if (!ps2_wait(PS2_STATUS_OBF, true))
-        return 0;
-    return inb(PS2_DATA);
-}
-
-/* Throw away anything the controller already has queued. Done before the line
- * is unmasked, because a byte produced by the BIOS's own probing would
- * otherwise arrive as the first keystroke of the session. */
-static void ps2_flush(void)
-{
-    unsigned int guard = 1024;
-
-    while ((inb(PS2_STATUS) & PS2_STATUS_OBF) && guard--)
-        (void)inb(PS2_DATA);
-}
-
-/* Consume one controller response, leaving the data register. Used to swallow the
- * 0xFA that acknowledges a command the kernel just sent.
- *
- * Takes the command byte so the failure can name it. "8042 answered 0x00 where
- * an ack was expected" identifies the controller's mood and nothing else: there
- * are several steps in the sequence and no way to tell which of them produced
- * it, which is how an unacknowledged enable-scanning -- the step that decides
- * whether a keystroke can raise an interrupt at all -- can look like a problem
- * with the keyboard rather than with the sequence.
- */
-static void ps2_expect_ack(uint8_t cmd, uint8_t want)
-{
-    uint8_t resp = ps2_read_data();
-
-    if (resp != want)
-        klog(KLOG_WARN, "tty: 8042 command 0x%02x answered 0x%02x, "
-             "expected 0x%02x\n", (unsigned)cmd, (unsigned)resp,
-             (unsigned)want);
-}
-
-/* ---------------------------------------------- scancode translation -------- */
-
-/* Make codes 0x00-0x3F, set 1, unshifted. A zero entry means the key produces no
- * byte: it is either a modifier, a function key, or part of a sequence this
- * driver does not decode yet. */
-static const char scancode_base[0x40] = {
-    [0x01] = 0x1B,                    /* Esc */
-    [0x02] = '1', [0x03] = '2', [0x04] = '3', [0x05] = '4',
-    [0x06] = '5', [0x07] = '6', [0x08] = '7', [0x09] = '8',
-    [0x0A] = '9', [0x0B] = '0',
-    [0x0C] = '-', [0x0D] = '=',
-    [0x0E] = '\b',                    /* Backspace */
-    [0x0F] = '\t',                    /* Tab */
-    [0x10] = 'q', [0x11] = 'w', [0x12] = 'e', [0x13] = 'r',
-    [0x14] = 't', [0x15] = 'y', [0x16] = 'u', [0x17] = 'i',
-    [0x18] = 'o', [0x19] = 'p',
-    [0x1A] = '[', [0x1B] = ']',
-    [0x1C] = '\n',                    /* Enter */
-    [0x1E] = 'a', [0x1F] = 's', [0x20] = 'd', [0x21] = 'f',
-    [0x22] = 'g', [0x23] = 'h', [0x24] = 'j', [0x25] = 'k',
-    [0x26] = 'l',
-    [0x27] = ';', [0x28] = '\'', [0x29] = '`',
-    [0x2B] = '\\',
-    [0x2C] = 'z', [0x2D] = 'x', [0x2E] = 'c', [0x2F] = 'v',
-    [0x30] = 'b', [0x31] = 'n', [0x32] = 'm',
-    [0x33] = ',', [0x34] = '.', [0x35] = '/',
-    [0x39] = ' ',
-};
-
-/*
- * The shifted entries that are not simply an upper-case letter. Letters are
- * derived instead of tabled, so this table is only the punctuation that moves,
- * and adding a keyboard layout means editing punctuation rather than 26 letters
- * that are all the same transformation.
- */
-static const char scancode_shifted[0x40] = {
-    [0x02] = '!', [0x03] = '@', [0x04] = '#', [0x05] = '$',
-    [0x06] = '%', [0x07] = '^', [0x08] = '&', [0x09] = '*',
-    [0x0A] = '(', [0x0B] = ')',
-    [0x0C] = '_', [0x0D] = '+',
-    [0x1A] = '{', [0x1B] = '}',
-    [0x27] = ':', [0x28] = '"', [0x29] = '~',
-    [0x2B] = '|',
-    [0x33] = '<', [0x34] = '>', [0x35] = '?',
-};
-
-/* Make codes with no ASCII of their own. */
-#define SC_LSHIFT 0x2A
-#define SC_RSHIFT 0x36
-#define SC_LCTRL  0x1D
-
-static bool shift_held;
-static bool ctrl_held;
-
-/*
- * True once an 0xE0 prefix has been seen. The prefix itself is not a key, and
- * the byte that follows belongs to the extended block — the arrows, keypad
- * Enter, right Ctrl — most of which reuse make codes that mean letters on the
- * main block. Swallowing only the prefix would make an arrow key type a
- * letter, so the whole two-byte sequence is dropped.
- */
-static bool extended_pending;
-
-static char tty_translate(uint8_t make)
-{
-    char c;
-
-    if (make >= ARRAY_SIZE(scancode_base))
-        return 0;
-
-    c = scancode_base[make];
-    if (c == 0)
-        return 0;
-
-    /* Ctrl+letter: convert A-Z to 0x01-0x1A. */
-    if (ctrl_held && c >= 'a' && c <= 'z')
-        return (char)(c & 0x1F);
-    if (ctrl_held && c >= 'A' && c <= 'Z')
-        return (char)(c & 0x1F);
-
-    if (!shift_held)
-        return c;
-
-    char s = scancode_shifted[make];
-    if (s != 0)
-        return s;
-    if (c >= 'a' && c <= 'z')
-        return (char)(c - ('a' - 'A'));
-    return c;
-}
-
-/* One scancode from port 0x60. Called from the IRQ handler, with interrupts
- * off, so the decoder state below needs no lock of its own. */
-static void keyboard_scancode(uint8_t sc)
-{
-    bool make = (sc & 0x80) == 0;
-    uint8_t code = make ? sc : (uint8_t)(sc & 0x7F);
-    char c;
-
-    /* Set 2 IDs, command acknowledgements, resend requests, and errors. None
-     * of them is a keystroke, and treating 0xFA as a key would put a byte
-     * nobody typed into the read stream on every command the kernel issues. */
-    if (sc == 0xFA || sc == 0xFE || sc == 0xFF || (sc >= 0xF0 && sc <= 0xFD)) {
-        /* A resend means the controller rejected the last command byte.
-         * The commands this driver sends are all self-contained, so the
-         * recovery is to drop the request and let the next one proceed; a
-         * command that genuinely needs repeating will be re-issued by
-         * whatever noticed the failure. */
-        return;
-    }
-
-    /* Prefix, not a key. 0xE0 introduces an extended key. Pause uses a
-     * six-byte sequence; ignore it as a whole so its trailing bytes cannot
-     * turn into spurious characters. */
-    if (sc == 0xE1) {
-        extended_pending = true;
-        return;
-    }
-    if (sc == 0xE0) {
-        extended_pending = true;
-        return;
-    }
-
-    if (extended_pending) {
-        extended_pending = false;
-        if (make) {
-            const char *seq = NULL;
-            switch (code) {
-            case 0x48: seq = "\033[A"; break; /* up */
-            case 0x50: seq = "\033[B"; break; /* down */
-            case 0x4D: seq = "\033[C"; break; /* right */
-            case 0x4B: seq = "\033[D"; break; /* left */
-            default: break;
-            }
-            if (seq)
-                while (*seq)
-                    tty_in_push(*seq++);
-        }
-        return;
-    }
-
-    /* Everything else in 0xE0-0xFF is a controller response or an ID, not a
-     * key. The make codes this driver decodes all live below 0x80. */
-    if (sc > 0xE0)
-        return;
-
-    /* Shift is state, not input. It has to be tracked on make and break
-     * because a terminal is entirely shift-driven: nothing is readable while
-     * it is held, and leaving it latched after the key is released turns
-     * every later key into upper case. */
-    if (code == SC_LSHIFT || code == SC_RSHIFT) {
-        shift_held = make;
-        return;
-    }
-    if (code == SC_LCTRL) {
-        ctrl_held = make;
-        return;
-    }
-
-    /* Only make codes produce input. A break code means the key came back up,
-     * and feeding it in would double every keystroke. */
-    if (!make)
-        return;
-
-    c = tty_translate(code);
-    if (c != 0)
-        tty_in_push(c);
-}
-
-/* Master 8259 data port and the keyboard's line bit are defined with the COM1
- * ones above, so that both unmasked lines are named in the same place. */
-
-static void keyboard_irq(struct interrupt_frame *frame)
-{
-    uint8_t status = inb(PS2_STATUS);
-
-    /*
-     * Drain the output buffer, not one byte of it.
-     *
-     * Reading the status port clears the controller's interrupt line, and a
-     * new one is only generated when a byte arrives *after* that read. So a
-     * handler that takes one byte and returns discards the line while more
-     * bytes are still sitting there, and the rest of the burst is never
-     * delivered -- there is nothing left to interrupt for. Measured: five
-     * keystrokes injected into the guest produced one IRQ, and one character.
-     *
-     * Bounded by the same OBF bit that gates the loop, so it terminates as
-     * soon as the controller is empty, and it cannot spin on a controller
-     * that never clears OBF for longer than one pass is bounded by the
-     * scancode queue draining.
-     */
-    for (unsigned guard = 0; guard < 32; guard++) {
-        if (!(status & PS2_STATUS_OBF))
-            return;
-
-        /* The byte is from the mouse, which shares the controller. It has
-         * its own interrupt line and no driver yet; taking its byte here
-         * would steal it from whichever driver claims IRQ12. Leave it for
-         * the mouse's own interrupt rather than returning, or the byte
-         * stays in the buffer and the loop spins to its bound. */
-        if (status & PS2_STATUS_SYS)
-            return;
-
-        keyboard_scancode(inb(PS2_DATA));
-
-        /* Re-read: the byte we just took may have been the last, and the
-         * status must be sampled again to know that. */
-        status = inb(PS2_STATUS);
-    }
-}
-
-/* pic_remap() masks every line, so it must happen exactly once. Called from
- * main.c directly it would be once; called from anywhere else that also brings
- * up devices it would not be. The guard is a bool rather than a "who is first"
- * convention because the second call's only effect is to break the first. */
-static bool pic_remapped;
 
 void tty_init(void)
 {
     u64 flags = irq_save();
     uint8_t config = 0;
 
-    if (pic_remapped) {
-        irq_restore(flags);
-        return;
-    }
-    pic_remapped = true;
-
-    /*
-     * Remap first: the keyboard interrupt arrives on the vector the remap
-     * produces, and until it has run the vector in the IDT is not the one
-     * the controller will raise.
-     */
     pic_remap();
 
     /*
-     * Drain the controller before the first command, and do not run its self
-     * test.
-     *
-     * The self test was here, and it is the step everything downstream was
-     * getting wrong. The controller answers 0xAA with 0x55 and then 0xAA; some
-     * implementations -- QEMU among them -- answer with 0x55 alone. Consuming
-     * "the second byte" on the assumption that it is always there reads a reply
-     * that belongs to a *later* command, and then that command's real reply is
-     * never seen. Both readings were tried here and neither is reliable:
-     * trusting one byte leaves a stray 0xAA to be mistaken for the next reply,
-     * and trusting two swallows the next reply instead. The observed result was
-     * "8042 command 0xae answered 0x00" -- the enable-interface command,
-     * unanswered, which is why no key ever arrived.
-     *
-     * The self test is diagnostic, not setup. A controller that is absent leaves
-     * the port unreadable, which the bounded waits below already turn into a
-     * reported failure rather than a hang. Draining first gives a known-empty
-     * register, which is the property the sequence actually needs.
-     */    ps2_flush();
-
-    if (ps2_write_port(PS2_CMD, PS2_CMD_ENABLE_KBD))
-        /* 0xAE (enable keyboard interface) does not generate a response. */
-        ;
-
-    ps2_flush();
-
-    /*
-     * Interrupt on keyboard bytes, keyboard clock not held low, and scancode
-     * translation left on: this driver decodes set 1, and translation is what
-     * turns the controller's set 2 into it. Setting it explicitly rather than
-     * trusting the BIOS matters because the byte the BIOS left behind is
-     * whatever the last BIOS keystroke left, and the two halves have to
-     * agree on which set is arriving.
+     * PS/2 keyboard: let the driver handle the controller, IRQ handler, and
+     * PIC unmask. The driver calls our keyboard_callback() to deliver decoded
+     * keystrokes into the input ring.
      */
-    if (ps2_write_port(PS2_CMD, PS2_CMD_READ_CONFIG))
-        config = ps2_read_data();
-    config |= PS2_CFG_KBD_INT | PS2_CFG_TRANSLATE;
-    config &= (uint8_t)~PS2_CFG_KBD_CLOCK;
-    if (ps2_write_port(PS2_CMD, PS2_CMD_WRITE_CONFIG))
-        ps2_write_port(PS2_DATA, config);
-
-    /* Scanning on, or no interrupt is ever generated no matter what the
-     * config byte says. */
-    if (ps2_write_port(PS2_DATA, KBD_CMD_ENABLE_SCAN))
-        ps2_expect_ack(KBD_CMD_ENABLE_SCAN, 0xFA);
-
-    ps2_flush();
+    ps2kbd_init(keyboard_callback);
 
     spinlock_init(&out_lock);
     spinlock_init(&in_lock);
@@ -1109,7 +716,6 @@ void tty_init(void)
      * it re-arms the line from inside a handler that has already been
      * entered by the same interrupt.
      */
-    idt_set_handler(VECTOR_IRQ_KEYBOARD, keyboard_irq, IST_NONE, 0);
     idt_set_handler(VECTOR_IRQ_COM1, com1_irq, IST_NONE, 0);
 
     /*
@@ -1121,6 +727,9 @@ void tty_init(void)
      * silently clearing it here would make this file responsible for a
      * decision it did not make.
      *
+     * ps2kbd_init() already cleared the IRQ1 (keyboard) bit, so only COM1
+     * (bit 4) is cleared here.
+     *
      * Still before the PIC unmask below, so the line cannot become visible
      * before there is something behind it.
      */
@@ -1128,24 +737,21 @@ void tty_init(void)
          (uint8_t)(inb(COM1 + UART_IER) | UART_IER_RX_AVAILABLE));
 
     config = inb(PIC1_DATA_PORT);
-    config &= (uint8_t)~(PIC1_IRQ_KEYBOARD_BIT | PIC1_IRQ_COM1_BIT);
+    config &= (uint8_t)~PIC1_IRQ_COM1_BIT;
     outb(PIC1_DATA_PORT, config);
 
     /*
-     * Read both lines back. This is a pin and not politeness: the two
-     * unmasked bits are the entire difference between a tty that can be
-     * typed at and one that cannot, and the failure mode is completely
-     * silent -- the poll still works, so the console keeps printing, the
-     * kernel looks healthy, and a person types at a terminal that is not
-     * listening. OCPW1 reads back the mask register, so this says what the
-     * device is actually using rather than what was written to it.
+     * Read back what the mask actually became. Keyboard is handled by
+     * ps2kbd_init(); only COM1 has to pass this check. This is a pin and
+     * not politeness -- the whole difference between a tty that can be
+     * typed at and one that cannot comes down to whether this bit cleared
+     * or did not. OCPW1 reads back what the driver is using rather than
+     * what was written to it.
      */
     config = inb(PIC1_DATA_PORT);
-    if (config & (PIC1_IRQ_KEYBOARD_BIT | PIC1_IRQ_COM1_BIT)) {
-        klog(KLOG_FATAL, "tty: PIC1 unmask did not take, mask is %#x "
-             "(keyboard %#x, COM1 %#x)\n", (unsigned)config,
-             (unsigned)!!(config & PIC1_IRQ_KEYBOARD_BIT),
-             (unsigned)!!(config & PIC1_IRQ_COM1_BIT));
+    if (config & PIC1_IRQ_COM1_BIT) {
+        klog(KLOG_FATAL, "tty: COM1 unmask did not take, mask is %#x\n",
+             (unsigned)config);
         return;
     }
 
