@@ -21,7 +21,7 @@ uint32_t gfx_rgb(const struct gfx_canvas *canvas, uint8_t r, uint8_t g, uint8_t 
 void gfx_clear(struct gfx_canvas *canvas, uint32_t color);
 void gfx_pixel(struct gfx_canvas *canvas, int x, int y, uint32_t color);
 void gfx_line(struct gfx_canvas *canvas, int x0, int y0, int x1, int y1,
-              uint32_t color);
+              int thickness, uint32_t color);
 void gfx_fill_rect(struct gfx_canvas *canvas, int x, int y, int width, int height,
                    uint32_t color);
 void gfx_fill_triangle(struct gfx_canvas *canvas, int x0, int y0, int x1, int y1,

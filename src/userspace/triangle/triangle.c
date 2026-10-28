@@ -27,9 +27,9 @@ int main(void)
     white = gfx_rgb(&canvas, 250, 248, 240);
     gfx_clear(&canvas, blue);
     gfx_fill_triangle(&canvas, x0, y0, x1, y1, x2, y2, gold);
-    gfx_line(&canvas, x0, y0, x1, y1, white);
-    gfx_line(&canvas, x1, y1, x2, y2, white);
-    gfx_line(&canvas, x2, y2, x0, y0, white);
+    gfx_line(&canvas, x0, y0, x1, y1, 3, white);
+    gfx_line(&canvas, x1, y1, x2, y2, 3, white);
+    gfx_line(&canvas, x2, y2, x0, y0, 3, white);
 
     if (gfx_present(&canvas) < 0) {
         fprintf(stderr, "triangle: present failed (%d)\n", errno);

@@ -86,14 +86,19 @@ void gfx_pixel(struct gfx_canvas *canvas, int x, int y, uint32_t color)
 }
 
 void gfx_line(struct gfx_canvas *canvas, int x0, int y0, int x1, int y1,
-              uint32_t color)
+               int thickness, uint32_t color)
 {
     int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
     int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
     int err = dx + dy;
+    if (thickness < 1)
+        thickness = 1;
 
     for (;;) {
-        gfx_pixel(canvas, x0, y0, color);
+        for (int ty = 0; ty < thickness; ty++)
+            for (int tx = 0; tx < thickness; tx++)
+                gfx_pixel(canvas, x0 + tx - thickness / 2,
+                          y0 + ty - thickness / 2, color);
         if (x0 == x1 && y0 == y1)
             break;
         int twice = 2 * err;
