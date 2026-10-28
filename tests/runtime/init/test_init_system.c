@@ -322,7 +322,7 @@ static int test_graphics_triangle(void) {
     fg = gfx_rgb(&canvas, 240, 180, 40);
     gfx_clear(&canvas, bg);
     gfx_fill_triangle(&canvas, 4, 28, 28, 28, 16, 4, fg);
-    gfx_line(&canvas, 4, 28, 28, 28, fg);
+    gfx_line(&canvas, 4, 28, 28, 28, 5, fg);
     TEST_ASSERT_EQ(canvas.pixels[16 * canvas.width + 16], fg,
                    "filled triangle should color an interior pixel");
     TEST_ASSERT_EQ(canvas.pixels[0], bg, "clear should color the background");

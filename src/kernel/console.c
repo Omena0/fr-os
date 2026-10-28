@@ -76,7 +76,6 @@ struct fb_text {
 
     uint32_t pitch;
     uint32_t cols, rows;
-    uint32_t cursor_x, cursor_y;
     uint64_t scrollback;
 
     /* Cell buffer and glyph atlas. */
@@ -92,6 +91,12 @@ static inline uint8_t *fb_pixels(void)
 {
     return (uint8_t *)vmm_boot_ptr(fb.phys);
 }
+
+/* Derive rows from the framebuffer height when it is active, rather than
+   hard-coding VGA_ROWS. This prevents a gap when the framebuffer is a
+   higher resolution than VGA (e.g. 1280x720 vs 800x600). */
+#define FB_TEXT_ROWS() (console_fb_active() ? fb.rows : VGA_ROWS)
+
 
 extern const uint8_t font8x16[256][16];
 
@@ -417,19 +422,23 @@ static void console_fb_scroll(void)
         fb.cells[(fb.rows - 1) * fb.cols + c].attr = current_attr;
     }
 
-    /* Repaint only the new bottom line rather than the whole screen. */
-    for (uint32_t c = 0; c < fb.cols; c++) {
-        struct fb_cell *cell = &fb.cells[(fb.rows - 1) * fb.cols + c];
-        const uint8_t *p = vga_palette_rgb[attr_fg(cell->attr)];
-        uint8_t fg_r = attr_bold(cell->attr) ? 0xFF : p[0];
-        uint8_t fg_g = attr_bold(cell->attr) ? 0xFF : p[1];
-        uint8_t fg_b = attr_bold(cell->attr) ? 0xFF : p[2];
-        const uint8_t *bg = vga_palette_rgb[attr_bg(cell->attr)];
+    /* Repaint entire screen since every row shifted up. */
+    for (uint32_t r = 0; r < fb.rows; r++) {
+        for (uint32_t c = 0; c < fb.cols; c++) {
+            struct fb_cell *cell = &fb.cells[r * fb.cols + c];
+            const uint8_t *p = vga_palette_rgb[attr_fg(cell->attr)];
+            uint8_t fg_r = attr_bold(cell->attr) ? 0xFF : p[0];
+            uint8_t fg_g = attr_bold(cell->attr) ? 0xFF : p[1];
+            uint8_t fg_b = attr_bold(cell->attr) ? 0xFF : p[2];
+            const uint8_t *bg = vga_palette_rgb[attr_bg(cell->attr)];
 
-        fb_render_glyph(c, fb.rows - 1, cell->ch, fg_r, fg_g, fg_b,
-                bg[0], bg[1], bg[2]);
+            fb_render_glyph(c, r, cell->ch, fg_r, fg_g, fg_b,
+                    bg[0], bg[1], bg[2]);
+        }
     }
     fb.scrollback++;
+    if (cursor_y >= fb.rows)
+        cursor_y = fb.rows - 1;
 }
 
 static void console_fb_clear(void)
@@ -448,16 +457,14 @@ static void console_fb_clear(void)
 
 static void console_fb_move(uint32_t x, uint32_t y)
 {
-    if (x < fb.cols)
-        fb.cursor_x = x;
-    if (y < fb.rows)
-        fb.cursor_y = y;
+    cursor_x = x;
+    cursor_y = y;
 }
 
 static void console_fb_putc(char c, uint8_t attr)
 {
-    uint32_t x = fb.cursor_x;
-    uint32_t y = fb.cursor_y;
+    uint32_t x = cursor_x;
+    uint32_t y = cursor_y;
 
     if (fb.cells && fb.cols) {
         struct fb_cell *cell = &fb.cells[y * fb.cols + x];
@@ -491,27 +498,16 @@ static void console_newline(void)
 {
     cursor_x = 0;
     cursor_y++;
-    scrollback++;
 
-    /* Parenthesis matters: "cursor_y >= vga_enabled ? A : B" parses as
-     * "(cursor_y >= vga_enabled) ? A : B", which is a scroll on every
-     * single line once the cursor is past column zero. */
-    uint32_t rows = vga_enabled ? VGA_ROWS : fb.rows;
+    uint32_t rows = FB_TEXT_ROWS();
 
     if (cursor_y >= rows) {
         if (vga_enabled)
             vga_scroll();
         if (console_fb_active())
             console_fb_scroll();
-        /* Keep the logical grid at the smaller of the two so a character
-         * written once reaches both backends at the same row. */
-        uint32_t limit = vga_enabled && console_fb_active() ?
-            MIN(VGA_ROWS, fb.rows) :
-            (vga_enabled ? VGA_ROWS : fb.rows);
-        cursor_y = limit - 1;
+        cursor_y = rows - 1;
     }
-    if (console_fb_active())
-        console_fb_move(cursor_x, cursor_y);
 }
 
 /* ------------------------------------------------------------- escapes ----- */
@@ -703,8 +699,62 @@ void console_write_raw(const char *s, size_t n)
     u64 flags = console_acquire();
 
     for (size_t i = 0; i < n; i++) {
+        char c = s[i];
+
+        if (c == '\n') {
+            if (serial_enabled)
+                serial_putc_blocking('\n');
+            console_newline();
+            continue;
+        }
+        if (c == '\r') {
+            cursor_x = 0;
+            if (console_fb_active())
+                console_fb_move(0, cursor_y);
+            if (serial_enabled)
+                serial_putc_blocking('\r');
+            continue;
+        }
+        if (c == '\t') {
+            /* Tab stops every 8 columns. */
+            do {
+                if (vga_enabled)
+                    vga_putc_at(cursor_x, cursor_y, ' ', current_attr);
+                if (console_fb_active())
+                    console_fb_putc(' ', current_attr);
+                cursor_x++;
+                if (vga_enabled && cursor_x >= VGA_COLS)
+                    cursor_x = 0;
+                else if (console_fb_active() && cursor_x >= fb.cols)
+                    cursor_x = 0;
+            } while (cursor_x % 8 != 0);
+            if (serial_enabled)
+                serial_putc_blocking('\t');
+            continue;
+        }
+        if (c == '\b') {
+            if (cursor_x > 0)
+                cursor_x--;
+            if (console_fb_active())
+                console_fb_move(cursor_x, cursor_y);
+            if (serial_enabled)
+                serial_putc_blocking('\b');
+            continue;
+        }
+
+        if (vga_enabled)
+            vga_putc_at(cursor_x, cursor_y, c, current_attr);
+        if (console_fb_active())
+            console_fb_putc(c, current_attr);
+
         if (serial_enabled)
-            serial_putc_blocking(s[i]);
+            serial_putc_blocking(c);
+
+        cursor_x++;
+        if (vga_enabled && cursor_x >= VGA_COLS)
+            cursor_x = 0;
+        else if (console_fb_active() && cursor_x >= fb.cols)
+            cursor_x = 0;
     }
 
     console_release(flags);
@@ -801,4 +851,6 @@ void console_init(struct bootinfo *bi)
     }
 
     scrollback = 0;
+    cursor_x = 0;
+    cursor_y = 0;
 }
