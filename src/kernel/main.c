@@ -124,14 +124,56 @@ void kmain(uint64_t bootinfo_phys)
 
     boot = *src;
 
+    /*
+     * Parse kernel command line for loglevel=NNN and postloglevel=NNN.
+     * loglevel (0..4): verbosity while booting (default DEBUG).
+     * postloglevel (0..4): verbosity once PID 1 is up (default WARN).
+     */
+    static klog_level_t boot_loglevel = KLOG_DEBUG;
+    static klog_level_t post_loglevel = KLOG_WARN;
+    {
+        const char *cmd = boot.cmdline[0] ? boot.cmdline : "";
+        uint32_t off = 0;
+        while (cmd[off]) {
+            if (cmd[off] == 'l' && cmd[off+1] == 'o' && cmd[off+2] == 'g' &&
+                cmd[off+3] == 'l' && cmd[off+4] == 'e' && cmd[off+5] == 'v' &&
+                cmd[off+6] == 'e' && cmd[off+7] == 'l' && cmd[off+8] == '=') {
+                unsigned long v = 0;
+                off += 9;
+                while (cmd[off] >= '0' && cmd[off] <= '9') {
+                    v = v * 10 + (unsigned long)(cmd[off] - '0');
+                    off++;
+                }
+                if (v <= 4)
+                    boot_loglevel = (klog_level_t)v;
+            } else if (cmd[off] == 'p' && cmd[off+1] == 'o' && cmd[off+2] == 's' &&
+                       cmd[off+3] == 't' && cmd[off+4] == 'l' && cmd[off+5] == 'o' &&
+                       cmd[off+6] == 'g' && cmd[off+7] == 'l' && cmd[off+8] == 'e' &&
+                       cmd[off+9] == 'v' && cmd[off+10] == 'e' && cmd[off+11] == 'l' &&
+                       cmd[off+12] == '=') {
+                unsigned long v = 0;
+                off += 13;
+                while (cmd[off] >= '0' && cmd[off] <= '9') {
+                    v = v * 10 + (unsigned long)(cmd[off] - '0');
+                    off++;
+                }
+                if (v <= 4)
+                    post_loglevel = (klog_level_t)v;
+            } else {
+                off++;
+            }
+        }
+    }
+
+    klog_init();
+    klog_set_level(boot_loglevel);
+
     const struct e820_entry *src_e820 = boot_ptr((phys_addr_t)boot.e820_addr);
     for (uint32_t i = 0; i < boot.e820_count; i++)
         e820_copy[i] = src_e820[i];
 
     /* Repoint at the kernel's own copies before anything reads them again. */
     boot.e820_addr = (uint64_t)(uintptr_t)e820_copy;
-
-    klog_init();
 
     /*
      * Identity. The per-CPU area has to exist before anything that uses
@@ -368,6 +410,10 @@ void kmain(uint64_t bootinfo_phys)
         panic("could not create the init process; there is nothing to run");
 
     kprintf("init: pid %u loaded, entering the scheduler\n", init->pid);
+
+    /* Drop verbosity once PID 1 is up: boot chatter is done, unless the
+     * cmdline asked for debug (postloglevel=0) we keep the system quiet. */
+    klog_set_level(post_loglevel);
 
     sched_start();
 
