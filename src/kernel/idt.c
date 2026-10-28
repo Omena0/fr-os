@@ -704,37 +704,10 @@ static void pic_unmask(uint8_t irq)
  */
 static volatile u64 pit_ticks;
 
-/*
- * Announced on the first tick and once a second thereafter, through the
- * polled serial path rather than klog.
- *
- * The reason is the whole design constraint. klog_emit() formats into 1.1 KiB
- * of stack and then takes the console spinlock, so a tick arriving while the
- * interrupted code already holds that lock spins forever with IF clear and the
- * machine stops with no output — a hang, indistinguishable from the bug that
- * made this timer worth having. ksnprintf() below is the same formatter with
- * none of the locking, and serial_puts() is the same polled primitive
- * panic() is documented to use from contexts that may hold anything.
- */
-static void pit_announce(u64 n)
-{
-    /* DEBUG: first tick only; subsequent ticks are silent */
-    if (n != 1)
-        return;
-    char line[64];
-
-    (void)ksnprintf(line, sizeof(line), "\r\npit: tick %llu, IRQ0 is live\r\n",
-            (unsigned long long)n);
-    serial_puts(line);
-}
-
 static void pit_irq(struct interrupt_frame *f)
 {
     (void)f;
     pit_ticks++;
-
-    if (pit_ticks == 1 || (pit_ticks % PIT_HZ) == 0)
-        pit_announce(pit_ticks);
 
     /*
      * The documented contract: "The timer driver calls this; the dispatch
