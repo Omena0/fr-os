@@ -513,6 +513,29 @@ long copy_to_user(u64 dst, const void *src, size_t n)
     return user_copy(t->mm, (void *)src, dst, src, n, true);
 }
 
+/* Validate and fault in a writable user range before an operation that may
+ * block. Reading from a console before discovering an invalid destination
+ * would otherwise sleep forever instead of returning EFAULT. */
+long user_write_range_prepare(struct address_space *mm, u64 addr, size_t len)
+{
+    size_t done = 0;
+
+    if (!user_range_ok(mm, addr, len))
+        return -EFAULT;
+    while (done < len) {
+        virt_addr_t page_addr = ALIGN_DOWN(addr + done, PAGE_SIZE);
+        size_t offset = (size_t)((addr + done) & (PAGE_SIZE - 1));
+        size_t chunk = PAGE_SIZE - offset;
+
+        if (chunk > len - done)
+            chunk = len - done;
+        if (!user_page(mm, page_addr, true))
+            return -EFAULT;
+        done += chunk;
+    }
+    return 0;
+}
+
 long copy_string_from_user(char *dst, u64 src, size_t max)
 {
     if (max == 0)

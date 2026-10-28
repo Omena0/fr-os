@@ -238,6 +238,59 @@ static bool console_fb_active(void)
     return fb.phys != 0;
 }
 
+bool console_framebuffer_get_info(struct framebuffer_info *info)
+{
+    u64 flags;
+
+    if (!info)
+        return false;
+    flags = console_acquire();
+    if (!console_fb_active() || !fb.info) {
+        console_release(flags);
+        return false;
+    }
+    *info = *fb.info;
+    console_release(flags);
+    return true;
+}
+
+/* Write a chunk from the tightly packed userspace image into the possibly
+ * padded hardware rows. Callers copy and validate user data before entering. */
+long console_framebuffer_write(uint64_t offset, const void *src, size_t len)
+{
+    struct framebuffer_info *info;
+    const uint8_t *in = src;
+    uint64_t total;
+    u64 flags;
+
+    if (!src && len)
+        return -EINVAL;
+    flags = console_acquire();
+    if (!console_fb_active() || !fb.info || fb.info->bpp != 32) {
+        console_release(flags);
+        return -ENODEV;
+    }
+    info = fb.info;
+    total = (uint64_t)info->width * info->height * 4;
+    if (offset > total || len > total - offset) {
+        console_release(flags);
+        return -EINVAL;
+    }
+    while (len) {
+        uint32_t y = (uint32_t)(offset / ((uint64_t)info->width * 4));
+        uint32_t xbyte = (uint32_t)(offset % ((uint64_t)info->width * 4));
+        size_t chunk = (size_t)info->width * 4 - xbyte;
+        if (chunk > len)
+            chunk = len;
+        memcpy(fb_pixels() + (uint64_t)y * info->pitch + xbyte, in, chunk);
+        in += chunk;
+        offset += chunk;
+        len -= chunk;
+    }
+    console_release(flags);
+    return 0;
+}
+
 /*
  * Render one glyph into the framebuffer.
  *

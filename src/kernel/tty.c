@@ -821,15 +821,28 @@ static void keyboard_scancode(uint8_t sc)
         return;
     }
 
+    if (extended_pending) {
+        extended_pending = false;
+        if (make) {
+            const char *seq = NULL;
+            switch (code) {
+            case 0x48: seq = "\033[A"; break; /* up */
+            case 0x50: seq = "\033[B"; break; /* down */
+            case 0x4D: seq = "\033[C"; break; /* right */
+            case 0x4B: seq = "\033[D"; break; /* left */
+            default: break;
+            }
+            if (seq)
+                while (*seq)
+                    tty_in_push(*seq++);
+        }
+        return;
+    }
+
     /* Everything else in 0xE0-0xFF is a controller response or an ID, not a
      * key. The make codes this driver decodes all live below 0x80. */
     if (sc > 0xE0)
         return;
-
-    if (extended_pending) {
-        extended_pending = false;
-        return;
-    }
 
     /* Shift is state, not input. It has to be tracked on make and break
      * because a terminal is entirely shift-driven: nothing is readable while

@@ -29,18 +29,6 @@
 #define LEN_SHORT    (-1)
 #define LEN_CHAR    (-2)
 
-/* DEBUG: Enable detailed logging */
-#define DEBUG_VA_ARG 1
-
-extern int sys_write(int fd, const void *buf, size_t count);
-
-static void debug_out(void *ctx, const char *data, size_t n) {
-    (void)ctx;
-    if (DEBUG_VA_ARG && n > 0 && data != NULL) {
-        sys_write(1, data, n);
-    }
-}
-
 struct fmt_state {
     void (*sink)(void *ctx, const char *data, size_t n);
     void *ctx;
@@ -135,15 +123,6 @@ static void emit_padded(struct fmt_state *st, const char *body, size_t len,
     size_t pad;
     size_t zero_extra;
 
-    if (DEBUG_VA_ARG) {
-        char dbg[128];
-        int slen = snprintf(dbg, sizeof(dbg),
-            "[emit_padded] body=%p len=%zu prec=%zu has_prec=%d width=%d left=%d zero=%d sign=%s\n",
-            (void*)body, len, precision, has_precision, width, left_align, zero_pad,
-            sign ? sign : "(null)");
-        debug_out(NULL, dbg, slen > 0 ? slen : 0);
-    }
-
     if (has_precision && precision > len)
         zero_extra = precision - len;
     else
@@ -177,19 +156,10 @@ static void emit_padded(struct fmt_state *st, const char *body, size_t len,
 static void handle_string(struct fmt_state *st, int width, int left_align,
               int precision, int has_precision)
 {
-    write(STDERR_FILENO, "DEBUG handle_string: entering\n", 28);
-
     const char *s = va_arg(st->ap, const char *);
 
     size_t len;
 
-    if (DEBUG_VA_ARG) {
-        char dbg[128];
-        int slen = snprintf(dbg, sizeof(dbg),
-            "[handle_string] va_arg returned %p (width=%d left=%d prec=%d has_prec=%d)\n",
-            (void*)s, width, left_align, precision, has_precision);
-        if (slen > 0) debug_out(NULL, dbg, (size_t)slen);
-    }
     /*
      * If va_arg returns a garbage pointer (near NULL), emit a visible
      * marker instead of crashing. This can happen if va_list copying
@@ -212,13 +182,6 @@ static void handle_string(struct fmt_state *st, int width, int left_align,
         len = strnlen(s, (size_t)precision);
     else
         len = strlen(s);
-    if (DEBUG_VA_ARG) {
-        char dbg[128];
-        int slen = snprintf(dbg, sizeof(dbg),
-            "[handle_string] s=%p len=%zu '%s'\n",
-            (void*)s, len, s ? s : "(null)");
-        if (slen > 0) debug_out(NULL, dbg, (size_t)slen);
-    }
     emit_padded(st, s, len, 0, 0, width, left_align, 0, NULL);
 }
 

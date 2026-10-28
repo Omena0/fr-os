@@ -889,7 +889,7 @@ static bool vbe_set_mode(uint16_t mode)
     diag_tick();
 
     uint32_t ret = (uint32_t)bios_call(BIOS_INT_VIDEO, 0x4F02u,
-                       0x4000u | (uint32_t)(mode & 0xFFu),
+                       0x4000u | (uint32_t)(mode & 0x3FFFu),
                        0, 0, 0, di, es);
 
     return ret == 0x004Fu;
@@ -899,39 +899,22 @@ static bool vbe_set_mode(uint16_t mode)
  * Pull a framebuffer description out of the mode info block vbe_get_mode_info()
  * has just filled in.
  *
- * The channel shifts are the interesting part. A VBE mode info block carries
- * six bytes about the pixel layout, and they are *positions* and *sizes*, in
- * that order of confusion:
- *
- *   +0x31 RedMaskSize     +0x34 RedMaskPosition
- *   +0x32 GreenMaskSize   +0x35 GreenMaskPosition
- *   +0x33 BlueMaskSize    +0x36 BlueMaskPosition
- *
- * The kernel composes a pixel as (r << red_shift) | (g << green_shift) |
- * (b << blue_shift), so it needs the positions and nothing else. Taking the
- * sizes instead is not a small error: for a plain 32bpp mode, where all three
- * sizes are 8, it produces red=2, green=0, blue=1 rather than 16/8/0, and
- * every channel lands in the wrong bits of the wrong byte. Nothing faults, the
- * framebuffer is mapped, and the text is a plausible smear of colour -- which
- * is why the numbers are worth checking against the mode list by hand once.
- *
- * The positions themselves live in bits 7:3 of their bytes; bits 2:0 are
- * reserved and are dropped by the shift. What is *not* done here is converting
- * to byte offsets: the field is a bit shift, and the comment in boot.h that
- * says otherwise describes a packing this loader does not produce.
+ * Use VBE 3's linear fields because mode setting requested a linear
+ * framebuffer. The channel positions are bit numbers within a 32-bit pixel
+ * (usually red=16, green=8, blue=0), not mask sizes or byte offsets.
  */
 static void vbe_extract_fb(void)
 {
     fb_info.address = (uint32_t)(vbe_mode[0x28] | ((uint32_t)vbe_mode[0x29] << 8) |
                      ((uint32_t)vbe_mode[0x2A] << 16) |
                      ((uint32_t)vbe_mode[0x2B] << 24));
-    fb_info.pitch = (uint32_t)(vbe_mode[0x10] | ((uint32_t)vbe_mode[0x11] << 8));
+    fb_info.pitch = (uint32_t)(vbe_mode[0x32] | ((uint32_t)vbe_mode[0x33] << 8));
     fb_info.width = (uint32_t)(vbe_mode[0x12] | ((uint32_t)vbe_mode[0x13] << 8));
     fb_info.height = (uint32_t)(vbe_mode[0x14] | ((uint32_t)vbe_mode[0x15] << 8));
     fb_info.bpp = vbe_mode[0x19];
-    fb_info.red_shift = (uint8_t)(vbe_mode[0x34] >> 3);
-    fb_info.green_shift = (uint8_t)(vbe_mode[0x35] >> 3);
-    fb_info.blue_shift = (uint8_t)(vbe_mode[0x36] >> 3);
+    fb_info.red_shift = vbe_mode[0x37];
+    fb_info.green_shift = vbe_mode[0x39];
+    fb_info.blue_shift = vbe_mode[0x3B];
 }
 
 /*
@@ -947,7 +930,6 @@ static void vbe_setup(void)
     uint8_t *ctrl = vbe_ctrl;
     uint16_t es;
     uint16_t di;
-    uint32_t best_score = 0;
     uint16_t best_mode = 0;
 
     /* The mode list is a far pointer into the firmware's own memory. */
@@ -955,16 +937,14 @@ static void vbe_setup(void)
     /*
      * The modes worth trying, kept rather than decided on the spot.
      *
-     * AH=4F02h names the mode in eight bits, so a mode above 0xFF cannot be
-     * set through it, and a firmware's largest listed mode is routinely one of
-     * those. The walk below therefore records several candidates and the tail
-     * of this function tries them best-first, rather than committing to the
-     * biggest one and reporting that the machine has no framebuffer when the
-     * firmware declines a mode this interface cannot express.
+     * Keep several candidates and try them best-first. Some firmware advertises
+     * modes it later declines, so falling back to the next usable mode avoids
+     * reporting no framebuffer when a smaller graphics mode works.
      */
     struct vbe_candidate {
         uint16_t mode;
         uint32_t score;
+        struct framebuffer_info fb;
     };
     struct vbe_candidate cand[VBE_MAX_CANDIDATES];
     unsigned ncand = 0;
@@ -1076,11 +1056,15 @@ static void vbe_setup(void)
                 continue;
             cand[worst].mode = m;
             cand[worst].score = score;
+            vbe_extract_fb();
+            cand[worst].fb = fb_info;
             continue;
         }
 
         cand[ncand].mode = m;
         cand[ncand].score = score;
+        vbe_extract_fb();
+        cand[ncand].fb = fb_info;
         ncand++;
     }
 
@@ -1104,15 +1088,10 @@ static void vbe_setup(void)
     /*
      * Try them in order until one is accepted.
      *
-     * This is not defensive padding. AH=4F02h carries the mode number in the
-     * low byte of BX alongside the bit-14 request for a linear framebuffer,
-     * so a mode numbered above 0xFF cannot be named through this interface at
-     * all -- the largest mode this firmware lists, 0x199, is exactly such a
-     * mode, and asking for it answers 0x014F. Choosing the single largest
-     * mode and setting it therefore fails on a machine whose 32bpp modes are
-     * perfectly settable. Walking down the list costs one extra BIOS round
-     * trip per rejected mode and gets a framebuffer out of hardware that the
-     * one-shot version reported as having none.
+     * AH=4F02h takes its mode number in the low 14 bits of BX; bit 14 requests
+     * a linear framebuffer. Preserve all mode-number bits here. Truncating the
+     * number to one byte strips the 0x100-based VBE modes used by modern
+     * firmware, so every selected 32bpp mode is rejected.
      */
     for (unsigned i = 0; i < ncand; i++) {
         serial_puts("  trying mode 0x");
@@ -1121,6 +1100,7 @@ static void vbe_setup(void)
 
         if (vbe_set_mode(cand[i].mode)) {
             best_mode = cand[i].mode;
+            fb_info = cand[i].fb;
             break;
         }
     }
@@ -1136,12 +1116,10 @@ static void vbe_setup(void)
      * away left the kernel with a description of the mode as it was before
      * the set, which is a different address and a different pitch on any
      * firmware that reprograms it. */
-    if (!vbe_get_mode_info(best_mode)) {
-        LOG("  mode info lost after mode set\r\n");
-        return;
-    }
-
-    vbe_extract_fb();
+    if (vbe_get_mode_info(best_mode))
+        vbe_extract_fb();
+    else
+        LOG("  mode info unavailable after set; using validated candidate\r\n");
 
     if (fb_info.address == 0) {
         LOG("  no framebuffer address after mode set\r\n");

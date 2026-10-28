@@ -109,17 +109,16 @@ struct e820_entry {
  *
  * `red_shift`, `green_shift` and `blue_shift` are *bit positions* of each
  * channel within a 32-bit pixel, taken verbatim from the VBE mode info
- * Red/Green/BlueMaskPosition fields (mode info offsets 0x34, 0x35 and 0x36,
- * already shifted down by 3 as VBE specifies). The kernel uses them directly
+ * linear Red/Green/BlueFieldPosition fields (mode info offsets 0x37, 0x39
+ * and 0x3B). The kernel uses them directly
  * as shift amounts when extracting a pixel component and never converts.
  *
  * This comment previously said they were byte offsets that the kernel
  * converted, which was wrong in a way that mattered: the bootloader was
- * filling them from the RedMaskSize/GreenMaskSize/BlueMaskSize fields
- * (offsets 0x31/0x32) instead of the positions, so a plain 32bpp mode came
- * out as red=2 green=0 blue=1 rather than 16/8/0, and every pixel had its
- * channels transposed. Size and position are different fields and reading one
- * where the other belongs produces a plausible-looking wrong answer.
+ * reading the wrong mode-info offsets instead of the linear channel positions
+ * produced shifts like 0/0/1, so colors landed in the wrong bits. Size and
+ * position are different fields, and linear and banked modes have separate
+ * descriptions.
  *
  * The kernel assumes 32bpp throughout; a mode with a different pixel format
  * is not accepted.

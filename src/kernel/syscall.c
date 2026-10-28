@@ -36,6 +36,8 @@
 #include <sched.h>
 #include <process.h>
 #include <syscall.h>
+#include <console.h>
+#include <uapi/graphics.h>
 
 #define SYSCALL_LOG(level, ...)                                              \
     do {                                                               \
@@ -170,7 +172,52 @@ static long sc_getcpu(struct syscall_regs *r)
 
     if (!user_range_ok(syscall_user_mm(), arg0(r), sizeof(pair)))
         return -EFAULT;
-    return copy_to_user(arg0(r), &pair, sizeof(pair));
+    return copy_to_user(arg0(r), &pair, sizeof(pair)) < 0 ? -EFAULT : 0;
+}
+
+static long sc_gfx_info(struct syscall_regs *r)
+{
+    struct framebuffer_info fb;
+    struct gfx_display_info info;
+
+    if (!console_framebuffer_get_info(&fb))
+        return -ENODEV;
+    memset(&info, 0, sizeof(info));
+    info.size = sizeof(info);
+    info.width = fb.width;
+    info.height = fb.height;
+    info.pitch = fb.pitch;
+    info.bpp = fb.bpp;
+    info.red_shift = fb.red_shift;
+    info.green_shift = fb.green_shift;
+    info.blue_shift = fb.blue_shift;
+    return copy_to_user(arg0(r), &info, sizeof(info)) < 0 ? -EFAULT : 0;
+}
+
+static long sc_gfx_present(struct syscall_regs *r)
+{
+    u64 src = arg0(r);
+    u64 len = arg1(r);
+    struct framebuffer_info fb;
+    uint8_t chunk[4096];
+    uint64_t total, off = 0;
+
+    if (!console_framebuffer_get_info(&fb) || fb.bpp != 32)
+        return -ENODEV;
+    total = (uint64_t)fb.width * fb.height * 4;
+    if (len != total || !user_range_ok(syscall_user_mm(), src, len))
+        return -EINVAL;
+    while (off < total) {
+        size_t n = (size_t)(total - off);
+        if (n > sizeof(chunk))
+            n = sizeof(chunk);
+        if (copy_from_user(chunk, src + off, n) < 0)
+            return -EFAULT;
+        if (console_framebuffer_write(off, chunk, n) < 0)
+            return -EIO;
+        off += n;
+    }
+    return 0;
 }
 
 static long sc_nanosleep(struct syscall_regs *r)
@@ -331,7 +378,7 @@ static long file_read(struct task *t, int fd, u64 buf, size_t count)
         return -EBADF;
     if (count == 0)
         return 0;
-    if (!user_range_ok(t->mm, buf, count))
+    if (user_write_range_prepare(t->mm, buf, count) < 0)
         return -EFAULT;
 
     return file_io(t, f, buf, count, false);
@@ -369,9 +416,10 @@ static long sc_lseek(struct syscall_regs *r)
 {
     struct file *f = fd_lookup(caller(), (int)(s32)arg0(r));
 
-    UNUSED(r);
     if (!f)
         return -EBADF;
+    if (arg2(r) != 0 && arg2(r) != 1 && arg2(r) != 2)
+        return -EINVAL;
     /* A character device has no offsets to seek between. */
     return -ESPIPE;
 }
@@ -392,7 +440,7 @@ static long sc_fstat(struct syscall_regs *r)
     /* A terminal has no length. Reporting 0 is what makes isatty() and
      * the stdio size checks behave. */
     st.size = 0;
-    return copy_to_user(arg1(r), &st, sizeof(st));
+    return copy_to_user(arg1(r), &st, sizeof(st)) < 0 ? -EFAULT : 0;
 }
 
 static long sc_ioctl(struct syscall_regs *r)
@@ -496,7 +544,6 @@ static ssize_t pipe_read_op(struct file *f, void *buf, size_t count)
     struct pipe *p = f->private;
     struct task *self = caller();
     struct task *w;
-    size_t done = 0;
     bool nonblock = (f->f_flags & O_NONBLOCK) != 0;
 
     if (count == 0)
@@ -526,7 +573,7 @@ static ssize_t pipe_read_op(struct file *f, void *buf, size_t count)
             spinlock_release(&p->lock);
             if (w)
                 sched_wake(w);
-            return (ssize_t)done;
+            return (ssize_t)avail;
         }
         if (p->write_closed) {
             spinlock_release(&p->lock);
@@ -550,7 +597,6 @@ static ssize_t pipe_write_op(struct file *f, const void *buf, size_t count)
     struct pipe *p = f->private;
     struct task *self = caller();
     struct task *r;
-    size_t done = 0;
     bool nonblock = (f->f_flags & O_NONBLOCK) != 0;
 
     for (;;) {
@@ -571,7 +617,7 @@ static ssize_t pipe_write_op(struct file *f, const void *buf, size_t count)
             spinlock_release(&p->lock);
             if (r)
                 sched_wake(r);
-            return (ssize_t)done;
+            return (ssize_t)space;
         }
         if (p->read_closed) {
             spinlock_release(&p->lock);
@@ -640,6 +686,8 @@ static long sc_pipe(struct syscall_regs *r)
 
     if (!t || !t->mm)
         return -ESRCH;
+    if (!user_range_ok(t->mm, arg0(r), sizeof(pair)))
+        return -EFAULT;
 
     p = pipe_alloc();
     if (!p)
@@ -680,7 +728,20 @@ static long sc_pipe(struct syscall_regs *r)
     }
 
     pair = ((u64)(u32)wfd << 32) | (u32)rfd;
-    return copy_to_user(arg0(r), &pair, sizeof(pair));
+    return copy_to_user(arg0(r), &pair, sizeof(pair)) < 0 ? -EFAULT : 0;
+}
+
+static long sc_futex(struct syscall_regs *r)
+{
+    u64 op = arg1(r) & 0x7f;
+    int value;
+
+    if (op != 1) /* FUTEX_WAKE */
+        return -ENOSYS;
+    if (copy_from_user(&value, arg0(r), sizeof(value)) < 0)
+        return -EFAULT;
+    /* There is no wait queue implementation yet, so no waiters can be woken. */
+    return 0;
 }
 
 /* ------------------------------------------------------------ memory ------- */
@@ -700,7 +761,7 @@ static long sc_brk(struct syscall_regs *r)
     /* Confine brk to the heap VMA only: never shrink below start_brk
      * (the initial heap base), and never grow past the RLIMIT_DATA bound. */
     if (want < mm->start_brk)
-        want = mm->start_brk;
+        return (long)mm->brk;
 
     if (want < mm->brk) {
         mm_remove_vma(mm, (virt_addr_t)want, (virt_addr_t)mm->brk);
@@ -793,6 +854,7 @@ static long sc_munmap(struct syscall_regs *r)
     struct address_space *mm = syscall_user_mm();
     u64 addr = arg0(r);
     u64 len = arg1(r);
+    u64 end;
 
     if (!mm)
         return -EINVAL;
@@ -801,7 +863,10 @@ static long sc_munmap(struct syscall_regs *r)
     len = ALIGN_UP(len, PAGE_SIZE);
     if (addr + len < addr)
         return -EINVAL;
-    return mm_remove_vma(mm, (virt_addr_t)addr, (virt_addr_t)(addr + len));
+    end = addr + len;
+    if (!mm_find_vma(mm, (virt_addr_t)addr))
+        return -EINVAL;
+    return mm_remove_vma(mm, (virt_addr_t)addr, (virt_addr_t)end);
 }
 
 static long sc_mprotect(struct syscall_regs *r)
@@ -844,7 +909,7 @@ static long sc_mprotect(struct syscall_regs *r)
     v = mm_find_vma(mm, (virt_addr_t)addr);
     if (!v || addr < v->start || addr + len > v->end) {
         spinlock_unlock_irqrestore(&mm->lock, flags);
-        return -ENOMEM;
+        return -EINVAL;
     }
     u32 old_prot = v->prot;
     u32 old_flags = v->flags;
@@ -989,46 +1054,44 @@ static long sc_mremap(struct syscall_regs *r)
     u64 old_size = arg1(r);
     u64 new_size = arg2(r);
     u64 flags = arg3(r);
-    u64 new_addr = arg4(r);
     int rc;
 
     if (!mm)
         return -EFAULT;
-    if (!user_range_ok(mm, old_addr, old_size))
+    if (!old_size || !new_size || (old_addr & (PAGE_SIZE - 1)) ||
+        old_addr + old_size < old_addr)
         return -EINVAL;
     if (flags & ~(u64)0x0FU)
         return -EINVAL;
 
     old_size = ALIGN_UP(old_size, PAGE_SIZE);
     new_size = ALIGN_UP(new_size, PAGE_SIZE);
+    if (old_addr + old_size < old_addr || old_addr + new_size < old_addr)
+        return -EINVAL;
 
-    if ((flags & 0x2) && new_addr) {  /* MREMAP_FIXED with new address */
-        if (!user_range_ok(mm, new_addr, new_size))
-            return -EINVAL;
-        rc = mm_remove_vma(mm, (virt_addr_t)old_addr, (virt_addr_t)(old_addr + old_size));
-        if (rc < 0)
-            return rc;
-        rc = mm_add_vma(mm, (virt_addr_t)new_addr, (virt_addr_t)(new_addr + new_size),
-                VM_READ | VM_WRITE | VM_USER, VM_ANON);
-        if (rc < 0)
-            return rc;
-        if (new_addr + new_size > mm->mmap_next)
-            mm->mmap_next = new_addr + new_size;
-        return (long)new_addr;
+    u64 irqflags = spinlock_irqsave(&mm->lock);
+    struct vma *v = mm_find_vma(mm, (virt_addr_t)old_addr);
+    bool valid = v && old_addr >= v->start && old_addr + old_size <= v->end;
+    u32 prot = valid ? v->prot : 0;
+    u32 vflags = valid ? v->flags : 0;
+    spinlock_unlock_irqrestore(&mm->lock, irqflags);
+    if (!valid)
+        return -EINVAL;
+
+    /* Keep the mapping in place. Shrinking drops only the tail; growing adds
+     * an adjacent anonymous range, preserving all existing mapped pages. */
+    if (new_size < old_size) {
+        rc = mm_remove_vma(mm, (virt_addr_t)(old_addr + new_size),
+                           (virt_addr_t)(old_addr + old_size));
+        return rc < 0 ? rc : (long)old_addr;
     }
-
-    rc = mm_remove_vma(mm, (virt_addr_t)old_addr, (virt_addr_t)(old_addr + old_size));
-    if (rc < 0)
-        return rc;
-    virt_addr_t vaddr = mm_find_free(mm, new_size, PAGE_SIZE);
-    if (!vaddr)
-        return -ENOMEM;
-    rc = mm_add_vma(mm, vaddr, vaddr + new_size, VM_READ | VM_WRITE | VM_USER, VM_ANON);
-    if (rc < 0)
-        return rc;
-    if (vaddr + new_size > mm->mmap_next)
-        mm->mmap_next = vaddr + new_size;
-    return (long)vaddr;
+    if (new_size > old_size) {
+        rc = mm_add_vma(mm, (virt_addr_t)(old_addr + old_size),
+                        (virt_addr_t)(old_addr + new_size), prot, vflags);
+        if (rc < 0)
+            return rc;
+    }
+    return (long)old_addr;
 }
 
 /* ---------------------------------------------------------------- mlock -- */
@@ -1041,7 +1104,13 @@ static long sc_mlock(struct syscall_regs *r)
 
     if (!mm)
         return -EFAULT;
-    if (!user_range_ok(mm, addr, len))
+    if (!len || !user_range_ok(mm, addr, len))
+        return -EINVAL;
+    u64 irqflags = spinlock_irqsave(&mm->lock);
+    struct vma *v = mm_find_vma(mm, (virt_addr_t)addr);
+    bool valid = v && addr + len >= addr && addr + len <= v->end;
+    spinlock_unlock_irqrestore(&mm->lock, irqflags);
+    if (!valid)
         return -EINVAL;
     /* mlock is a no-op in this kernel; accept valid user ranges. */
     return 0;
@@ -1148,10 +1217,9 @@ static long sc_getgid(struct syscall_regs *r)
 
 static long sc_madvise(struct syscall_regs *r)
 {
-    UNUSED(r);
-    /* Advice is advisory by definition, and every value this kernel
-     * understands means "do nothing"; rejecting them would make a libc
-     * that calls it on every allocation fail. */
+    u64 advice = arg2(r);
+    if (advice != 0 && advice != 4) /* MADV_NORMAL, MADV_DONTNEED */
+        return -EINVAL;
     return 0;
 }
 
@@ -1244,8 +1312,11 @@ void syscall_init(void)
     syscall_table[SYS_madvise] = sc_madvise;
     syscall_table[SYS_get_tls_base] = sc_get_tls_base;
     syscall_table[SYS_pipe] = sc_pipe;
+    syscall_table[SYS_futex] = sc_futex;
     syscall_table[SYS_sched_yield] = sc_sched_yield;
     syscall_table[SYS_getcpu] = sc_getcpu;
+    syscall_table[SYS_gfx_info] = sc_gfx_info;
+    syscall_table[SYS_gfx_present] = sc_gfx_present;
     syscall_table[SYS_mremap] = sc_mremap;
     syscall_table[SYS_mlock] = sc_mlock;
 

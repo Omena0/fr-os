@@ -153,6 +153,7 @@ bool user_range_ok(struct address_space *mm, u64 addr, size_t len);
 
 long copy_from_user(void *dst, u64 src, size_t n);
 long copy_to_user(u64 dst, const void *src, size_t n);
+long user_write_range_prepare(struct address_space *mm, u64 addr, size_t len);
 
 /* Copy a NUL-terminated user string into a kernel buffer, bounded. */
 long copy_string_from_user(char *dst, u64 src, size_t max);

@@ -11,6 +11,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <stdint.h>
 
 void *memset(void *dst, int c, size_t n)
 {
@@ -43,7 +44,7 @@ void *memmove(void *dst, const void *src, size_t n)
 
     /* Copy backwards when the destination overlaps the source past the
      * start, so the overlapping tail is read before it is overwritten. */
-    if (d < s) {
+    if ((uintptr_t)d < (uintptr_t)s) {
         size_t i;
         for (i = 0; i < n; i++)
             d[i] = s[i];

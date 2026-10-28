@@ -25,6 +25,8 @@
 
 #include <types.h>
 #include <boot.h>
+#include <stddef.h>
+#include <uapi/errno.h>
 
 /* Terminal escape sequences the console interprets. */
 #define TERM_ESC_CLEAR      "\033[2J"
@@ -71,6 +73,10 @@ uint32_t console_rows(void);
 
 /* Where the console currently is, for the framebuffer/GUI work later. */
 void console_clear(void);
+
+/* Framebuffer access for the validated graphics syscalls. */
+bool console_framebuffer_get_info(struct framebuffer_info *info);
+long console_framebuffer_write(uint64_t offset, const void *src, size_t len);
 
 /*
  * Emit a single character with a specific foreground colour, bypassing the

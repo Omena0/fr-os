@@ -167,10 +167,17 @@ fi
 #
 # mux=on makes the stdio chardev bidirectional so input from the terminal
 # reaches the guest's COM1 receive interrupt.
-QEMU_ARGS+=(
-    -chardev stdio,id=ser0,signal=off,mux=on,logfile=$LOG
-    -serial chardev:ser0
-)
+if [ -n "${BOOT_SMOKE_SERIAL_SOCKET:-}" ]; then
+    QEMU_ARGS+=(
+        -chardev socket,id=ser0,path=$BOOT_SMOKE_SERIAL_SOCKET,server=on,wait=off,logfile=$LOG
+        -serial chardev:ser0
+    )
+else
+    QEMU_ARGS+=(
+        -chardev stdio,id=ser0,signal=off,mux=on,logfile=$LOG
+        -serial chardev:ser0
+    )
+fi
 
 # Debug console for port 0xE9 output (kernel markers)
 DEBUG_LOG="${LOG%.log}.debug"

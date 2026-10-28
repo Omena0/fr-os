@@ -526,20 +526,6 @@ static bool rq_has_work_locked(const struct runqueue *rq, const struct task *ign
 	int prio;
 	u32 bitmap = rq->mlfq_bitmap;
 
-	/* Debug: dump the run queue state */
-	{
-		u32 dbg_bitmap = bitmap;
-		u32 dbg_level = (u32)__builtin_ctz(dbg_bitmap);
-		struct list_head *dbg_pos = dbg_bitmap ? rq->mlfq[dbg_level].head.next : NULL;
-		if (dbg_pos && dbg_pos != &rq->mlfq[dbg_level].head) {
-			struct task *dbg_t = list_entry(dbg_pos, struct task, rq_node);
-			klog_emit(KLOG_DEBUG, "sched", "rq_has_work: bitmap=%#x level=%u first_task_pid=%u state=%d",
-				  dbg_bitmap, dbg_level, dbg_t->pid, (int)dbg_t->state);
-		} else {
-			klog_emit(KLOG_DEBUG, "sched", "rq_has_work: bitmap=%#x no tasks", dbg_bitmap);
-		}
-	}
-
 	if (rq->deadline_count) {
 		t = rq_first_locked(&rq->deadline);
 		if (t && t != ignore)
