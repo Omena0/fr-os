@@ -158,6 +158,7 @@ import signal
 import subprocess
 import sys
 import time
+import socket
 
 EXIT_PASS = 0
 EXIT_FAIL = 1
@@ -165,7 +166,7 @@ EXIT_SKIP = 77
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-DEFAULT_TIMEOUT = 25.0
+DEFAULT_TIMEOUT = 10.0
 
 # DRAIN_TIMEOUT is how long this harness waits for run.sh to finish after it
 # asks QEMU to stop. run.sh gives the chardev up to 5 s to drain before it
@@ -174,7 +175,7 @@ DEFAULT_TIMEOUT = 25.0
 # hang at the last line printed, so this wait is not optional politeness, and
 # a run that blows through it says so rather than reporting a truncated log as
 # a verdict.
-DRAIN_TIMEOUT = 30.0
+DRAIN_TIMEOUT = 15.0
 
 
 # --------------------------------------------------------------------------
@@ -232,7 +233,7 @@ def load_text(data):
 def nul_runs(data):
     """(count, total_nuls, longest) for the NUL runs in a raw serial log."""
     runs = [m.end() - m.start() for m in re.finditer(b"\x00+", data)]
-    return len(runs), sum(runs), max(runs) if runs else 0
+    return len(runs), sum(runs), max(runs, default=0)
 
 
 def scan(text):
@@ -401,9 +402,7 @@ def image_root(image):
     if os.path.basename(build_dir) != "build":
         return None
     root = os.path.dirname(build_dir)
-    if not os.path.isdir(os.path.join(root, "src")):
-        return None
-    return root
+    return root if os.path.isdir(os.path.join(root, "src")) else None
 
 
 def image_is_fresh(root, image):
@@ -411,10 +410,10 @@ def image_is_fresh(root, image):
     try:
         img_mtime = os.stat(image).st_mtime
     except OSError as exc:
-        return False, "cannot stat the image %s: %s" % (image, exc)
+        return False, f"cannot stat the image {image}: {exc}"
     newest, path = newest_input(root, image)
     if path is None:
-        return True, "no build inputs found under %s" % root
+        return True, f"no build inputs found under {root}"
     if newest > img_mtime:
         return False, ("the image is older than its input %s "
                        "(image %.1fs, input %.1fs, %.1fs apart) -- this is the "
@@ -445,7 +444,7 @@ def direct_children(pid):
         if not entry.isdigit():
             continue
         try:
-            with open("/proc/%s/stat" % entry) as fh:
+            with open(f"/proc/{entry}/stat") as fh:
                 fields = fh.read().rsplit(")", 1)[1].split()
             if int(fields[1]) == pid:
                 out.append(int(entry))
@@ -473,7 +472,8 @@ def read_log(path):
         return b""
 
 
-def run_boot(root, image, log, errlog, timeout, allow_tcg, extra_args, command=None):
+def run_boot(root, image, log, errlog, timeout, allow_tcg, extra_args,
+             command=None, wait_for=None):
     """Boot the image via run.sh and return a dict describing what happened.
 
     run.sh is reused rather than reimplemented. Its QEMU invocation is the one
@@ -498,20 +498,34 @@ def run_boot(root, image, log, errlog, timeout, allow_tcg, extra_args, command=N
     attached under "test_summary".
     """
     os.makedirs(os.path.dirname(log), exist_ok=True)
-    for path in (log, errlog, log + ".watchdog"):
+    for path in (log, errlog, f"{log}.watchdog"):
         try:
             os.unlink(path)
         except FileNotFoundError:
             pass
 
-    env = dict(os.environ)
-    env.update({"IMAGE": image, "LOG": log, "HEADLESS": "1",
-                # Strictly later than our own deadline: the watchdog is the
-                # backstop for this loop failing, not the primary bound. Never
-                # 0 -- run.sh documents that as the unbounded interactive run,
-                # and inheriting it here would make CI able to hang forever.
-                "RUN_TIMEOUT": "",
-                "TMPDIR": scratch_dir(root)})
+    serial_socket = None
+    if command is not None:
+        serial_path = os.path.join(os.path.dirname(log), "serial-%d.sock" % os.getpid())
+        try:
+            os.unlink(serial_path)
+        except FileNotFoundError:
+            pass
+        serial_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+
+    env = os.environ | {
+        "IMAGE": image,
+        "LOG": log,
+        "HEADLESS": "1",
+        # Strictly later than our own deadline: the watchdog is the
+        # backstop for this loop failing, not the primary bound. Never
+        # 0 -- run.sh documents that as the unbounded interactive run,
+        # and inheriting it here would make CI able to hang forever.
+        "RUN_TIMEOUT": "",
+        "TMPDIR": scratch_dir(root),
+    }
+    if command is not None:
+        env["BOOT_SMOKE_SERIAL_SOCKET"] = serial_path
     if allow_tcg:
         env["FORCE_TCG"] = "1"
 
@@ -528,6 +542,7 @@ def run_boot(root, image, log, errlog, timeout, allow_tcg, extra_args, command=N
         # invents the reason for the run it is diagnosing is worse than none.
         stop_reason = "bound"
         test_summary = None
+        command_reached = False
         try:
             while True:
                 if time.time() - started > timeout:
@@ -549,38 +564,51 @@ def run_boot(root, image, log, errlog, timeout, allow_tcg, extra_args, command=N
                         # connects to its serial port).
                         time.sleep(0.2)
                         try:
-                            written = proc.stdin.write((command + "\n").encode())
-                            proc.stdin.flush()
+                            if serial_socket is not None:
+                                serial_socket.settimeout(timeout)
+                                serial_socket.connect(serial_path)
+                                connection = serial_socket
+                                connection.settimeout(timeout)
+                                written = connection.send((command + "\n").encode())
+                            else:
+                                written = proc.stdin.write((command + "\n").encode())
+                                proc.stdin.flush()
                             print("DEBUG: Sent command '%s' to guest (%d bytes written)"
                                   % (command, written), file=sys.stderr)
                         except BrokenPipeError:
-                            print("DEBUG: Failed to send command '%s' - broken pipe"
-                                  % command, file=sys.stderr)
+                            print(
+                                f"DEBUG: Failed to send command '{command}' - broken pipe",
+                                file=sys.stderr,
+                            )
                             test_summary = None
                         except Exception as e:
-                            print("DEBUG: Failed to send command '%s' - %s"
-                                  % (command, e), file=sys.stderr)
+                            print(f"DEBUG: Failed to send command '{command}' - {e}", file=sys.stderr)
                             test_summary = None
                         else:
                             # Poll for the SUMMARY line, which the test-runner prints
                             # when it finishes running all suites.
                             deadline = time.time() + timeout
-                            while time.time() < deadline:
-                                if proc.poll() is not None:
-                                    break
+                            while time.time() < deadline and proc.poll() is None:
                                 text = load_text(read_log(log))
+                                if serial_socket is not None:
+                                    try:
+                                        connection.recv(4096)
+                                    except socket.timeout:
+                                        pass
+                                    text = load_text(read_log(log))
+                                if wait_for and wait_for in text:
+                                    command_reached = True
+                                    break
                                 if "==================== SUMMARY ====================" in text:
                                     test_summary = _parse_summary(text)
                                     break
                                 time.sleep(0.05)
-                            else:
-                                # Timeout: the test-runner didn't produce a summary
-                                # within the allotted time.
-                                pass
+
                     break
-                    qemu_pid = find_qemu(proc.pid)
                 time.sleep(0.025)
         finally:
+            if serial_socket is not None:
+                serial_socket.close()
             # SIGTERM, always. QEMU's chardev writes are asynchronous and
             # SIGKILL drops the tail of the serial log, which then reads as a
             # hang at the last line printed rather than as what happened.
@@ -605,7 +633,7 @@ def run_boot(root, image, log, errlog, timeout, allow_tcg, extra_args, command=N
                 timed_out_draining = False
 
     elapsed = time.time() - started
-    watchdog = os.path.exists(log + ".watchdog")
+    watchdog = os.path.exists(f"{log}.watchdog")
     try:
         with open(errlog, "rb") as fh:
             err = fh.read().decode("utf-8", "replace")
@@ -626,6 +654,7 @@ def run_boot(root, image, log, errlog, timeout, allow_tcg, extra_args, command=N
         "stderr": err,
         "log_bytes": len(read_log(log)),
         "test_summary": test_summary,
+        "command_reached": command_reached,
     }
 
 
@@ -640,13 +669,27 @@ def _parse_summary(text):
         if "==================== SUMMARY ====================" in line:
             # Look for the Suites and Tests lines in the next few lines
             for j in range(i + 1, min(i + 4, len(lines))):
-                m = re.match(r"Suites:\s+(\d+)\s+total,\s+(\d+)\s+passed,\s+(\d+)\s+failed,\s+(\d+)\s+skipped", lines[j])
-                if m:
-                    result["suites"] = {"total": int(m.group(1)), "passed": int(m.group(2)), "failed": int(m.group(3)), "skipped": int(m.group(4))}
+                if m := re.match(
+                    r"Suites:\s+(\d+)\s+total,\s+(\d+)\s+passed,\s+(\d+)\s+failed,\s+(\d+)\s+skipp+ed",
+                    lines[j],
+                ):
+                    result["suites"] = {
+                        "total": int(m[1]),
+                        "passed": int(m[2]),
+                        "failed": int(m[3]),
+                        "skipped": int(m[4]),
+                    }
                     continue
-                m = re.match(r"Tests:\s+(\d+)\s+total,\s+(\d+)\s+passed,\s+(\d+)\s+failed,\s+(\d+)\s+skipped", lines[j])
-                if m:
-                    result["tests"] = {"total": int(m.group(1)), "passed": int(m.group(2)), "failed": int(m.group(3)), "skipped": int(m.group(4))}
+                if m := re.match(
+                    r"Tests:\s+(\d+)\s+total,\s+(\d+)\s+passed,\s+(\d+)\s+failed,\s+(\d+)\s+skipp+ed",
+                    lines[j],
+                ):
+                    result["tests"] = {
+                        "total": int(m[1]),
+                        "passed": int(m[2]),
+                        "failed": int(m[3]),
+                        "skipped": int(m[4]),
+                    }
                     continue
             break
     return result
@@ -659,28 +702,35 @@ def print_runtime_tests(info, text):
     """
     summary = info.get("test_summary")
     lines = text.splitlines()
-    summary_idx = None
-    for i, line in enumerate(lines):
-        if "==================== SUMMARY ====================" in line:
-            summary_idx = i
-            break
+    summary_idx = next(
+        (
+            i
+            for i, line in enumerate(lines)
+            if "==================== SUMMARY ====================" in line
+        ),
+        None,
+    )
+
     if summary_idx is None:
         print("runtime-tests: no summary produced by the guest")
         return "skip"
     print("=== Runtime tests ===")
+
     # Print suite result lines found before the summary
     for i in range(summary_idx):
         if "=== Suite " in lines[i]:
-            print("  %s" % lines[i][:160])
+            print(f"  {lines[i][:160]}")
+
     # Print the summary block
     for j in range(summary_idx, min(summary_idx + 4, len(lines))):
-        print("  %s" % lines[j][:160])
+        print(f"  {lines[j][:160]}")
+
     # Determine verdict
     failed_suites = 0
     failed_tests = 0
     if summary:
-        failed_suites = summary.get("suites", {}).get("failed", 0)
-        failed_tests = summary.get("tests", {}).get("failed", 0)
+        failed_suites = (summary.get("suites") or {}).get("failed", 0)
+        failed_tests = (summary.get("tests") or {}).get("failed", 0)
     if failed_suites or failed_tests:
         print("runtime-tests: FAIL -- %d suite(s) and %d test(s) failed"
               % (failed_suites, failed_tests))
@@ -773,15 +823,16 @@ def corruption_note(raw):
 
 def report_fail(reason_lines, log, log_path, info, raw=b""):
     out = ["boot-smoke: FAIL"]
-    out += ["  " + ln for ln in reason_lines]
-    note = corruption_note(raw)
-    if note:
-        out.append("  NOTE: %s" % note)
+    out += [f"  {ln}" for ln in reason_lines]
+    if note := corruption_note(raw):
+        out.append(f"  NOTE: {note}")
+
     if info.get("timed_out_draining"):
         out.append("  WARNING: QEMU did not finish within %.0fs of being asked "
                    "to stop, so the log below may be truncated and this verdict "
                    "is less trustworthy than it looks"
                    % DRAIN_TIMEOUT)
+
     out.append("  serial log: %s (%d bytes)" % (log_path, info["log_bytes"]))
     # How the run ended, from the reason this harness's own poll loop stopped,
     # corroborated by run.sh's watchdog marker. Reporting the loop's own reason
@@ -797,16 +848,19 @@ def report_fail(reason_lines, log, log_path, info, raw=b""):
                % (info["run_status"], why,
                   "; run.sh's watchdog also fired" if info["watchdog"] else "",
                   info["elapsed"]))
-    qemu_err = [ln for ln in info["stderr"].splitlines()
-                if ln.startswith("qemu-system-x86_64: ")
-                and "terminating on signal" not in ln]
-    if qemu_err:
+
+    if qemu_err := [
+        ln
+        for ln in info["stderr"].splitlines()
+        if ln.startswith("qemu-system-x86_64: ")
+        and "terminating on signal" not in ln
+    ]:
         out.append("  qemu said:")
-        out += ["    " + ln for ln in qemu_err[:6]]
-    tail = tail_lines(log, 12)
-    if tail:
+        out += [f"    {ln}" for ln in qemu_err[:6]]
+
+    if tail := tail_lines(log, 12):
         out.append("  last lines of the log:")
-        out += ["    " + ln[:150] for ln in tail]
+        out += [f"    {ln[:150]}" for ln in tail]
     return "\n".join(out)
 
 
@@ -816,8 +870,10 @@ def evaluate(text, log_path, info, raw=b""):
     if signatures:
         lines = ["failure signature(s) in the serial log -- the boot reached "
                  "its prompt or nearly did and then broke:"]
-        for name, _needle, line_no, line in signatures:
-            lines.append("%s at line %d: %s" % (name, line_no, line))
+        lines.extend(
+            "%s at line %d: %s" % (name, line_no, line)
+            for name, _needle, line_no, line in signatures
+        )
         return report_fail(lines, text, log_path, info, raw)
 
     if missing is not None:
@@ -827,21 +883,17 @@ def evaluate(text, log_path, info, raw=b""):
             "milestone %d of %d never appeared: %s"
             % (n, len(MILESTONES), mid),
             "  expected in the serial log: %r" % needle,
-            "  its absence means: %s" % why,
-            "  milestones reached in order: %s"
-            % (", ".join(f[0] for f in found) or "none"),
+            f"  its absence means: {why}",
+            f'  milestones reached in order: {", ".join(f[0] for f in found) or "none"}',
         ]
-        # Milestones found somewhere but not followable in the chain. Naming
-        # them is what stops "the boot stopped at milestone 3" being read as
-        # "the kernel died there" when what happened is that a line was
-        # written out of order or dropped.
-        stray = [m[0] for m in MILESTONES if m[0] in present
-                 and m[0] not in {f[0] for f in found}]
-        if stray:
-            lines.append("  present in the log but NOT in the chain: %s -- so "
-                         "this is a log that is out of order or missing text, "
-                         "not a boot that stopped here"
-                         % ", ".join(stray))
+        if stray := [
+            m[0]
+            for m in MILESTONES
+            if m[0] in present and m[0] not in {f[0] for f in found}
+        ]:
+            lines.append(
+                f'  present in the log but NOT in the chain: {", ".join(stray)} -- so this is a log that is out of order or missing text, not a boot that stopped here'
+            )
         if not found and info["log_bytes"] == 0:
             lines.append("  the log is 0 bytes: that is a bad command, a full "
                          "filesystem or a wrong path, not a silent guest")
@@ -883,10 +935,10 @@ def self_test():
     def check(name, cond, detail=""):
         total[0] += 1
         if cond:
-            print("  ok   %s" % name)
+            print(f"  ok   {name}")
         else:
             failures.append(name)
-            print("  FAIL %s %s" % (name, detail))
+            print(f"  FAIL {name} {detail}")
 
     print("boot-smoke self-test: the classifier")
 
@@ -939,9 +991,11 @@ def self_test():
         late = text + "\r\n" + ("some prefix | %s | and then it stops\r\n"
                                 % needle)
         _f, miss, sigs, _p = scan(late)
-        check("%s after the prompt still fails" % name,
-              miss is None and any(s[0] == name for s in sigs),
-              "missing=%r sigs=%r" % (miss, sigs))
+        check(
+            f"{name} after the prompt still fails",
+            miss is None and any(s[0] == name for s in sigs),
+            "missing=%r sigs=%r" % (miss, sigs),
+        )
 
     # The NUL-corruption case, sized from a real log out of this tree: three
     # runs of 3, 42 and 48 bytes at offsets 1084, 1594 and 1712, plus a
@@ -1060,7 +1114,7 @@ def self_test():
 
     print("boot-smoke self-test: %d checks, %d failed"
           % (total[0], len(failures)))
-    return EXIT_PASS if not failures else EXIT_FAIL
+    return EXIT_FAIL if failures else EXIT_PASS
 
 
 # --------------------------------------------------------------------------
@@ -1069,13 +1123,14 @@ def main(argv):
     if "--self-test" in argv:
         return self_test()
 
-    image = "build/os.img"
     timeout_s = os.environ.get("BOOT_SMOKE_TIMEOUT", str(DEFAULT_TIMEOUT))
     allow_tcg = os.environ.get("BOOT_SMOKE_ALLOW_TCG", "") not in ("", "0")
     extra = []
     run_tests = False
+    run_command = None
     args = argv[1:]
     i = 0
+    image = "build/os.img"
     while i < len(args):
         if args[i] == "--image" and i + 1 < len(args):
             image = args[i + 1]
@@ -1083,6 +1138,9 @@ def main(argv):
         elif args[i] == "--run-tests":
             run_tests = True
             i += 1
+        elif args[i] == "--run-command" and i + 1 < len(args):
+            run_command = args[i + 1]
+            i += 2
         else:
             extra.append(args[i])
             i += 1
@@ -1105,28 +1163,27 @@ def main(argv):
     # ---- skip: is there anything here that can run a guest at all? --------
     qemu, why = which_qemu()
     if not qemu:
-        print("boot-smoke: SKIP -- %s" % why)
+        print(f"boot-smoke: SKIP -- {why}")
         print("           the kernel boot path was NOT exercised")
         return EXIT_SKIP
 
     kvm_ok, kvm_why = kvm_expected()
     if not kvm_ok and not allow_tcg:
-        print("boot-smoke: SKIP -- %s" % kvm_why)
+        print(f"boot-smoke: SKIP -- {kvm_why}")
         print("           the kernel boot path was NOT exercised")
         print("           (set BOOT_SMOKE_ALLOW_TCG=1 to run under emulation "
               "instead; TCG boots this image)")
         return EXIT_SKIP
     if not kvm_ok:
-        print("boot-smoke: %s; BOOT_SMOKE_ALLOW_TCG=1, running under TCG"
-              % kvm_why)
+        print(f"boot-smoke: {kvm_why}; BOOT_SMOKE_ALLOW_TCG=1, running under TCG")
 
     # ---- fail before booting: a stale image makes every verdict a lie -----
     src_root = image_root(image)
     if src_root is None:
-        print("boot-smoke: harness error: cannot work out which source tree "
-              "%s belongs to, so its freshness cannot be checked and this run "
-              "would prove nothing. Expected <tree>/build/os.img with a src/ "
-              "beside <tree>." % image, file=sys.stderr)
+        print(
+            f"boot-smoke: harness error: cannot work out which source tree {image} belongs to, so its freshness cannot be checked and this run would prove nothing. Expected <tree>/build/os.img with a src/ beside <tree>.",
+            file=sys.stderr,
+        )
         return EXIT_FAIL
     fresh, detail = image_is_fresh(src_root, image)
     if not fresh:
@@ -1134,42 +1191,50 @@ def main(argv):
         # Saying "serial log: <the image>" here would be a small lie that
         # sends the next reader to a 64 MiB binary instead of a log.
         print("boot-smoke: FAIL -- harness error, nothing was booted")
-        print("  %s" % detail)
-        print("  image: %s" % image)
-        print("  source tree: %s" % src_root)
+        print(f"  {detail}")
+        print(f"  image: {image}")
+        print(f"  source tree: {src_root}")
         return EXIT_FAIL
 
     scratch = scratch_dir(ROOT)
     try:
         os.makedirs(scratch, exist_ok=True)
     except OSError as exc:
-        print("boot-smoke: harness error: cannot create the scratch directory "
-              "%s (%s). A full filesystem here yields a 0-byte serial log and "
-              "reads as a silent guest." % (scratch, exc), file=sys.stderr)
+        print(
+            f"boot-smoke: harness error: cannot create the scratch directory {scratch} ({exc}). A full filesystem here yields a 0-byte serial log and reads as a silent guest.",
+            file=sys.stderr,
+        )
         return EXIT_FAIL
     if free_bytes(scratch) < 8 * 1024 * 1024:
-        print("boot-smoke: harness error: less than 8 MiB free under %s. A "
-              "serial log that cannot be written is a 0-byte log, and a 0-byte "
-              "log has been read as a healthy guest in this project before."
-              % scratch, file=sys.stderr)
+        print(
+            f"boot-smoke: harness error: less than 8 MiB free under {scratch}. A serial log that cannot be written is a 0-byte log, and a 0-byte log has been read as a healthy guest in this project before.",
+            file=sys.stderr,
+        )
         return EXIT_FAIL
 
     # Never boot the shared build/os.img: QEMU takes a write lock on it and
     # every other agent is booting from their own copy of it.
     mine = os.path.join(scratch, "os-%d.img" % os.getpid())
     log = os.path.join(scratch, "serial-%d.log" % os.getpid())
-    errlog = log + ".err"
+    errlog = f"{log}.err"
     try:
         shutil.copyfile(image, mine)
     except OSError as exc:
-        print("boot-smoke: harness error: cannot copy the image to %s (%s)"
-              % (mine, exc), file=sys.stderr)
+        print(
+            f"boot-smoke: harness error: cannot copy the image to {mine} ({exc})",
+            file=sys.stderr,
+        )
         return EXIT_FAIL
 
     accel = "TCG" if (not kvm_ok or os.environ.get("FORCE_TCG")) else "KVM"
     try:
-        command = "run runtime-tests" if run_tests else None
-        info = run_boot(ROOT, mine, log, errlog, timeout, allow_tcg, extra, command)
+        command = "run runtime-tests" if run_tests else (
+            f"run {run_command}" if run_command else None
+        )
+        info = run_boot(
+            ROOT, mine, log, errlog, timeout, allow_tcg, extra, command,
+            "frame presented" if run_command == "triangle" else None,
+        )
     finally:
         # The copy goes and the log stays: the image is reproducible from the
         # tree, and leaving a stale copy lying around is how this project read
@@ -1191,18 +1256,26 @@ def main(argv):
         if verdict == "skip":
             print("boot-smoke: SKIP -- QEMU would not start a guest")
             for ln in complaints[:4]:
-                print("           %s" % ln)
+                print(f"           {ln}")
             print("           the kernel boot path was NOT exercised")
             return EXIT_SKIP
-        print(report_fail(
-            ["harness error: the serial log is 0 bytes, so the guest produced "
-             "no output at all and this run says nothing about the kernel",
-             "  qemu found at: %s" % qemu,
-             "  accelerator pre-check: %s" % kvm_why,
-             "  if the log file exists and is empty, the log was never "
-             "written: check the path, the free space under FR_TMPDIR, and "
-             "the colon in -serial chardev:s0"],
-            text, log, info), file=sys.stderr)
+        print(
+            report_fail(
+                [
+                    "harness error: the serial log is 0 bytes, so the guest produced "
+                    "no output at all and this run says nothing about the kernel",
+                    f"  qemu found at: {qemu}",
+                    f"  accelerator pre-check: {kvm_why}",
+                    "  if the log file exists and is empty, the log was never "
+                    "written: check the path, the free space under FR_TMPDIR, and "
+                    "the colon in -serial chardev:s0",
+                ],
+                text,
+                log,
+                info,
+            ),
+            file=sys.stderr,
+        )
         return EXIT_FAIL
 
     failure = evaluate(text, log, info, raw)
@@ -1220,18 +1293,26 @@ def main(argv):
         if verdict == "fail":
             print("runtime-tests: FAIL")
             return EXIT_FAIL
+    if run_command:
+        if not info.get("command_reached"):
+            print(f"guest command {run_command!r} did not reach its success marker")
+            print(f"           serial log: {log}")
+            return EXIT_FAIL
+        print(f"guest command {run_command!r}: PASS")
 
     print("boot-smoke: PASS -- %d/%d milestones in order, no failure "
           "signature, %.1fs (%s)"
           % (len(MILESTONES), len(MILESTONES), info["elapsed"], accel))
     note = corruption_note(raw)
     if info.get("timed_out_draining"):
-        note = ((note + "; ") if note else "") + (
-            "QEMU did not finish within %.0fs of being asked to stop, so the "
-            "log may be truncated" % DRAIN_TIMEOUT)
+        note = (
+            (f"{note}; " if note else "")
+            + "QEMU did not finish within %.0fs of being asked to stop, so the "
+            "log may be truncated" % DRAIN_TIMEOUT
+        )
     if note:
-        print("           WARNING: %s" % note)
-    print("           serial log: %s" % log)
+        print(f"           WARNING: {note}")
+    print(f"           serial log: {log}")
     return EXIT_PASS
 
 
