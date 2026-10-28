@@ -20,6 +20,7 @@
 #include <io.h>
 #include <boot.h>
 #include <vmm.h>
+#include <tty.h>
 
 /* ------------------------------------------------------------ VGA text ------ */
 
@@ -502,10 +503,12 @@ static void console_newline(void)
     uint32_t rows = FB_TEXT_ROWS();
 
     if (cursor_y >= rows) {
-        if (vga_enabled)
-            vga_scroll();
-        if (console_fb_active())
-            console_fb_scroll();
+        if (!tty_screen_owned()) {
+            if (vga_enabled)
+                vga_scroll();
+            if (console_fb_active())
+                console_fb_scroll();
+        }
         cursor_y = rows - 1;
     }
 }
@@ -652,17 +655,19 @@ void console_putc_attr(char c, uint8_t attr)
     if (c == '\b') {
         if (cursor_x > 0)
             cursor_x--;
-        if (console_fb_active())
+        if (!tty_screen_owned() && console_fb_active())
             console_fb_move(cursor_x, cursor_y);
         if (serial_enabled)
             serial_putc_blocking('\b');
         return;
     }
 
-    if (vga_enabled)
-        vga_putc_at(cursor_x, cursor_y, c, attr);
-    if (console_fb_active())
-        console_fb_putc(c, attr);
+    if (!tty_screen_owned()) {
+        if (vga_enabled)
+            vga_putc_at(cursor_x, cursor_y, c, attr);
+        if (console_fb_active())
+            console_fb_putc(c, attr);
+    }
 
     if (serial_enabled)
         serial_putc_blocking(c);
@@ -709,7 +714,7 @@ void console_write_raw(const char *s, size_t n)
         }
         if (c == '\r') {
             cursor_x = 0;
-            if (console_fb_active())
+            if (!tty_screen_owned() && console_fb_active())
                 console_fb_move(0, cursor_y);
             if (serial_enabled)
                 serial_putc_blocking('\r');
@@ -718,9 +723,9 @@ void console_write_raw(const char *s, size_t n)
         if (c == '\t') {
             /* Tab stops every 8 columns. */
             do {
-                if (vga_enabled)
+                if (!tty_screen_owned() && vga_enabled)
                     vga_putc_at(cursor_x, cursor_y, ' ', current_attr);
-                if (console_fb_active())
+                if (!tty_screen_owned() && console_fb_active())
                     console_fb_putc(' ', current_attr);
                 cursor_x++;
                 if (vga_enabled && cursor_x >= VGA_COLS)
@@ -735,17 +740,19 @@ void console_write_raw(const char *s, size_t n)
         if (c == '\b') {
             if (cursor_x > 0)
                 cursor_x--;
-            if (console_fb_active())
+            if (!tty_screen_owned() && console_fb_active())
                 console_fb_move(cursor_x, cursor_y);
             if (serial_enabled)
                 serial_putc_blocking('\b');
             continue;
         }
 
-        if (vga_enabled)
-            vga_putc_at(cursor_x, cursor_y, c, current_attr);
-        if (console_fb_active())
-            console_fb_putc(c, current_attr);
+        if (!tty_screen_owned()) {
+            if (vga_enabled)
+                vga_putc_at(cursor_x, cursor_y, c, current_attr);
+            if (console_fb_active())
+                console_fb_putc(c, current_attr);
+        }
 
         if (serial_enabled)
             serial_putc_blocking(c);

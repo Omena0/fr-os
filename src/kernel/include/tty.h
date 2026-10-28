@@ -21,6 +21,33 @@
 #include <types.h>
 
 /*
+ * Screen ownership APIs. Call tty_screen_claim() when a process wants exclusive
+ * access to the screen (e.g. a fullscreen graphics program), and
+ * tty_screen_release() when it no longer owns it. The console skips VGA and
+ * framebuffer writes while the screen is owned, but serial output always
+ * passes through.
+ *
+ * The claim is exclusive: a second claim while the screen is owned is a
+ * no-op and the second caller does not gain ownership. Release is always
+ * allowed.
+ */
+/*
+ * Claim or release ownership of the screen. While owned, console VGA and
+ * framebuffer output is skipped so the owning program's rendering is not
+ * overwritten. Serial output always passes through.
+ *
+ * The claim is exclusive: a second claim while the screen is owned by someone
+ * else is rejected. Release is always allowed.
+ *
+ * Returns 0 on success, or -EPERM if the screen is already owned by another
+ * process.
+ */
+int tty_screen_claim(void);
+void tty_screen_release(void);
+bool tty_screen_owned(void);
+u32 tty_screen_owner_pid(void);
+
+/*
  * Attach the ring storage, install the keyboard handler and turn scanning on.
  *
  * Must be called from kmain after idt_init() -- it calls idt_set_handler(), and
@@ -42,3 +69,4 @@ u64 tty_write_dropped(void);
 u64 tty_read_dropped(void);
 
 #endif /* TTY_H */
+

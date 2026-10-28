@@ -74,9 +74,73 @@ static spinlock_t in_lock;
 static u64 out_dropped;
 static u64 in_dropped;
 
-/* Reported through tty_write_dropped() only once per burst; the input counter
+/*
+ * Screen ownership: at most one process owns the screen at a time. When
+ * the screen is owned, console VGA and framebuffer output is skipped so
+ * the owning program's rendering is not overwritten. Serial output always
+ * passes through.
+ *
+ * The kernel enforces ownership: a process must call SYS_screen_claim to
+ * gain ownership before it can successfully call SYS_gfx_present. The
+ * claim is released automatically on process exit (via the task destructor
+ * in sched.c or when the process explicitly calls SYS_screen_release).
+ */
+
+/*
+ * Reported through tty_write_dropped() only once per burst; the input counter
  * is not reported from the handler at all, for the reason given at tty_in_push(). */
 static bool out_dropped_reported;
+
+/*
+ * Screen ownership: at most one process owns the screen at a time. When
+ * the screen is owned, console VGA and framebuffer output is skipped so
+ * the owning program's rendering is not overwritten. Serial output always
+ * passes through.
+ *
+ * The kernel enforces ownership: a process must call SYS_screen_claim to
+ * gain ownership before it can successfully call SYS_gfx_present. The
+ * claim is released automatically on process exit (via the task destructor
+ * in sched.c or when the process explicitly calls SYS_screen_release).
+ */
+static u32 screen_owner_pid = 0;
+
+/*
+ * Claim or release ownership of the screen. While owned, console VGA and
+ * framebuffer output is skipped so the owning program's rendering is not
+ * overwritten. Serial output always passes through.
+ *
+ * The claim is exclusive: a second claim while the screen is owned by someone
+ * else is rejected. The kernel rejects it and returns -EPERM from
+ * SYS_screen_claim; a process whose present gets -EPERM prints a diagnostic and
+ * falls back to scrolling text on the serial console. Release is always allowed.
+ */
+int tty_screen_claim(void)
+{
+    struct task *t = current_task();
+
+    if (!t)
+        return -EPERM;
+    /* Already owned by someone else: reject. Not owned, or owned by us: claim. */
+    if (tty_screen_owned() && tty_screen_owner_pid() != t->pid)
+        return -EPERM;
+    screen_owner_pid = t->pid;
+    return 0;
+}
+
+void tty_screen_release(void)
+{
+    screen_owner_pid = 0;
+}
+
+bool tty_screen_owned(void)
+{
+    return screen_owner_pid != 0;
+}
+
+u32 tty_screen_owner_pid(void)
+{
+    return screen_owner_pid;
+}
 
 /* Amount copied out of the output ring before releasing the lock, so the console
  * is never entered with out_lock held. Small enough to stay on the stack. */
@@ -265,7 +329,24 @@ static void tty_in_push(char c)
     if (wake)
         sched_wake(wake);
 
-    console_putc(c);
+    /* Backspace (0x08) and DEL (0x7f): do not echo here. The consumer
+     * (init's REPL) writes "\b \b" through console_write_raw, which
+     * erases the glyph and repositions the cursor in one step. Echoing
+     * '\b' here too would advance the cursor twice and erase the
+     * preceding character instead of the one backspace targets. */
+    if (c == '\b' || c == 0x7f)
+        return;
+
+    /* Control characters display as ^X notation so they appear as visible
+     * glyphs instead of garbage bytes or non-printing codes on screen. */
+    if ((uint8_t)c >= 0x01 && (uint8_t)c <= 0x1f &&
+        (uint8_t)c != '\t' && (uint8_t)c != '\n' &&
+        (uint8_t)c != '\r') {
+        console_putc('^');
+        console_putc((char)('@' + (uint8_t)c));
+    } else {
+        console_putc(c);
+    }
 }
 
 /*
@@ -758,8 +839,10 @@ static const char scancode_shifted[0x40] = {
 /* Make codes with no ASCII of their own. */
 #define SC_LSHIFT 0x2A
 #define SC_RSHIFT 0x36
+#define SC_LCTRL  0x1D
 
 static bool shift_held;
+static bool ctrl_held;
 
 /*
  * True once an 0xE0 prefix has been seen. The prefix itself is not a key, and
@@ -780,6 +863,12 @@ static char tty_translate(uint8_t make)
     c = scancode_base[make];
     if (c == 0)
         return 0;
+
+    /* Ctrl+letter: convert A-Z to 0x01-0x1A. */
+    if (ctrl_held && c >= 'a' && c <= 'z')
+        return (char)(c & 0x1F);
+    if (ctrl_held && c >= 'A' && c <= 'Z')
+        return (char)(c & 0x1F);
 
     if (!shift_held)
         return c;
@@ -853,6 +942,10 @@ static void keyboard_scancode(uint8_t sc)
      * every later key into upper case. */
     if (code == SC_LSHIFT || code == SC_RSHIFT) {
         shift_held = make;
+        return;
+    }
+    if (code == SC_LCTRL) {
+        ctrl_held = make;
         return;
     }
 
@@ -1063,7 +1156,7 @@ void tty_init(void)
 
     irq_restore(flags);
 
-    klog(KLOG_INFO, "tty: rings %u bytes each, 8042 up, keyboard on "
+klog(KLOG_INFO, "tty: rings %u bytes each, 8042 up, keyboard on "
          "vector %u, COM1 receive on vector %u\n", (unsigned)TTY_RING_CAP,
          VECTOR_IRQ_KEYBOARD, VECTOR_IRQ_COM1);
 }

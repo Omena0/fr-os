@@ -17,6 +17,13 @@ int main(void)
     printf("triangle: rendering on a %ux%u framebuffer\n",
            canvas.width, canvas.height);
 
+    /* Claim the screen before rendering. */
+    if (gfx_claim_screen() < 0) {
+        fprintf(stderr, "triangle: could not claim screen (%d)\n", errno);
+        gfx_close(&canvas);
+        return 1;
+    }
+
     /* Three deliberately arbitrary, fixed points for a repeatable demo. */
     x0 = (int)(canvas.width * 19 / 100); y0 = (int)(canvas.height * 72 / 100);
     x1 = (int)(canvas.width * 77 / 100); y1 = (int)(canvas.height * 81 / 100);
@@ -38,6 +45,16 @@ int main(void)
     }
     static const char done[] = "triangle: frame presented\n";
     (void)write(STDOUT_FILENO, done, sizeof(done) - 1);
+
+    /* Wait for Ctrl+C before returning to the shell. */
+    {
+        char c;
+        while (read(STDIN_FILENO, &c, 1) > 0) {
+            if (c == 0x03)  /* Ctrl+C */
+                break;
+        }
+    }
+
     gfx_close(&canvas);
     return 0;
 }

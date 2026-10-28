@@ -37,6 +37,7 @@
 #include <process.h>
 #include <syscall.h>
 #include <console.h>
+#include <tty.h>
 #include <uapi/graphics.h>
 
 #define SYSCALL_LOG(level, ...)                                              \
@@ -175,6 +176,19 @@ static long sc_getcpu(struct syscall_regs *r)
     return copy_to_user(arg0(r), &pair, sizeof(pair)) < 0 ? -EFAULT : 0;
 }
 
+static long sc_screen_claim(struct syscall_regs *r)
+{
+    UNUSED(r);
+    return tty_screen_claim();
+}
+
+static long sc_screen_release(struct syscall_regs *r)
+{
+    UNUSED(r);
+    tty_screen_release();
+    return 0;
+}
+
 static long sc_gfx_info(struct syscall_regs *r)
 {
     struct framebuffer_info fb;
@@ -204,6 +218,8 @@ static long sc_gfx_present(struct syscall_regs *r)
 
     if (!console_framebuffer_get_info(&fb) || fb.bpp != 32)
         return -ENODEV;
+    if (!tty_screen_owned() || tty_screen_owner_pid() != current_task()->pid)
+        return -EPERM;
     total = (uint64_t)fb.width * fb.height * 4;
     if (len != total || !user_range_ok(syscall_user_mm(), src, len))
         return -EINVAL;
@@ -1315,6 +1331,8 @@ void syscall_init(void)
     syscall_table[SYS_futex] = sc_futex;
     syscall_table[SYS_sched_yield] = sc_sched_yield;
     syscall_table[SYS_getcpu] = sc_getcpu;
+    syscall_table[SYS_screen_claim] = sc_screen_claim;
+    syscall_table[SYS_screen_release] = sc_screen_release;
     syscall_table[SYS_gfx_info] = sc_gfx_info;
     syscall_table[SYS_gfx_present] = sc_gfx_present;
     syscall_table[SYS_mremap] = sc_mremap;

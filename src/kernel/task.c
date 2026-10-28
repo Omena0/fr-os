@@ -24,6 +24,7 @@
 #include <sched.h>
 #include <process.h>
 #include <syscall.h>
+#include <tty.h>
 
 KLOG_SUBSYSTEM("task");
 
@@ -385,6 +386,13 @@ void task_release_resources(struct task *t)
         kfree((void *)((u64)t->fpu_state & ~63ULL),
               TASK_FPU_STATE_SIZE + 64);
         t->fpu_state = NULL;
+    }
+
+    /*
+     * Release screen ownership when this task exits.
+     */
+    if (tty_screen_owned() && tty_screen_owner_pid() == t->pid) {
+        tty_screen_release();
     }
 
     /*

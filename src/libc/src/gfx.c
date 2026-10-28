@@ -182,3 +182,13 @@ int gfx_present(struct gfx_canvas *canvas)
     ret = __syscall2(SYS_gfx_present, (long)canvas->pixels, (long)bytes);
     return syscall_status(ret);
 }
+
+int gfx_claim_screen(void)
+{
+    long ret;
+
+    ret = __syscall1(SYS_screen_claim, 0);
+    if (ret < 0)
+        return syscall_status(ret);
+    return 0;
+}
