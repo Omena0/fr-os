@@ -451,7 +451,7 @@ static int dispatch(int argc, char **argv)
         }
     } else if (strcmp(argv[0], "exit") == 0) {
         say("exit: Shutting down.");
-        sys_shutdown(1);  /* halt the CPU */
+        sys_shutdown(0);  /* CF9 reset - halt QEMU */
     } else {
         say("unknown command '%s' - try 'help'", argv[0]);
     }
