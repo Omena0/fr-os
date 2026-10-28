@@ -7,6 +7,7 @@
 
 extern long __syscall1(long number, long a1);
 extern long __syscall2(long number, long a1, long a2);
+extern long __syscall0(long number);
 
 static int syscall_status(long ret)
 {
@@ -191,4 +192,10 @@ int gfx_claim_screen(void)
     if (ret < 0)
         return syscall_status(ret);
     return 0;
+}
+
+void gfx_claim_screen_release(void)
+{
+    long ret = __syscall0(SYS_screen_release);
+    (void)syscall_status(ret);
 }

@@ -326,8 +326,11 @@ static int test_graphics_triangle(void) {
     TEST_ASSERT_EQ(canvas.pixels[16 * canvas.width + 16], fg,
                    "filled triangle should color an interior pixel");
     TEST_ASSERT_EQ(canvas.pixels[0], bg, "clear should color the background");
+    /* Claim the screen so gfx_present accepts the backbuffer. */
+    TEST_ASSERT_EQ(gfx_claim_screen(), 0, "gfx_claim_screen should succeed");
     TEST_ASSERT_EQ(gfx_present(&canvas), 0, "present should accept the backbuffer");
     gfx_close(&canvas);
+    gfx_claim_screen_release();
     return TEST_PASS;
 }
 
