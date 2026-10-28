@@ -15,7 +15,12 @@
 #include <unistd.h>
 #include <version.h>
 #include <sys/auxv.h>
-#include <uapi/syscall.h>
+
+/* Wait status macros */
+#define WIFEXITED(wstatus)   (((wstatus) & 0xFF) == 0)
+#define WEXITSTATUS(wstatus)  (((wstatus) & 0xFF00) >> 8)
+#define WIFSIGNALED(wstatus)  (((wstatus) & 0xFF) > 0 && ((wstatus) & 0xFF) <= 0x7F)
+#define WTERMSIG(wstatus)     ((wstatus) & 0x7F)
 
 extern char **environ;
 
@@ -399,10 +404,10 @@ static int dispatch(int argc, char **argv)
         }
     } else if (strcmp(argv[0], "run") == 0) {
         /*
-         * Hand the process over. execve only returns on failure, so
-         * anything printed after this point is a diagnostic about why --
-         * there is deliberately no success path back here, because a
-         * successful exec never comes back.
+         * Fork and exec the program. The parent waits for it, then
+         * continues the REPL loop. The child executes and only returns
+         * on failure. The exit code of the child is displayed by the
+         * parent if the child exited normally.
          */
         if (argc < 2) {
             say("run: expected a program name");
@@ -410,18 +415,37 @@ static int dispatch(int argc, char **argv)
             return 0;
         }
 
-        char *child_argv[8];
-        int child_argc = 0;
+        pid_t pid = fork();
+        if (pid < 0) {
+            say("run: fork failed: %s", strerror(errno));
+            return 0;
+        } else if (pid == 0) {
+            /* Child */
+            char *child_argv[8];
+            int child_argc = 0;
 
-        child_argv[child_argc++] = argv[1];
-        for (int a = 2; a < argc && child_argc < 7; a++)
-            child_argv[child_argc++] = argv[a];
-        child_argv[child_argc] = NULL;
+            child_argv[child_argc++] = argv[1];
+            for (int a = 2; a < argc && child_argc < 7; a++)
+                child_argv[child_argc++] = argv[a];
+            child_argv[child_argc] = NULL;
 
-        execve(argv[1], child_argv, environ);
+            execve(argv[1], child_argv, environ);
 
-        say("run: execve(\"%s\") failed: %s", argv[1], strerror(errno));
-        say("     errno %d", errno);
+            /* execve only returns on failure */
+            say("run: execve(\"%s\") failed: %s", argv[1], strerror(errno));
+            say("     errno %d", errno);
+            return EXIT_FAILURE;
+        }
+
+        /* Parent: wait for the child */
+        int status;
+        waitpid(pid, &status, 0);
+
+        if (WIFEXITED(status)) {
+            say("run: program exited with status %d", WEXITSTATUS(status));
+        } else if (WIFSIGNALED(status)) {
+            say("run: program was killed by signal %d", WTERMSIG(status));
+        }
     } else if (strcmp(argv[0], "exit") == 0) {
         say("exit: reboot syscall is not implemented yet");
         say("exit: the kernel exposes no power-management interface");
