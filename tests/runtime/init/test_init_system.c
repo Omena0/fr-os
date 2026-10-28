@@ -5,6 +5,8 @@
  */
 
 #include "test_framework.h"
+#include <gfx.h>
+#include <errno.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,7 +14,6 @@
 #include <time.h>
 
 /* errno values from libc */
-#define ERANGE      1
 #define ENOMEM      12
 #define EINVAL      22
 
@@ -158,8 +159,8 @@ static int test_memmove_overlap_basic(void) {
     char dst[20];
     memcpy(dst, src, 11);
     
-    memmove(dst + 3, dst + 1, 5); /* "defgh" -> "cdef" */
-    TEST_ASSERT_EQ(memcmp(dst + 3, "cdefg", 5), 0, "memmove with overlap should work");
+    memmove(dst + 3, dst + 1, 5);
+    TEST_ASSERT_EQ(memcmp(dst + 3, "bcdef", 5), 0, "memmove with overlap should work");
     return TEST_PASS;
 }
 
@@ -168,7 +169,7 @@ static int test_memset_basic(void) {
     void *ret = memset(arr, 0xaa, 10);
     TEST_ASSERT_EQ((long long)ret, (long long)arr, "memset should return dst");
     for (int i = 0; i < 10; i++) {
-        TEST_ASSERT_EQ(arr[i], 0xaa, "memset should fill with pattern");
+        TEST_ASSERT_EQ((unsigned char)arr[i], 0xaa, "memset should fill with pattern");
     }
     return TEST_PASS;
 }
@@ -255,9 +256,9 @@ static int test_fread_line_basic(void) {
 }
 
 static int test_fputs_basic(void) {
-    const char *msg = "test\n";
+    const char *msg = "test";
     int ret = puts(msg);
-    TEST_ASSERT(ret == 4, "puts should return length without newline");
+    TEST_ASSERT(ret >= 0, "puts should return success");
     return TEST_PASS;
 }
 
@@ -303,6 +304,30 @@ static int test_getpid_basic(void) {
 static int test_getppid_basic(void) {
     pid_t ppid = getppid();
     TEST_ASSERT(ppid >= 0, "getppid should return non-negative PPID");
+    return TEST_PASS;
+}
+
+static int test_graphics_triangle(void) {
+    struct gfx_canvas canvas;
+    uint32_t bg, fg;
+
+    if (gfx_open(&canvas) < 0) {
+        if (errno == ENODEV)
+            return TEST_SKIP;
+        TEST_ASSERT(0, "gfx_open should succeed when a framebuffer is available");
+    }
+    TEST_ASSERT(canvas.width >= 32 && canvas.height >= 32,
+                "framebuffer should be large enough to draw");
+    bg = gfx_rgb(&canvas, 4, 8, 12);
+    fg = gfx_rgb(&canvas, 240, 180, 40);
+    gfx_clear(&canvas, bg);
+    gfx_fill_triangle(&canvas, 4, 28, 28, 28, 16, 4, fg);
+    gfx_line(&canvas, 4, 28, 28, 28, fg);
+    TEST_ASSERT_EQ(canvas.pixels[16 * canvas.width + 16], fg,
+                   "filled triangle should color an interior pixel");
+    TEST_ASSERT_EQ(canvas.pixels[0], bg, "clear should color the background");
+    TEST_ASSERT_EQ(gfx_present(&canvas), 0, "present should accept the backbuffer");
+    gfx_close(&canvas);
     return TEST_PASS;
 }
 
@@ -354,6 +379,7 @@ struct test_suite test_init_system = {
         { "clock_realtime", test_clock_realtime, false },
         { "getpid_basic", test_getpid_basic, false },
         { "getppid_basic", test_getppid_basic, false },
+        { "graphics_triangle", test_graphics_triangle, false },
         { "exit_basic", test_exit_basic, true },
         { "abort_basic", test_abort_basic, true },
     },

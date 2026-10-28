@@ -13,26 +13,13 @@ static const char *current_test = NULL;
 void test_log(const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
-    /* DEBUG: Log that test_log is called with arguments */
-    write(STDOUT_FILENO, "[DEBUG] test_log called with fmt: ", 40);
-    write(STDOUT_FILENO, fmt, strlen(fmt));
-    write(STDOUT_FILENO, "\n", 1);
-    
     char buf[512];
     size_t len = vsnprintf(buf, sizeof(buf), fmt, ap);
-    
-    /* DEBUG: Log completion */
-    {
-        char len_str[32];
-        int n = snprintf(len_str, sizeof(len_str), "[DEBUG] vsnprintf completed, len=%zu\n", len);
-        if (n > 0) write(STDOUT_FILENO, len_str, (size_t)n);
-    }
-    
     va_end(ap);
+    if (len >= sizeof(buf))
+        len = sizeof(buf) - 1;
     write(STDOUT_FILENO, buf, len);
     write(STDOUT_FILENO, "\n", 1);
-    
-    write(STDOUT_FILENO, "[DEBUG] test_log finished\n", 27);
 }
 
 void test_fail(const char *file, int line, const char *cond, const char *msg) {
@@ -82,7 +69,6 @@ int test_run_suite(const struct test_suite *suite) {
     test_failed = 0;
     test_skipped = 0;
 
-    fprintf(stderr, "DEBUG test_run_suite: suite->name=%p ('%s')\n", (void*)suite->name, suite->name);
     test_log("=== Test Suite: %s ===", suite->name);
     
     if (suite->setup) {
@@ -117,8 +103,6 @@ int test_run_suite(const struct test_suite *suite) {
         suite->teardown();
     }
     
-    fprintf(stderr, "DEBUG test_run_suite: suite->name=%p ('%s'), passed=%d, failed=%d, skipped=%d\n",
-            (void*)suite->name, suite->name, test_passed, test_failed, test_skipped);
     test_log("=== Suite %s: %d passed, %d failed, %d skipped ===",
              suite->name, test_passed, test_failed, test_skipped);
     
