@@ -792,21 +792,11 @@ void console_init(struct bootinfo *bi)
     }
 
     /* The VGA text buffer is only usable if the firmware left us in a text
-     * mode. Setting a graphics mode for the framebuffer would have
-     * repurposed it, so the two backends are mutually exclusive in practice;
-     * enabling both would corrupt the other's memory.
-     *
-     * An assignment, not a set, because this function is called twice: once
-     * with no bootinfo to get serial output up before anything can fail, and
-     * once with it to add the framebuffer. The first call has to enable VGA
-     * because there is nothing else yet, and the second has to be able to
-     * turn it back off again when a framebuffer turns out to be there. */
+     * mode. Setting a graphics mode for the framebuffer has repurposed it. */
     vga_enabled = !console_fb_active();
 
     if (vga_enabled) {
         vga_clear();
-        /* Park the cursor just past the end of the buffer so the hardware
-         * cursor is not drawn over the last line of text. */
         outw(0x3D4, 0x200A);
     }
 

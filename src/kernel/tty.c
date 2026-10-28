@@ -812,11 +812,14 @@ static void keyboard_scancode(uint8_t sc)
         return;
     }
 
-    /* Prefix, not a key. 0xE0 introduces the extended block; 0xE1 introduces
-     * the pause sequence, which is two more bytes for a key that produces
-     * nothing. Both are treated the same way: the byte that follows is
-     * consumed with them and never reaches the input ring. */
-    if (sc == 0xE0 || sc == 0xE1) {
+    /* Prefix, not a key. 0xE0 introduces an extended key. Pause uses a
+     * six-byte sequence; ignore it as a whole so its trailing bytes cannot
+     * turn into spurious characters. */
+    if (sc == 0xE1) {
+        extended_pending = true;
+        return;
+    }
+    if (sc == 0xE0) {
         extended_pending = true;
         return;
     }

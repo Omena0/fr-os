@@ -63,6 +63,7 @@ INIT_ELF := build/init.elf
 # because there is no shell yet to type its name at.
 HELLO_SRC := $(sort $(wildcard src/userspace/hello/*.c))
 HELLO_ELF := build/hello.elf
+TRIANGLE_ELF := build/triangle.elf
 INITRD := build/initrd.img
 
 DISK := build/os.img
@@ -173,10 +174,18 @@ $(HELLO_ELF): $(HELLO_SRC) $(LIBC_OBJ) $(BUILD)/libc.a src/include/version.h \
 	$(HOST_OBJCOPY) $(STRIP_DEBUG) $@
 	@$(MAKE) --no-print-directory verify-isa PROFILE=user FILE=$@
 
-$(INITRD): $(INIT_ELF) $(HELLO_ELF) tools/initrd.py
+$(TRIANGLE_ELF): src/userspace/triangle/triangle.c $(LIBC_OBJ) $(BUILD)/libc.a \
+		src/include/version.h $(VERIFY_ISA_PY)
+	@mkdir -p $(dir $@)
+	$(HOST_CC_64) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $< \
+		$(BUILD)/libc.a $(KERNEL_VERSION_DEFS)
+	$(HOST_OBJCOPY) $(STRIP_DEBUG) $@
+	@$(MAKE) --no-print-directory verify-isa PROFILE=user FILE=$@
+
+$(INITRD): $(INIT_ELF) $(HELLO_ELF) $(TRIANGLE_ELF) tools/initrd.py
 	@mkdir -p $(dir $@)
 	python3 tools/initrd.py --out $@ --program init=$(INIT_ELF) \
-		--program hello=$(HELLO_ELF)
+		--program hello=$(HELLO_ELF) --program triangle=$(TRIANGLE_ELF)
 
 # version.h supplies KERNEL_VERSION/KERNEL_GIT_REV/KERNEL_BUILD_STAMP, which
 # reach the image as -D flags on the link line rather than through a header

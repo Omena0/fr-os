@@ -102,6 +102,13 @@ static void serial_putc(char c)
 {
     unsigned spin = 0;
 
+    /* Boot diagnostics are text; suppress binary/control bytes from corrupt
+     * firmware return data so one bad value cannot make the log unreadable. */
+    if ((unsigned char)c < 0x20 && c != '\r' && c != '\n' && c != '\t')
+        return;
+    if ((unsigned char)c == 0x7F)
+        return;
+
     while (!(inb(COM1 + 5) & 0x20)) {
         /* Bounded so a missing or wedged UART is a dropped byte rather
          * than a hang with nothing on the port to explain it. */
@@ -943,6 +950,7 @@ static void vbe_setup(void)
      */
     struct vbe_candidate {
         uint16_t mode;
+        uint8_t size_class;
         uint32_t score;
         struct framebuffer_info fb;
     };
@@ -1032,6 +1040,12 @@ static void vbe_setup(void)
         if (phys == 0)
             continue;
 
+        uint32_t linear_pitch = (uint32_t)(vbe_mode[0x32] |
+                                  ((uint32_t)vbe_mode[0x33] << 8));
+        if (linear_pitch < width * 4u || height == 0 || width == 0 ||
+            (uint64_t)linear_pitch * height > 0xFFFFFFFFull)
+            continue;
+
         /*
          * Only 32bpp. The kernel's framebuffer renderer composes a pixel by
          * shifting the three channels into the mask positions the mode info
@@ -1044,17 +1058,27 @@ static void vbe_setup(void)
         if (vbe_mode[0x19] != 32)
             continue;
 
+        /* Fit common desktop displays: prefer a 16:9 720p class mode, then
+         * 1024x768, and only use larger modes as a fallback. */
+        uint8_t size_class =
+            (width <= 1280 && height <= 720 && width * 9u >= height * 16u) ? 2 :
+            (width <= 1024 && height <= 768) ? 1 : 0;
         uint32_t score = width * height;
 
         if (ncand == VBE_MAX_CANDIDATES) {
             unsigned worst = 0;
 
             for (unsigned k = 1; k < ncand; k++)
-                if (cand[k].score < cand[worst].score)
+                if (cand[k].size_class < cand[worst].size_class ||
+                    (cand[k].size_class == cand[worst].size_class &&
+                     cand[k].score < cand[worst].score))
                     worst = k;
-            if (score <= cand[worst].score)
+            if (size_class < cand[worst].size_class ||
+                (size_class == cand[worst].size_class &&
+                 score <= cand[worst].score))
                 continue;
             cand[worst].mode = m;
+            cand[worst].size_class = size_class;
             cand[worst].score = score;
             vbe_extract_fb();
             cand[worst].fb = fb_info;
@@ -1062,6 +1086,7 @@ static void vbe_setup(void)
         }
 
         cand[ncand].mode = m;
+        cand[ncand].size_class = size_class;
         cand[ncand].score = score;
         vbe_extract_fb();
         cand[ncand].fb = fb_info;
@@ -1078,7 +1103,10 @@ static void vbe_setup(void)
         struct vbe_candidate keep = cand[i];
         unsigned j = i;
 
-        while (j > 0 && cand[j - 1].score < keep.score) {
+        while (j > 0 &&
+               (cand[j - 1].size_class < keep.size_class ||
+                (cand[j - 1].size_class == keep.size_class &&
+                 cand[j - 1].score < keep.score))) {
             cand[j] = cand[j - 1];
             j--;
         }
@@ -1109,17 +1137,6 @@ static void vbe_setup(void)
         LOG("  every framebuffer mode refused; framebuffer unavailable\r\n");
         return;
     }
-
-    /* The mode set can invalidate the mode info block, so the values the
-     * kernel needs are read back rather than trusted from before -- and this
-     * time the block is actually used. Fetching it and throwing the answer
-     * away left the kernel with a description of the mode as it was before
-     * the set, which is a different address and a different pitch on any
-     * firmware that reprograms it. */
-    if (vbe_get_mode_info(best_mode))
-        vbe_extract_fb();
-    else
-        LOG("  mode info unavailable after set; using validated candidate\r\n");
 
     if (fb_info.address == 0) {
         LOG("  no framebuffer address after mode set\r\n");

@@ -42,6 +42,14 @@ void serial_init(void)
 void serial_putc_blocking(char c)
 {
     unsigned int spin = TX_SPIN_LIMIT;
+    unsigned char byte = (unsigned char)c;
+
+    /* The serial backend is a text log and terminal. Do not inject binary
+     * NUL/control bytes into captured logs; keep common editing and terminal
+     * controls that an interactive user may intentionally send. */
+    if ((byte < 0x20 && byte != '\r' && byte != '\n' && byte != '\t' &&
+         byte != '\b' && byte != 0x1B) || byte == 0x7F)
+        return;
 
     while ((inb(COM1 + 5) & UART_LSR_TX_EMPTY) == 0) {
         if (--spin == 0)
