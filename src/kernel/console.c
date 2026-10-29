@@ -301,6 +301,10 @@ enum esc_state {
 
 static enum esc_state esc_state;
 static char esc_params[64];
+/* CSI '?' prefix: a private-mode sequence such as ?25l. The console has no
+ * mode to set, but it must consume the whole sequence instead of treating
+ * '?' as the final byte and printing the rest as text. */
+static bool esc_private;
 static uint8_t esc_param_count;
 
 static void console_fb_init(struct framebuffer_info *info);
@@ -844,6 +848,7 @@ static bool handle_escape(char c)
         if (c == '[') {
             esc_state = ESC_CSI;
             esc_param_count = 0;
+            esc_private = false;
             if (serial_enabled)
                 serial_putc_blocking(c);
             return true;
@@ -871,6 +876,12 @@ static bool handle_escape(char c)
         return true;
 
     case ESC_CSI:
+        if (c == '?' && esc_param_count == 0) {
+            esc_private = true;
+            if (serial_enabled)
+                serial_putc_blocking(c);
+            return true;
+        }
         if (c >= '0' && c <= '9') {
             if (esc_param_count < sizeof(esc_params))
                 esc_params[esc_param_count] = c;
@@ -904,6 +915,13 @@ static bool handle_escape(char c)
         /* Mirror the final byte to serial before processing. */
         if (serial_enabled)
             serial_putc_blocking(c);
+
+        /* Private modes (?25l hide cursor, ?25h show it, ...) have no
+         * framebuffer equivalent to set; consume and ignore them. */
+        if (esc_private) {
+            esc_private = false;
+            return true;
+        }
 
         switch (c) {
             case 'H':       /* cursor position, 1-based */
