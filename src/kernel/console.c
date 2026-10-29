@@ -703,10 +703,12 @@ static bool handle_escape(char c)
             return true;
         }
         if (c == ';') {
-            /* Terminate the current parameter so the parser below can
-             * walk through several of them. */
+            /* Keep the separator as ';'. It used to be stored as NUL, which
+             * made the parameter string end at the first separator: every
+             * multi-parameter SGR (1;31, 38;2;r;g;b, ...) was parsed as just
+             * its first number. */
             if (esc_param_count < sizeof(esc_params))
-                esc_params[esc_param_count] = 0;
+                esc_params[esc_param_count] = ';';
             esc_param_count++;
             if (serial_enabled)
                 serial_putc_blocking(c);
