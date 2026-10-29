@@ -25,8 +25,17 @@
 /* The largest class served from SLAB. See the file header. */
 #define KMALLOC_CACHE_MAX    4096
 
-/* Objects per cache per CPU, per docs/src/memory/per-cpu-caches.md. */
-#define KMALLOC_MAG_SIZE    64
+/*
+ * Objects per cache per CPU.
+ *
+ * This is a batch size, not a correctness constraint: a magazine is a cache in
+ * front of the slab lists, and any size works. It is also BSS multiplied by
+ * MAX_CPUS * NUM_KCACHE, which is why it is 32 rather than 64: at 64 the array
+ * was 1.27 MiB of untouched .bss, over two thirds of the kernel's 1.8 MiB
+ * landing-zone budget, spent on 255 CPUs that do not exist on this machine.
+ * Halving it buys 640 KiB of image headroom for a slightly higher refill rate.
+ */
+#define KMALLOC_MAG_SIZE    32
 
 /* Objects a refill asks the cache for at once. A refill takes a slab's worth,
  * and no slab holds more than this, so the two numbers only meet at the top. */

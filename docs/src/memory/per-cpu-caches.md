@@ -12,7 +12,10 @@ Per-CPU caches exist at two levels:
 
 Each SLAB cache has a per-CPU magazine — see [slab-allocator.md](slab-allocator.md) for details.
 
-- **Capacity**: 64 objects per cache per CPU (configurable per cache).
+- **Capacity**: 32 objects per cache per CPU (`KMALLOC_MAG_SIZE`). The batch size
+  is a performance knob, not a correctness one, and the array is indexed by
+  `[cpu][cache]`, so its size is multiplied by `MAX_CPUS`; 64 doubled it to
+  1.27 MiB of `.bss` for CPUs this machine does not have.
 - **Replenishment**: When empty, swap with a loaded depot magazine or refill from the global slab.
 - **Flush**: When full, swap with an empty depot magazine or flush to the global slab.
 - **Lock**: No lock on the magazine itself; depot swap uses a per-CPU lock.

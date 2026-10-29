@@ -955,10 +955,10 @@ void interrupt_dispatch(struct interrupt_frame *f)
      * from a silent non-event into a #PF on the first tick, 10 ms into the
      * boot, on whatever code happened to be running.
      *
-     * As of this change sched_init() has no caller anywhere in the tree, so
-     * this branch never reaches it and a tick only counts. That is the
-     * correct shape for the moment sched_init() is wired up: no change to
-     * this file is needed then, and until then a tick can do no harm.
+     * sched_init() runs before the first user task is created, so by the
+     * time a tick can arrive this branch reaches the scheduler. A tick that
+     * lands before sched_init() (during early boot) still only counts, which
+     * is why the run-queue check above is load-bearing rather than defensive.
      *
      * The request is cleared whether or not the tick runs. Leaving it set
      * would be a latch with no reader, and a latch whose only effect is to
