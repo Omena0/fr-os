@@ -21,6 +21,8 @@
 
 #include <console.h>
 #include <drivers/serial.h>
+#include <drivers/ps2kbd.h>
+#include <cpu_features.h>
 #include <cpu_features.h>
 #include <gdt.h>
 #include <interrupt.h>
@@ -412,8 +414,10 @@ void kmain(uint64_t bootinfo_phys)
     kprintf("init: pid %u loaded, entering the scheduler\n", init->pid);
 
     /* Drop verbosity once PID 1 is up: boot chatter is done, unless the
-     * cmdline asked for debug (postloglevel=0) we keep the system quiet. */
+     * cmdline asked for debug (postloglevel=0) we keep the system quiet.
+     * Enable ps2kbd debug logging so it can be followed during testing. */
     klog_set_level(post_loglevel);
+    klog_set_subsystem_level("ps2kbd", KLOG_DEBUG);
 
     sched_start();
 
@@ -434,14 +438,14 @@ static void kmain_banner(void)
      * and the mistake is easy to make, because "did the loader say that or did
      * the kernel?" changes what a line means.
      */
-    kprintf("=========================================================\n");
+    kprintf("\n=========================================================\n");
     kprintf(" %s (%s, rev %s)\n", KERNEL_VERSION_STRING,
         KERNEL_BUILD_STAMP, KERNEL_GIT_REV);
     kprintf(" boot: entry 0x%016lx, image 0x%016lx, drive 0x%lx, "
         "cmdline '%s'\n",
         boot.kernel_entry, boot.kernel_phys_base, boot.boot_drive,
         boot.cmdline[0] ? boot.cmdline : "(none)");
-    kprintf("=========================================================\n");
+    kprintf("=========================================================\n\n");
 }
 
 static void kmain_report_cpu(void)

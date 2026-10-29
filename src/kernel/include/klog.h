@@ -79,7 +79,7 @@ void klog_emit(klog_level_t level, const char *subsystem,
 #define klog(level, ...)                                                  \
     do {                                                              \
         if ((level) >= KLOG_COMPILE_LEVEL &&                     \
-            (level) >= klog_runtime_level)                      \
+            (level) >= klog_effective_level(klog_subsys_name)) \
             klog_emit((level), klog_subsys_name, __VA_ARGS__); \
     } while (0)
 
@@ -88,6 +88,13 @@ extern klog_level_t klog_runtime_level;
 
 /* Raise or lower verbosity at runtime. Used by the observability interface. */
 void klog_set_level(klog_level_t level);
+
+/* Set a per-subsystem log level override. The override takes precedence over
+ * the global runtime level and applies to the named subsystem only. */
+void klog_set_subsystem_level(const char *name, klog_level_t level);
+
+/* Effective log level for a subsystem: the override if set, else the global. */
+klog_level_t klog_effective_level(const char *subsystem);
 
 /* Number of messages emitted per level, for the statistics interface. */
 uint64_t klog_count(klog_level_t level);

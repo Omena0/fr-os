@@ -816,7 +816,7 @@ long sys_wait4(s64 pid, u64 wstatus, u64 options, u64 rusage)
          * so the re-check race is impossible — the loop re-locks the
          * child list before looking again.
          */
-        klog_emit(KLOG_DEBUG, "process", "wait4: blocking, pid=%d child_pid=%ld",
+        klog_emit(KLOG_DEBUG, "process", "wait4: blocking, pid=%li child_pid=%ld",
               pid, (long)me->pid);
         sched_block_current();
         klog_emit(KLOG_DEBUG, "process", "wait4: unblocked");

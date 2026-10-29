@@ -28,10 +28,10 @@
 #include <task.h>
 #include <process.h>
 
-#define ELF_LOG(level, ...)                                                  \
-    do {                                                               \
-        if ((level) >= klog_runtime_level)                         \
-            klog_emit((level), "elf", __VA_ARGS__);            \
+#define ELF_LOG(level, ...)                                   \
+    do {                                                      \
+        if ((level) >= klog_runtime_level)                    \
+            klog_emit((level), "elf", __VA_ARGS__);           \
     } while (0)
 
 /* ------------------------------------------------------------- on-disk ------- */
