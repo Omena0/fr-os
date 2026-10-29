@@ -7,7 +7,9 @@
  * still says which process said what.
  */
 #include <errno.h>
+#include <fcntl.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -472,10 +474,232 @@ static int dispatch(int argc, char **argv)
     return 0;
 }
 
+/* --------------------------------------------------------- line editor --- */
+
+/*
+ * The terminal has no line discipline: read() returns the raw bytes. This
+ * editor owns echo, a block cursor, insertion in the middle, Backspace,
+ * Ctrl+W / Ctrl+Backspace word delete, Left/Right, Home/End and Delete.
+ *
+ * The block cursor is an inverse-video character rather than the hardware
+ * cursor because the framebuffer console has no visible cursor. The real
+ * terminal cursor is hidden while editing so the serial and framebuffer
+ * backends look the same.
+ */
+static void line_draw_plain(const char *prompt, const char *line, size_t len)
+{
+    fputs("\r", stdout);
+    fputs(prompt, stdout);
+    fwrite(line, 1, len, stdout);
+    fputs("\033[K", stdout);
+    fflush(stdout);
+}
+
+static void line_redraw(const char *prompt, const char *line, size_t len,
+                        size_t pos)
+{
+    fputs("\r", stdout);
+    fputs(prompt, stdout);
+    for (size_t i = 0; i < len; i++) {
+        if (i == pos)
+            printf("\033[7m%c\033[0m", line[i]);
+        else
+            putchar(line[i]);
+    }
+    if (pos == len)
+        fputs("\033[7m \033[0m", stdout);
+    fputs("\033[K", stdout);
+    fflush(stdout);
+}
+
+static void line_delete(char *line, size_t *len, size_t *pos,
+                        size_t from, size_t to)
+{
+    if (to > *len)
+        to = *len;
+    if (from >= to)
+        return;
+    memmove(line + from, line + to, *len - to);
+    *len -= to - from;
+    line[*len] = '\0';
+    if (*pos >= to)
+        *pos -= to - from;
+    else if (*pos > from)
+        *pos = from;
+}
+
+static int read_byte(void)
+{
+    unsigned char c;
+
+    return read(0, &c, 1) == 1 ? (int)c : -1;
+}
+
+/* Consume a CSI sequence (after ESC [). Returns false on EOF. */
+static bool handle_csi(char *line, size_t *len, size_t *pos,
+                       const char *prompt)
+{
+    int params[4] = { 0, 0, 0, 0 };
+    int np = 0;
+    int v = 0;
+    bool have = false;
+
+    for (;;) {
+        int c = read_byte();
+
+        if (c < 0)
+            return false;
+        if (c >= '0' && c <= '9') {
+            v = v * 10 + (c - '0');
+            have = true;
+            continue;
+        }
+        if (c == ';') {
+            if (np < 4)
+                params[np++] = have ? v : 0;
+            v = 0;
+            have = false;
+            continue;
+        }
+        if (np < 4)
+            params[np++] = have ? v : 0;
+
+        if (c == '~') {
+            int p = params[0];
+
+            if (p == 3 && *pos < *len) {            /* Delete */
+                line_delete(line, len, pos, *pos, *pos + 1);
+                line_redraw(prompt, line, *len, *pos);
+            } else if (p == 1) {                    /* Home */
+                *pos = 0;
+                line_redraw(prompt, line, *len, *pos);
+            } else if (p == 4) {                    /* End */
+                *pos = *len;
+                line_redraw(prompt, line, *len, *pos);
+            } else if ((p == 127 || p == 8) && np >= 2 && params[1] == 5) {
+                /* Ctrl+Backspace in modifyOtherKeys form. */
+                size_t from = *pos;
+
+                while (from > 0 && line[from - 1] == ' ')
+                    from--;
+                while (from > 0 && line[from - 1] != ' ')
+                    from--;
+                line_delete(line, len, pos, from, *pos);
+                line_redraw(prompt, line, *len, *pos);
+            }
+        } else if (c == 'A' || c == 'B') {
+            /* No history. */
+        } else if (c == 'C') {
+            if (*pos < *len) {
+                (*pos)++;
+                line_redraw(prompt, line, *len, *pos);
+            }
+        } else if (c == 'D') {
+            if (*pos > 0) {
+                (*pos)--;
+                line_redraw(prompt, line, *len, *pos);
+            }
+        } else if (c == 'H') {
+            *pos = 0;
+            line_redraw(prompt, line, *len, *pos);
+        } else if (c == 'F') {
+            *pos = *len;
+            line_redraw(prompt, line, *len, *pos);
+        }
+        return true;
+    }
+}
+
+/* Read and edit one line. Returns the length, or -1 on EOF. */
+static int line_edit(const char *prompt, char *line, size_t max)
+{
+    size_t len = 0, pos = 0;
+
+    line[0] = '\0';
+    fputs("\033[?25l", stdout);
+    line_redraw(prompt, line, len, pos);
+
+    for (;;) {
+        int c = read_byte();
+
+        if (c < 0) {
+            line_draw_plain(prompt, line, len);
+            fputs("\033[0m\033[?25h\n", stdout);
+            fflush(stdout);
+            return -1;
+        }
+        if (c == '\r' || c == '\n') {
+            line_draw_plain(prompt, line, len);
+            fputs("\033[0m\033[?25h\n", stdout);
+            fflush(stdout);
+            return (int)len;
+        }
+        if (c == '\b' || c == 0x7f) {                /* Backspace */
+            if (pos > 0) {
+                line_delete(line, &len, &pos, pos - 1, pos);
+                line_redraw(prompt, line, len, pos);
+            }
+            continue;
+        }
+        if (c == 0x17) {                             /* Ctrl+W / Ctrl+Backspace */
+            size_t from = pos;
+
+            while (from > 0 && line[from - 1] == ' ')
+                from--;
+            while (from > 0 && line[from - 1] != ' ')
+                from--;
+            line_delete(line, &len, &pos, from, pos);
+            line_redraw(prompt, line, len, pos);
+            continue;
+        }
+        if (c == 0x1b) {
+            int c1 = read_byte();
+
+            if (c1 < 0) {
+                fputs("\033[0m\033[?25h\n", stdout);
+                return -1;
+            }
+            if (c1 == '[') {
+                if (!handle_csi(line, &len, &pos, prompt)) {
+                    fputs("\033[0m\033[?25h\n", stdout);
+                    return -1;
+                }
+            } else if (c1 == 'O') {
+                int c2 = read_byte();
+
+                if (c2 == 'C' && pos < len) {
+                    pos++;
+                    line_redraw(prompt, line, len, pos);
+                } else if (c2 == 'D' && pos > 0) {
+                    pos--;
+                    line_redraw(prompt, line, len, pos);
+                } else if (c2 == 'H') {
+                    pos = 0;
+                    line_redraw(prompt, line, len, pos);
+                } else if (c2 == 'F') {
+                    pos = len;
+                    line_redraw(prompt, line, len, pos);
+                }
+            }
+            continue;
+        }
+        if (c < 0x20)
+            continue;
+        if (len + 1 >= max)
+            continue;
+        memmove(line + pos + 1, line + pos, len - pos);
+        line[pos] = (char)c;
+        len++;
+        pos++;
+        line[len] = '\0';
+        line_redraw(prompt, line, len, pos);
+    }
+}
+
 int main(void)
 {
     char line[256];
-    size_t cap = 0;
+    char prompt[32];
 
     printf("%s%s %s (build %s, rev %s)\n", TAG, FR_INIT_NAME,
            KERNEL_VERSION, KERNEL_BUILD_STAMP, KERNEL_GIT_REV);
@@ -486,59 +710,14 @@ int main(void)
     printf("%stype 'help' for the command list, EOF to stop\n", TAG);
     fflush(stdout);
 
+    snprintf(prompt, sizeof(prompt), "%s> ", FR_INIT_NAME);
+
     for (;;) {
         int argc;
         char *argv[32];
-        int c;
 
-        /* The prompt is derived from FR_INIT_NAME rather than spelled
-         * "init>", so it names the component the same way every other
-         * line this process prints does. */
-        fputs(FR_INIT_NAME "> ", stdout);
-        fflush(stdout);
-
-        /* Read one byte at a time. The terminal is in raw mode and
-         * sends \r for Enter, not \n, so getline() would block forever.
-         * Byte-by-byte reading also lets us handle backspace.
-         *
-         * Backspace and DEL are the two codes a serial/vga console
-         * sends for erase, and rewriting with "\b \b" is the only way to
-         * actually remove a glyph from a terminal — a bare backspace
-         * just moves the cursor and leaves the old character behind.
-         * There is no line discipline on the input path, so the raw
-         * byte the keyboard or serial line produces is what read()
-         * returns: a user who presses Backspace really does put
-         * 0x7f in the buffer, and this is the code that turns it back
-         * into a visible erase. */
-        cap = 0;
-        for (;;) {
-            ssize_t n = read(0, &c, 1);
-            if (n <= 0) {
-                putchar('\n');
-                break;
-            }
-
-            if (c == '\r' || c == '\n') {
-                putchar('\n');
-                break;
-            }
-            if (c == '\b' || c == 0x7f) {
-                if (cap > 0) {
-                    cap--;
-                    line[cap] = '\0';
-                    fputs("\b \b", stdout);
-                }
-                continue;
-            }
-            if (c < 0x20 || c == 0x7f)
-                continue;
-            if (cap >= sizeof(line) - 1) {
-                fputs("\n[init] line too long, truncated\n", stdout);
-                break;
-            }
-            line[cap++] = (char)c;
-            line[cap] = '\0';
-        }
+        if (line_edit(prompt, line, sizeof(line)) < 0)
+            break;
 
         if (line[0] == '\0')
             continue;
