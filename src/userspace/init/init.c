@@ -481,7 +481,10 @@ int main(void)
      * fails, child exits 127) or that dies just stops the sequence; the REPL
      * is always reached. */
     {
-        static const char *tests[] = { "ansi", "ansi2" };
+        /* Box first, matrix last: each program clears the screen, so the
+         * colour matrix is what remains visible when the REPL prompt comes
+         * back. */
+        static const char *tests[] = { "ansi2", "ansi" };
 
         for (size_t i = 0; i < sizeof(tests) / sizeof(tests[0]); i++) {
             pid_t pid = fork();
