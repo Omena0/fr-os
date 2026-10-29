@@ -137,7 +137,10 @@ static void matrix(void)
     print_cell("01", "1;97;41");
     print_cell("05", "5;33");
     print_cell("09", "9;36");
-    print_cell("ff", "ff");
+    /* Do not print SGR "ff": "f" is the CSI final byte for HVP (cursor
+     * position), not a parameter byte. ESC[ffm is therefore a cursor command
+     * with a malformed argument, not an ignorable SGR, and terminals respond
+     * by moving the cursor -- which redrew the matrix over its own header. */
     print_cell("00", "0");
     print_cell("00", "0");
     print_cell("00", "0");
