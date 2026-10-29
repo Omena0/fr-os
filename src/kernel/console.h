@@ -67,6 +67,11 @@ void kvprintf_to_console(const char *fmt, __builtin_va_list ap);
 void console_set_attr(uint8_t attr);
 uint8_t console_get_attr(void);
 
+/* Apply an SGR parameter string (e.g. "0;31") to set colors. */
+void console_apply_sgr(const char *params);
+/* Reset attributes to the default. */
+void console_reset_attr(void);
+
 /* Terminal geometry, as seen by the console. */
 uint32_t console_columns(void);
 uint32_t console_rows(void);

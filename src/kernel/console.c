@@ -185,16 +185,6 @@ static void console_release(u64 flags)
 
 /* ------------------------------------------------------------ rendering ---- */
 
-/*
- * The VGA text buffer, resolved through whichever map is live.
- *
- * 0xB8000 is a fixed physical address, and the way to reach it changes
- * underneath this file: vmm_switch_to_kernel_pgd() replaces the bootloader's
- * identity view of the low 4 GiB. The address is recomputed on every access
- * rather than cached: console_init(NULL) enables this backend before the
- * switch and the first character after it is a store, so a cached value from
- * the wrong regime is a #PF.
- */
 static inline volatile struct vga_cell *vga_mem(void)
 {
     return (volatile struct vga_cell *)vmm_boot_ptr(VGA_TEXT_BASE);
@@ -207,8 +197,6 @@ static void vga_scroll(void)
     volatile uint8_t *bottom = (volatile uint8_t *)
         &mem[(VGA_ROWS - 1) * VGA_COLS];
 
-    /* Copy every line up by one. The 0xB8000 buffer is in write-through
-     * memory, so a volatile byte copy is correct and fast enough. */
     for (volatile uint8_t *p = top; p < bottom; p++)
         *p = *(p + VGA_COLS * 2);
 
@@ -516,6 +504,87 @@ static void console_newline(void)
 /* ------------------------------------------------------------- escapes ----- */
 
 /*
+ * Apply one SGR (Select Graphic Rendition) parameter string to the current
+ * attribute. The string is the raw parameter bytes collected by the escape
+ * parser, terminated with NUL and with ';' separating numbers.
+ *
+ * Only the codes the console uses are handled; an unknown code is a no-op
+ * rather than an error, so a sequence like "\033[0;37m" leaves the unknown
+ * 37 alone and resets the attribute.
+ */
+void console_apply_sgr(const char *params)
+{
+    for (char *p = (char *)params; *p; ) {
+        unsigned long n = 0;
+        kstrtoul(p, &n, 10);
+        uint32_t code = (uint32_t)n;
+
+        /* Skip past this number. */
+        while (*p && *p != ';')
+            p++;
+        if (*p == ';')
+            p++;
+
+        switch (code) {
+        case 0:   /* reset: normal attribute */
+            current_attr = TERM_ATTR_NORMAL;
+            break;
+        case 1:   /* bold: set intensity bit */
+            current_attr |= 0x08;
+            break;
+        case 30:  /* black foreground, index 0 in bits 0-3 */
+        case 31:  /* red foreground, index 1 */
+        case 32:  /* green foreground, index 2 */
+        case 33:  /* yellow foreground, index 3 */
+        case 34:  /* blue foreground, index 4 */
+        case 35:  /* magenta foreground, index 5 */
+        case 36:  /* cyan foreground, index 6 */
+        case 37:  /* white foreground, index 7 */
+            current_attr = (current_attr & 0xF0) | ((uint8_t)code - 30);
+            break;
+        case 39:  /* default foreground = white */
+            current_attr = (current_attr & 0xF0) | 7;
+            break;
+        case 40:  /* black background, index 0 in bits 4-6 */
+        case 41:  /* red background, index 1 */
+        case 42:  /* green background, index 2 */
+        case 43:  /* yellow background, index 3 */
+        case 44:  /* blue background, index 4 */
+        case 45:  /* magenta background, index 5 */
+        case 46:  /* cyan background, index 6 */
+        case 47:  /* white background, index 7 */
+            current_attr = ((uint8_t)(code - 40) << 4) | (current_attr & 0x07);
+            break;
+        case 49:  /* default background = black */
+            current_attr = current_attr & 0x07;
+            break;
+        case 90:  /* bright black (dark gray) foreground */
+        case 91:  /* bright red foreground */
+        case 92:  /* bright green foreground */
+        case 93:  /* bright yellow foreground */
+        case 94:  /* bright blue foreground */
+        case 95:  /* bright magenta foreground */
+        case 96:  /* bright cyan foreground */
+        case 97:  /* bright white foreground */
+            current_attr = 0x08 | ((current_attr & 0xF0) | ((uint8_t)code - 90));
+            break;
+        case 100: /* bright black background */
+        case 101: /* bright red background */
+        case 102: /* bright green background */
+        case 103: /* bright yellow background */
+        case 104: /* bright blue background */
+        case 105: /* bright magenta background */
+        case 106: /* bright cyan background */
+        case 107: /* bright white background */
+            current_attr = ((uint8_t)(code - 100) << 4) | (current_attr & 0x07);
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+/*
  * Feed one character to the escape parser.
  *
  * Returns true if the character was part of an escape sequence and must not
@@ -530,6 +599,8 @@ static bool handle_escape(char c)
     case ESC_NONE:
         if (c == 0x1B) {
             esc_state = ESC_SEEN;
+            if (serial_enabled)
+                serial_putc_blocking(c);
             return true;
         }
         return false;
@@ -538,11 +609,15 @@ static bool handle_escape(char c)
         if (c == '[') {
             esc_state = ESC_CSI;
             esc_param_count = 0;
+            if (serial_enabled)
+                serial_putc_blocking(c);
             return true;
         }
         /* ESC followed by anything else is a two-byte sequence we do not
          * implement. Drop it rather than printing the second byte. */
         esc_state = ESC_NONE;
+        if (serial_enabled)
+            serial_putc_blocking(c);
         return true;
 
     case ESC_CSI:
@@ -550,67 +625,73 @@ static bool handle_escape(char c)
             if (esc_param_count < sizeof(esc_params))
                 esc_params[esc_param_count] = c;
             esc_param_count++;
+            if (serial_enabled)
+                serial_putc_blocking(c);
             return true;
         }
         if (c == ';') {
-            /* Only the first parameter is used; a second one would be a
-             * colour request, which this console ignores. */
+            /* Terminate the current parameter so the parser below can
+             * walk through several of them. */
             if (esc_param_count < sizeof(esc_params))
                 esc_params[esc_param_count] = 0;
             esc_param_count++;
+            if (serial_enabled)
+                serial_putc_blocking(c);
             return true;
         }
 
+        /* Sequence complete: parse the command */
         esc_state = ESC_NONE;
         esc_params[esc_param_count < sizeof(esc_params) ?
                 esc_param_count : 0] = '\0';
 
-        /* An unparseable parameter is treated as absent rather than
-         * fatal: a malformed escape sequence in a log line should not
-         * stop the line from being printed. */
         unsigned long n_param = 0;
-
         kstrtoul(esc_params, &n_param, 10);
         uint32_t n = (uint32_t)n_param;
 
-        switch (c) {
-        case 'H':       /* cursor position, 1-based */
-            {
-            uint32_t row = n ? n - 1 : 0;
-            uint32_t col = 0;
+        /* Mirror the final byte to serial before processing. */
+        if (serial_enabled)
+            serial_putc_blocking(c);
 
-            /* A second parameter is the column; only single-parameter
-             * forms appear in kernel output today. */
-            col = 0;
-            cursor_y = row;
-            cursor_x = col;
-            if (vga_enabled) {
-                if (cursor_y >= VGA_ROWS)
-                    cursor_y = VGA_ROWS - 1;
-                vga_putc_at(cursor_x, cursor_y, ' ', current_attr);
-            }
-            if (console_fb_active())
-                console_fb_move(cursor_x, cursor_y);
-            return true;
-            }
-        case 'J':       /* erase display */
-            if (vga_enabled)
-                vga_clear();
-            if (console_fb_active())
-                console_fb_clear();
-            cursor_x = 0;
-            cursor_y = 0;
-            return true;
-        case 'K':       /* erase line */
-            for (uint32_t x = cursor_x; x < VGA_COLS; x++)
-                vga_putc_at(x, cursor_y, ' ', current_attr);
-            return true;
-        case 'm':       /* colour: ignore, the console has one attribute */
-            return true;
-        default:
-            /* An unknown final byte still ends a sequence, so it is
-             * consumed rather than printed. */
-            return true;
+        switch (c) {
+            case 'H':       /* cursor position, 1-based */
+                {
+                uint32_t row = n ? n - 1 : 0;
+                uint32_t col = 0;
+
+                /* A second parameter is the column; only single-parameter
+                 * forms appear in kernel output today. */
+                col = 0;
+                cursor_y = row;
+                cursor_x = col;
+                if (vga_enabled) {
+                    if (cursor_y >= VGA_ROWS)
+                        cursor_y = VGA_ROWS - 1;
+                    vga_putc_at(cursor_x, cursor_y, ' ', current_attr);
+                }
+                if (console_fb_active())
+                    console_fb_move(cursor_x, cursor_y);
+                return true;
+                }
+            case 'J':       /* erase display */
+                if (vga_enabled)
+                    vga_clear();
+                if (console_fb_active())
+                    console_fb_clear();
+                cursor_x = 0;
+                cursor_y = 0;
+                return true;
+            case 'K':       /* erase line */
+                for (uint32_t x = cursor_x; x < VGA_COLS; x++)
+                    vga_putc_at(x, cursor_y, ' ', current_attr);
+                return true;
+            case 'm':       /* SGR: set attributes */
+                console_apply_sgr(esc_params);
+                return true;
+            default:
+                /* An unknown final byte still ends a sequence, so it is
+                 * consumed rather than printed. */
+                return true;
         }
     }
 
@@ -759,9 +840,9 @@ void console_write_raw(const char *s, size_t n)
 
         cursor_x++;
         if (vga_enabled && cursor_x >= VGA_COLS)
-            cursor_x = 0;
+            console_newline();
         else if (console_fb_active() && cursor_x >= fb.cols)
-            cursor_x = 0;
+            console_newline();
     }
 
     console_release(flags);
@@ -796,6 +877,11 @@ void kvprintf_to_console(const char *fmt, __builtin_va_list ap)
 void console_set_attr(uint8_t attr)
 {
     current_attr = attr;
+}
+
+void console_reset_attr(void)
+{
+    current_attr = TERM_ATTR_NORMAL;
 }
 
 uint8_t console_get_attr(void)
