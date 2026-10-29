@@ -2000,17 +2000,28 @@ static long execve_common(struct task *t, u64 path, u64 argv, u64 envp)
     memset(kargv, 0, sizeof(kargv));
     memset(kenvp, 0, sizeof(kenvp));
 
-    /* argv[0] is the path itself, as execve(2) specifies. */
-    strlcpy(argv_buf[0], kpath, MAX_ARG_LEN);
-    kargv[0] = argv_buf[0];
-    n = count_user_strings(argv, &argv_buf[1][0], kargv + 1,
-                   MAX_EXEC_ARGS - 1,
-                   (MAX_EXEC_ARGS - 1) * MAX_ARG_LEN, &used);
+    /*
+     * execve(2) passes argv through exactly as the caller supplied it. The
+     * kernel does not rewrite argv[0] to the path: a shell or init sets
+     * argv[0] itself, and execve must not shift the vector. The old code
+     * prefixed the path and copied the caller's vector beneath it, so
+     * `run snake 10 8 5` arrived as
+     *   {path, "snake", "10", "8", "5"}
+     * and the program's first argument was its own name.
+     */
+    n = count_user_strings(argv, &argv_buf[0][0], kargv, MAX_EXEC_ARGS,
+                   MAX_EXEC_ARGS * MAX_ARG_LEN, &used);
     if (n < 0) {
         PROC_LOG(KLOG_ERROR,
              "execve: pid %u \"%s\" argv is unreadable or too long: "
              "%ld", t->pid, kpath, n);
         return n;
+    }
+    if (n == 0) {
+        /* An empty vector is not a useful argv; at least name the program. */
+        strlcpy(argv_buf[0], kpath, MAX_ARG_LEN);
+        kargv[0] = argv_buf[0];
+        kargv[1] = NULL;
     }
 
     n = count_user_strings(envp, &envp_buf[0][0], kenvp, MAX_EXEC_ARGS,
