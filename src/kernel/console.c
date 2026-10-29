@@ -915,6 +915,16 @@ void console_write_raw(const char *s, size_t n)
             continue;
         }
 
+        /*
+         * A process's bytes are still sent to the serial port verbatim (the
+         * escape parser mirrors what it consumes), but the screen has to
+         * interpret them: drawing ESC[38;2;...m literally is what made the
+         * ANSI test fill the framebuffer with the sequence text instead of
+         * colours. Only the screen is affected; the parser never routes user
+         * bytes through kprintf. */
+        if (handle_escape(c))
+            continue;
+
         if (!tty_screen_owned()) {
             if (vga_enabled)
                 vga_putc_at(cursor_x, cursor_y, c, current_attr);
