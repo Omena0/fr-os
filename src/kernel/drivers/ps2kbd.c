@@ -292,9 +292,9 @@ void ps2kbd_init(ps2kbd_callback_t cb)
     {
         unsigned int guard = 1024;
         while ((inb(PS2_STATUS) & PS2_STATUS_OBF) && guard--) {
+            uint8_t stale = inb(PS2_DATA);
             klog(KLOG_DEBUG, "ps2kbd: drained pre-existing 0x%02x\n",
-                  (unsigned)inb(PS2_DATA));
-            (void)inb(PS2_DATA);
+                  (unsigned)stale);
         }
     }
 
