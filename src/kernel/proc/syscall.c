@@ -1511,13 +1511,24 @@ long syscall_dispatch(struct syscall_regs *regs)
      * table it protects. A garbage RAX lands here and leaves as -ENOSYS
      * without ever indexing the table.
      */
-    if (!regs || regs->rax >= SYSCALL_MAX)
+    if (!regs)
         return -ENOSYS;
+
+    if (regs->rax >= SYSCALL_MAX) {
+        struct task *t = current_task();
+        SYSCALL_LOG(KLOG_WARN, "unknown syscall %llu from pid %u (%s): out of range, returning ENOSYS",
+                    (unsigned long long)regs->rax, t ? t->pid : 0, t ? t->comm : "?");
+        return -ENOSYS;
+    }
 
     long (*fn)(struct syscall_regs *) = syscall_table[regs->rax];
 
-    if (!fn)
+    if (!fn) {
+        struct task *t = current_task();
+        SYSCALL_LOG(KLOG_WARN, "NOT IMPLEMENTED: syscall %llu requested by pid %u (%s), returning ENOSYS",
+                    (unsigned long long)regs->rax, t ? t->pid : 0, t ? t->comm : "?");
         return -ENOSYS;
+    }
 
     /*
      * Set ret_to_user = 1 before any early returns. This ensures the
