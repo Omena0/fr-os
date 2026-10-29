@@ -514,6 +514,28 @@ static long sc_fstat(struct syscall_regs *r)
     return copy_to_user(arg1(r), &st, sizeof(st)) < 0 ? -EFAULT : 0;
 }
 
+static long sc_fcntl(struct syscall_regs *r)
+{
+    struct file *f = fd_lookup(caller(), (int)(s32)arg0(r));
+    int cmd = (int)(s32)arg1(r);
+    long arg = (long)(s32)arg2(r);
+
+    if (!f)
+        return -EBADF;
+
+    switch (cmd) {
+    case F_GETFL:
+        return (long)f->f_flags;
+    case F_SETFL:
+        /* Only O_NONBLOCK is meaningful here. Preserve the access mode and
+         * every other status flag; replace the one bit the caller owns. */
+        f->f_flags = (f->f_flags & ~O_NONBLOCK) | ((u32)arg & O_NONBLOCK);
+        return 0;
+    default:
+        return -EINVAL;
+    }
+}
+
 static long sc_ioctl(struct syscall_regs *r)
 {
     struct file *f = fd_lookup(caller(), (int)(s32)arg0(r));
@@ -1376,6 +1398,7 @@ void syscall_init(void)
     syscall_table[SYS_lseek] = sc_lseek;
     syscall_table[SYS_fstat] = sc_fstat;
     syscall_table[SYS_ioctl] = sc_ioctl;
+    syscall_table[SYS_fcntl] = sc_fcntl;
     syscall_table[SYS_getdents] = sc_getdents;
     syscall_table[SYS_dup] = sc_dup;
     syscall_table[SYS_mmap] = sc_mmap;

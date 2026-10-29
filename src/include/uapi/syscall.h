@@ -257,6 +257,10 @@ struct kdirent {
 #define O_DIRECTORY 0x10000
 #define O_CLOEXEC   0x80000
 
+/* fcntl commands (the subset this kernel implements). */
+#define F_GETFL 3
+#define F_SETFL 4
+
 /* ioctl request encoding: direction, size, type, number. */
 #define IOC_NRBITS   8
 #define IOC_TYPEBITS 8

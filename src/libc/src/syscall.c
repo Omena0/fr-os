@@ -17,6 +17,7 @@
 #include <sys/syscall.h>
 #include <sys/mman.h>
 #include <sys/ioctl.h>
+#include <fcntl.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -74,6 +75,21 @@ off_t sys_lseek(int fd, off_t offset, int whence)
 int sys_fstat(int fd, struct kstat *st)
 {
     return (int)check0(__syscall2(SYS_fstat, fd, (long)st));
+}
+
+int fcntl(int fd, int cmd, ...)
+{
+    long arg = 0;
+
+    if (cmd != F_GETFL) {
+        va_list ap;
+
+        va_start(ap, cmd);
+        arg = va_arg(ap, long);
+        va_end(ap);
+    }
+
+    return (int)check0(__syscall3(SYS_fcntl, fd, cmd, arg));
 }
 
 int sys_ioctl(int fd, unsigned long request, ...)
