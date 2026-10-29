@@ -167,6 +167,68 @@ static void keys_fill(struct keys *k)
     }
 }
 
+/*
+ * Body colour palette, darkest (oldest) to brightest (newest).
+ *
+ * Cells leave from the tail, so the tail is what a player needs to read: the
+ * segments nearest the tail are the ones that disappear next.
+ *
+ * A segment is one palette entry darker than the one ahead of it, always. The
+ * *range* of the palette in use grows with the snake: a 3-cell snake uses the
+ * three brightest entries, a 24-cell snake the whole list, and past that the
+ * window stays at 24 entries sitting on the tail, with the rest of the body at
+ * the brightest entry. That keeps two properties:
+ *
+ *   - adjacent segments never differ by more than one palette step, so a short
+ *     snake is not a violent dark-to-bright jump;
+ *   - the step never shrinks either. Stretching a fixed palette over an
+ *     arbitrarily long snake is what made the gradient fade to nothing on a
+ *     large board; here the contrast per segment is constant however long the
+ *     snake gets.
+ *
+ * The window is anchored at the tail rather than at the head so the detailed
+ * ramp is on the cells that are about to vanish.
+ */
+#define PALETTE_N 24
+
+static const unsigned char palette[PALETTE_N][3] = {
+    {  10,  40,  18 },
+    {  15,  47,  23 },
+    {  19,  54,  28 },
+    {  24,  61,  32 },
+    {  29,  68,  37 },
+    {  33,  75,  42 },
+    {  38,  82,  47 },
+    {  43,  89,  51 },
+    {  48,  96,  56 },
+    {  52, 103,  61 },
+    {  57, 110,  66 },
+    {  62, 117,  71 },
+    {  66, 123,  75 },
+    {  71, 130,  80 },
+    {  76, 137,  85 },
+    {  80, 144,  90 },
+    {  85, 151,  95 },
+    {  90, 158,  99 },
+    {  95, 165, 104 },
+    {  99, 172, 109 },
+    { 104, 179, 114 },
+    { 109, 186, 118 },
+    { 113, 193, 123 },
+    { 118, 200, 128 },
+};
+
+/* Palette entry for snake[index], where 0 is the head. */
+static int segment_palette(int index, int len)
+{
+    int from_tail = len - 1 - index;      /* 0 = tail (oldest) */
+    int window = len < PALETTE_N ? len : PALETTE_N;
+    int base = PALETTE_N - window;        /* darker end of the slice */
+    int pos = from_tail < window ? from_tail : window - 1;
+
+    return base + pos;
+}
+
 static void render(const struct point *body, int len,
                    const struct point *apples, int n_apples,
                    int eaten, int tick_ms)
@@ -181,35 +243,32 @@ static void render(const struct point *body, int len,
     for (int y = 0; y < board_h; y++) {
         fputs("\033[34m|\033[0m", stdout);
         for (int x = 0; x < board_w; x++) {
-            const char *colour = NULL;
-            char ch = ' ';
+            int seg = -1;
+            bool apple_here = false;
 
-            if (body[0].x == x && body[0].y == y) {
-                ch = '@';
-                colour = "\033[1;32m";
-            } else {
-                bool drawn = false;
-
-                for (int i = 0; i < n_apples; i++)
-                    if (apples[i].x == x && apples[i].y == y) {
-                        ch = 'o';
-                        colour = "\033[1;31m";
-                        drawn = true;
+            for (int i = 0; i < n_apples; i++)
+                if (apples[i].x == x && apples[i].y == y) {
+                    apple_here = true;
+                    break;
+                }
+            if (!apple_here) {
+                for (int i = 0; i < len; i++)
+                    if (body[i].x == x && body[i].y == y) {
+                        seg = i;
                         break;
                     }
-                if (!drawn) {
-                    for (int i = 1; i < len; i++)
-                        if (body[i].x == x && body[i].y == y) {
-                            ch = '#';
-                            colour = "\033[32m";
-                            break;
-                        }
-                }
             }
-            if (colour)
-                printf("%s%c\033[0m", colour, ch);
-            else
+
+            if (seg >= 0) {
+                const unsigned char *c = palette[segment_palette(seg, len)];
+
+                printf("\033[38;2;%d;%d;%dm%c\033[0m",
+                       c[0], c[1], c[2], seg == 0 ? '@' : '#');
+            } else if (apple_here) {
+                fputs("\033[1;31mo\033[0m", stdout);
+            } else {
                 putchar(' ');
+            }
         }
         fputs("\033[34m|\033[0m\n", stdout);
     }
