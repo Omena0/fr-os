@@ -472,37 +472,6 @@ int main(void)
     printf("%stype 'help' for the command list, EOF to stop\n", TAG);
     fflush(stdout);
 
-    /* Auto-run the ANSI test programs at boot, then drop into the REPL.
-     *
-     * The tests are a startup demonstration and a smoke check, not the whole
-     * system: control must return to the prompt so a person can run more
-     * programs and so the runtime-test harness can drive `run runtime-tests`
-     * through this same init. A test that is missing from the initrd (execve
-     * fails, child exits 127) or that dies just stops the sequence; the REPL
-     * is always reached. */
-    {
-        /* Box first, matrix last: each program clears the screen, so the
-         * colour matrix is what remains visible when the REPL prompt comes
-         * back. */
-        static const char *tests[] = { "ansi2", "ansi" };
-
-        for (size_t i = 0; i < sizeof(tests) / sizeof(tests[0]); i++) {
-            pid_t pid = fork();
-            int status;
-
-            if (pid < 0)
-                break;
-            if (pid == 0) {
-                char *argv[2] = { (char *)tests[i], NULL };
-                execve(argv[0], argv, environ);
-                _exit(127);
-            }
-            waitpid(pid, &status, 0);
-            if (!WIFEXITED(status) || WEXITSTATUS(status) == 127)
-                break;
-        }
-    }
-
     for (;;) {
         int argc;
         char *argv[32];
