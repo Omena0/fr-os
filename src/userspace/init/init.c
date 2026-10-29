@@ -415,7 +415,7 @@ static int dispatch(int argc, char **argv)
          */
         if (argc < 2) {
             say("run: expected a program name");
-            say("     the initrd carries: init, hello, ansi, ansi2");
+            say("     the initrd carries: init, hello, ansi, ansi2, snake");
             return 0;
         }
 
