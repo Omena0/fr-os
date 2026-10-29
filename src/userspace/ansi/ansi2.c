@@ -9,6 +9,10 @@
 
 static void box(void)
 {
+    /* Own the screen so the absolute-move probe below acts on this program's
+     * output. The blank first line is deliberate: ESC[1;1H writes the marker
+     * there instead of over the box header. */
+    printf("\033[2J\033[H");
     printf("\n");
     printf("  CURSOR/STYLE BOX (each line a separate check, legible = pass)\n");
     printf("  -----------------------------------------------------------\n");
