@@ -60,6 +60,9 @@ static struct tty_ring in_ring  = { .buf = NULL, .head = 0, .tail = 0, .count = 
 static u8 out_storage[TTY_RING_CAP];
 static u8 in_storage[TTY_RING_CAP];
 
+/* The console termios. Guarded by in_lock. */
+static struct termios tty_term;
+
 /*
  * Zero-initialised is a valid lock state ({0, 0} is SPINLOCK_INIT), so the rings
  * are usable before tty_init() runs. That matters: a process can be entered
@@ -488,10 +491,181 @@ static void com1_irq(struct interrupt_frame *frame)
     }
 }
 
+/* Raw reads echo what they return when ECHO is set. Called without in_lock. */
+static size_t tty_raw_echo(const char *buf, size_t n)
+{
+    u64 flags = spinlock_irqsave(&in_lock);
+    bool echo_on = (tty_term.c_lflag & ECHO) != 0;
+
+    spinlock_unlock_irqrestore(&in_lock, flags);
+    if (echo_on && n)
+        tty_write(buf, n);
+    return n;
+}
+
+/*
+ * Canonical input state. Bytes are moved from the input ring into canon_buf by
+ * the reader, under in_lock. canon_buf holds the editing line followed by
+ * committed bytes: the first canon_commit bytes are complete lines (or the part
+ * of one a reader took early) and may be read; the rest is still being typed.
+ * canon_eof records a VEOF typed on an empty line, which the next read reports
+ * as end of file.
+ */
+#define TTY_CANON_CAP 256
+static u8 canon_buf[TTY_CANON_CAP];
+static size_t canon_len;
+static size_t canon_commit;
+static bool canon_eof;
+
+/* Maximum bytes moved from the ring per lock hold, and the echo a single
+ * byte can produce (erase is "\b \b"), bounding the echo buffer. */
+#define TTY_CANON_BATCH 64
+#define TTY_ECHO_CAP   (TTY_CANON_BATCH * 3)
+
+/* Caller holds in_lock. */
+static void tty_termios_get_locked(struct termios *t)
+{
+    *t = tty_term;
+}
+
+static void canon_reset(void)
+{
+    canon_len = 0;
+    canon_commit = 0;
+    canon_eof = false;
+}
+
+/* Apply one input byte to the line discipline. Runs under in_lock; echo is
+ * appended to echo[] and written by the caller after the lock is dropped. */
+static void canon_feed(u8 c, const struct termios *t, u8 *echo, size_t *elen)
+{
+    bool echo_on = (t->c_lflag & ECHO) != 0;
+
+    if ((t->c_iflag & ICRNL) && c == '\r')
+        c = '\n';
+
+    if (c == t->c_cc[VERASE]) {
+        if (canon_len > canon_commit) {
+            canon_len--;
+            if (echo_on && (t->c_lflag & ECHOE)) {
+                echo[(*elen)++] = '\b';
+                echo[(*elen)++] = ' ';
+                echo[(*elen)++] = '\b';
+            }
+        }
+        return;
+    }
+
+    if (c == t->c_cc[VKILL]) {
+        canon_len = canon_commit;
+        if (echo_on && (t->c_lflag & ECHOK))
+            echo[(*elen)++] = '\n';
+        return;
+    }
+
+    if (c == t->c_cc[VEOF]) {
+        if (canon_len == canon_commit)
+            canon_eof = true;
+        else
+            canon_commit = canon_len;
+        return;
+    }
+
+    if (c == '\n') {
+        if (canon_len < TTY_CANON_CAP) {
+            canon_buf[canon_len++] = '\n';
+            canon_commit = canon_len;
+        }
+        if (echo_on)
+            echo[(*elen)++] = '\n';
+        return;
+    }
+
+    if (canon_len + 1 >= TTY_CANON_CAP)
+        return;
+    canon_buf[canon_len++] = c;
+    if (echo_on)
+        echo[(*elen)++] = c;
+}
+
+/*
+ * The canonical read. Returns at most one buffered line's worth of bytes, a
+ * partial line if count is smaller, or 0 at end of file. A reader that asks to
+ * block sleeps until a line is complete; without block it returns 0 at once.
+ */
+static size_t tty_read_canon(char *buf, size_t count, bool block)
+{
+    for (;;) {
+        u8 echo[TTY_ECHO_CAP];
+        size_t elen = 0;
+        struct task *me;
+        struct termios t;
+        u64 flags;
+        size_t n;
+
+        tty_poll_serial();
+        me = block ? current_task() : NULL;
+
+        flags = spinlock_irqsave(&in_lock);
+        tty_termios_get_locked(&t);
+        for (size_t i = 0; i < TTY_CANON_BATCH; i++) {
+            u8 c;
+
+            if (ring_pop(&in_ring, &c, 1) == 0)
+                break;
+            canon_feed(c, &t, echo, &elen);
+        }
+
+        if (canon_commit > 0 || (canon_eof && canon_len == 0)) {
+            n = canon_commit < count ? canon_commit : count;
+            if (n == 0)
+                canon_eof = false;
+            memcpy(buf, canon_buf, n);
+            memmove(canon_buf, canon_buf + n, canon_len - n);
+            canon_len -= n;
+            canon_commit -= n;
+            spinlock_unlock_irqrestore(&in_lock, flags);
+            if (elen)
+                tty_write((const char *)echo, elen);
+            return n;
+        }
+
+        if (!me) {
+            spinlock_unlock_irqrestore(&in_lock, flags);
+            if (elen)
+                tty_write((const char *)echo, elen);
+            return 0;
+        }
+
+        if (in_ring.count > 0) {
+            spinlock_unlock_irqrestore(&in_lock, flags);
+            if (elen)
+                tty_write((const char *)echo, elen);
+            continue;
+        }
+
+        tty_waiter = me;
+        spinlock_unlock_irqrestore(&in_lock, flags);
+        if (elen)
+            tty_write((const char *)echo, elen);
+        sched_block_current();
+        tty_waiter = NULL;
+    }
+}
+
 size_t tty_read(char *buf, size_t count, bool block)
 {
     if (!buf || count == 0)
         return 0;
+
+    {
+        u64 flags = spinlock_irqsave(&in_lock);
+        bool canonical = (tty_term.c_lflag & ICANON) != 0;
+
+        spinlock_unlock_irqrestore(&in_lock, flags);
+        if (canonical)
+            return tty_read_canon(buf, count, block);
+    }
 
     for (;;) {
         u64 flags;
@@ -550,7 +724,7 @@ size_t tty_read(char *buf, size_t count, bool block)
             if (n != 0) {
                 tty_waiter = NULL;
                 spinlock_unlock_irqrestore(&in_lock, flags);
-                return n;
+                return tty_raw_echo(buf, n);
             }
             /*
              * Still empty. Keep tty_waiter set across the unlock and
@@ -567,7 +741,7 @@ size_t tty_read(char *buf, size_t count, bool block)
         spinlock_unlock_irqrestore(&in_lock, flags);
 
         if (n != 0)
-            return n;
+            return tty_raw_echo(buf, n);
 
         /* Nothing buffered and no wait requested. Reporting 0 is how a
          * caller tells an idle terminal from a closed one, and it is what
@@ -661,8 +835,6 @@ static void keyboard_callback(char c)
  * processing is what the console always does for '\n', so OPOST and ONLCR are
  * reported as set. The control characters are the usual terminal ones.
  */
-static struct termios tty_term;
-
 static void tty_termios_defaults(struct termios *t)
 {
     memset(t, 0, sizeof(*t));
@@ -676,6 +848,7 @@ static void tty_termios_defaults(struct termios *t)
     t->c_cc[VMIN] = 1;
     t->c_cc[VTIME] = 0;
 }
+
 
 void tty_termios_get(struct termios *t)
 {
@@ -694,6 +867,7 @@ void tty_termios_set(const struct termios *t, bool flush_input)
         in_ring.head = 0;
         in_ring.tail = 0;
         in_ring.count = 0;
+        canon_reset();
     }
     spinlock_unlock_irqrestore(&in_lock, flags);
 }
