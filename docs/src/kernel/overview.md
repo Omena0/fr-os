@@ -22,59 +22,36 @@ The following subsystems are designed into the kernel: VFS, networking stack, IP
 
 ```
 src/kernel/
-├── main.c              kernel_main() — early init sequence
-├── boot/               Early boot stubs, multiboot2 shim
-├── arch/x86_64/        Architecture-specific code
-│   ├── idt.c           Interrupt Descriptor Table setup
-│   ├── gdt.c           Global Descriptor Table
-│   ├── apic.c          Local and I/O APIC management
-│   ├── context.asm     Context switch assembly stub
-│   ├── syscall.asm     SYSCALL/SYSRET entry point
-│   └── cpu.c           Per-CPU data, CPU feature detection
-├── mm/                 Memory management
-├── sched/              Scheduler
-├── fs/                 VFS + ext4
-├── ipc/                Pipes and shared memory
-├── net/                Networking stack
-├── drivers/            Kernel-side driver core
-├── security/           Capabilities, seccomp, namespaces
-├── module/             Loadable kernel module system
-└── lib/                Internal kernel utility library
+├── core/       entry (kmain.S), main.c, panic, kprintf, kstring, klog
+├── arch/       cpu_features, gdt, idt, percpu, context.S,
+│               interrupt_entry.S, syscall_entry.S
+├── mm/         pmm, vmm, address spaces (mm), kmalloc, ELF loader
+├── sched/      scheduler, tasks, timekeeping
+├── console/    console (VGA, framebuffer, ANSI) and tty
+├── proc/       process lifecycle, file/fd layer, syscall dispatch
+├── drivers/    kernel-side drivers (serial, PS/2 keyboard, font)
+├── include/    kernel headers
+└── link.ld     linker script
 ```
 
-The intended source layout groups subsystems into directories:
-
-```
-src/kernel/
-├── *.c                 Core kernel files (main.c, idt.c, gdt.c, vmm.c, pmm.c, 
-│                       kmalloc.c, sched.c, task.c, process.c, mm.c, syscall.c, 
-│                       elf.c, tty.c, console.c, klog.c, panic.c, percpu.c, 
-│                       cpu_features.c, module.c, ...)
-├── *.h                 Public headers (interrupt.h, sched.h, vmm.h, pmm.h, 
-│                       task.h, process.h, types.h, boot.h, syscall.h, ...)
-├── include/            Internal kernel headers
-├── drivers/            Driver sources (serial.c, keyboard.c, pci.c, ...)
-└── arch/x86_64/        Architecture-specific assembly and C
-    ├── *.c             (idt.c, gdt.c, apic.c, cpu.c)
-    └── *.S             (context.asm, syscall_entry.S, interrupt_entry.S)
-```
-
-Most subsystems live as individual `.c` files directly in `src/kernel/` rather than
-in subdirectories. The `mm/`, `sched/`, `fs/`, `ipc/`, `net/`, `security/`,
-`module/`, and `lib/` directories are the target layout.
+The build discovers kernel sources recursively, so a new file in any of these
+folders is picked up without a Makefile edit; object paths mirror the source
+paths under `build/obj/`.
 
 ## Core Kernel Components
 
 | Component | File(s) | Description |
 |---|---|---|
-| Interrupt handling | `arch/x86_64/idt.c`, `apic.c` | IDT, APIC routing, per-CPU interrupt stacks |
-| Context switching | `arch/x86_64/context.asm` | Save/restore GPRs, SIMD, scheduling metadata |
-| Privilege levels | `arch/x86_64/gdt.c` | GDT segments, TSS, ring transitions |
-| Syscall dispatch | `arch/x86_64/syscall.asm` | SYSCALL entry, dispatch table, SYSRET |
-| Module system | `module/` | ELF module loader, symbol table, versioning |
-| Panic system | `lib/panic.c` | Panic handler, diagnostic dump, halt |
-| Kernel logging | `lib/klog.c` | Structured log with severity levels |
-| Early boot | `main.c`, `boot/` | Sequenced subsystem initialization |
+| Interrupt handling | `arch/idt.c` | IDT, PIC remap/EOI, per-CPU interrupt stacks |
+| Context switching | `arch/context.S` | Save/restore GPRs, scheduling metadata |
+| Privilege levels | `arch/gdt.c` | GDT segments, TSS, ring transitions |
+| Syscall entry | `arch/syscall_entry.S` | SYSCALL entry and register frame |
+| Syscall dispatch | `proc/syscall.c` | Dispatch table and handlers |
+| Process lifecycle | `proc/process.c` | fork/exec/wait/init, address-space setup |
+| Files and descriptors | `proc/file.c` | File objects, console file, fd table |
+| Panic system | `core/panic.c` | Panic handler, diagnostic dump, halt |
+| Kernel logging | `core/klog.c` | Structured log with severity levels |
+| Early boot | `core/main.c`, `core/kmain.S` | Sequenced subsystem initialization |
 
 ## Kernel Object Model
 

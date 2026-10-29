@@ -3,7 +3,7 @@
 This document describes the intended memory layout for `Fr Core`. Every address
 below is a design constant. The ones in the tables come from
 `src/include/boot.h`, `src/kernel/include/vmm.h`, `src/kernel/include/pmm.h`
-and `src/kernel/process.c`.
+and `src/kernel/proc/process.c`.
 
 ## Physical Address Space
 
@@ -74,7 +74,7 @@ so far, so a fragmented address space runs out rather than filling gaps.
 `PHYS_DIRECT_MAP` is `0xFFFF800000000000` and `phys_to_virt(p)` is
 `PHYS_DIRECT_MAP + p`, so the mapping is an identity map over whatever the
 direct-map constructor chose to cover. That constructor uses
-`DIRECT_MAP_BYTES = (4ULL << 30)` (`src/kernel/vmm.c`) — **4 GiB**. The boot log
+`DIRECT_MAP_BYTES = (4ULL << 30)` (`src/kernel/mm/vmm.c`) — **4 GiB**. The boot log
 says the extent on every run, and which of two page sizes it used:
 
 ```
@@ -99,7 +99,7 @@ is latent.
 
 This was audit finding **#35**, a three-way disagreement between this document,
 `vmm.c` and `pmm.h`. **The code is authoritative and the documents were both
-wrong**: `DIRECT_MAP_BYTES` in `src/kernel/vmm.c` decides, and the header text
+wrong**: `DIRECT_MAP_BYTES` in `src/kernel/mm/vmm.c` decides, and the header text
 in `src/kernel/include/pmm.h` describing `ZONE_HIGH` as "reachable through the
 direct map" has been corrected to say the opposite. Both corrections are landed
 (2026-10-02). The hazard itself is unchanged: a ZONE_HIGH allocation is still

@@ -61,8 +61,13 @@ $(BUILDDIR)/stage2.elf: $(BOOT_STAGE2_SRC)
 
 ### `src/kernel/Makefile.inc`
 
+Kernel sources are grouped by subsystem (`core/`, `arch/`, `mm/`, `sched/`,
+`console/`, `proc/`, `drivers/`) and discovered recursively, so adding a file
+to an existing folder needs no Makefile change. Objects mirror source paths
+under `build/obj/`.
+
 ```makefile
-KERNEL_SRCS := $(wildcard src/kernel/**/*.c src/kernel/**/*.asm)
+KERNEL_SRCS := $(sort $(shell find src/kernel -name '*.c' -o -name '*.S'))
 KERNEL_CFLAGS := -ffreestanding -nostdlib -mno-red-zone -mno-mmx -mno-sse \
     -Wall -Wextra -O2 -g -mcmodel=kernel \
     -mno-implicit-float

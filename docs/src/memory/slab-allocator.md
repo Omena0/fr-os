@@ -4,7 +4,7 @@
 
 The SLAB allocator provides efficient fixed-size object allocation for the kernel. It reduces fragmentation and allocation overhead for frequently allocated objects (inodes, task structs, VMAs, network buffers, etc.) by maintaining pools of pre-initialized objects.
 
-The implementation in `src/kernel/kmalloc.c` is a two-tier allocator:
+The implementation in `src/kernel/mm/kmalloc.c` is a two-tier allocator:
 
 - **kmalloc caches (up to 4 KiB)**: Power-of-two size classes (8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096 bytes) served from per-CPU magazines backed by slab pages.
 - **vmalloc (larger than 4 KiB)**: Direct page-backed allocations from the vmalloc region.
