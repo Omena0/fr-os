@@ -341,8 +341,9 @@ def free_bytes(path):
 # ISA self-test, build/.build-inputs.stamp from the header digest), and each
 # one added later is a false "stale image".
 
-STALE_ARTEFACTS = ("libk.a", "libc.a", "initrd.img", "kernel.elf",
-                   "stage1.elf", "stage2.elf")
+# Artefacts common to both images; the kernel and initrd differ per image and
+# are chosen in newest_input().
+STALE_ARTEFACTS = ("libk.a", "libc.a", "stage1.elf", "stage2.elf")
 
 
 def newest_input(root, image):
@@ -387,6 +388,16 @@ def newest_input(root, image):
                 consider(os.path.join(dirpath, name))
 
     for name in STALE_ARTEFACTS:
+        consider(os.path.join(root, "build", name))
+
+    # The runtime image is built from its own kernel and initrd. Counting the
+    # main image's artefacts as its inputs made a current runtime image look
+    # stale as soon as anything rebuilt kernel.elf.
+    if runtime_image:
+        variants = ("kernel-runtime.elf", "initrd-runtime.img")
+    else:
+        variants = ("kernel.elf", "initrd.img")
+    for name in variants:
         consider(os.path.join(root, "build", name))
 
     if newest[1] and os.path.realpath(newest[1]) == img_real:
