@@ -81,13 +81,20 @@ static void draw_cursor(void)
     printf("\033[48;5;%dm\033[30;1m[]\033[0m", palette[colour]);
 }
 
+static int cur_px, cur_py;
+static int screen_w, screen_h;
+
 static void draw_status(void)
 {
     move_to(rows, 0);
     reset_attr();
-    printf("\033[K paint  cell %2d,%2d  colour %d/%d  "
-           "[LMB paint  RMB colour  MMB clear  q quit]",
-           cur_col, cur_row, colour + 1, PALETTE_N);
+    /* Both coordinate systems are shown. A discrepancy between the cell the
+     * canvas thinks it is painting and the pixel the kernel reports is then
+     * visible here instead of only as a misplaced block on screen. */
+    printf("\033[K paint  cell %2d,%2d  px %4d,%4d  of %4d,%4d  colour %d/%d"
+           "  [LMB paint  RMB colour  MMB clear  q quit]",
+           cur_col, cur_row, cur_px, cur_py, screen_w, screen_h,
+           colour + 1, PALETTE_N);
     reset_attr();
 }
 
@@ -161,6 +168,8 @@ int main(void)
 
     cols = (int)m.char_width / CELL_CHARS;
     rows = (int)m.char_height - 1;          /* reserve the status row */
+    screen_w = (int)m.pixel_width;
+    screen_h = (int)m.pixel_height;
     if (cols < 8 || rows < 3) {
         fprintf(stderr, "paint: console too small (%dx%d)\n", cols, rows);
         return 1;
@@ -188,6 +197,9 @@ int main(void)
 
         int c = m.char_x / CELL_CHARS;
         int r = m.char_y;
+
+        cur_px = m.x;
+        cur_py = m.y;
 
         if (c >= cols)
             c = cols - 1;
