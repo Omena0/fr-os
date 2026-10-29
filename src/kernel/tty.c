@@ -331,24 +331,12 @@ void tty_in_push(char c)
     if (wake)
         sched_wake(wake);
 
-    /* Backspace (0x08) and DEL (0x7f): do not echo here. The consumer
-     * (init's REPL) writes "\b \b" through console_write_raw, which
-     * erases the glyph and repositions the cursor in one step. Echoing
-     * '\b' here too would advance the cursor twice and erase the
-     * preceding character instead of the one backspace targets. */
-    if (c == '\b' || c == 0x7f)
-        return;
-
-    /* Control characters display as ^X notation so they appear as visible
-     * glyphs instead of garbage bytes or non-printing codes on screen. */
-    if ((uint8_t)c >= 0x01 && (uint8_t)c <= 0x1f &&
-        (uint8_t)c != '\t' && (uint8_t)c != '\n' &&
-        (uint8_t)c != '\r') {
-        console_putc('^');
-        console_putc((char)('@' + (uint8_t)c));
-    } else {
-        console_putc(c);
-    }
+    /*
+     * No echo here. Input echo belongs to whoever owns the line discipline:
+     * init's REPL needs to place a cursor, insert in the middle of the line
+     * and redraw, and a game polls keys without wanting them printed over its
+     * screen. Echoing here made both impossible (and double-echoed the REPL).
+     */
 }
 
 /*
