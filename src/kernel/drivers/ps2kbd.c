@@ -41,33 +41,34 @@
 #define PIC1_IRQ_KEYBOARD_BIT 0x02
 
 #include <drivers/ps2kbd.h>
+#include <drivers/ps2mouse.h>
 #include <io.h>
 #include <klog.h>
 #include <cpu_features.h>
+#include <wait.h>
 #include <types.h>
 
 KLOG_SUBSYSTEM("ps2kbd");
 
 /* --- 8042 controller I/O helpers --- */
 
-static u64 ps2_us_to_tsc(u64 us)
-{
-    extern struct cpu_features cpu_features;
-    if (!cpu_features.tsc_khz)
-        return us * 3000;
-    return us * cpu_features.tsc_khz / 1000;
-}
-
 static bool ps2_wait(uint8_t mask, bool set)
 {
-    u64 deadline = rdtsc() + (u64)ps2_us_to_tsc(PS2_WAIT_US);
+    /*
+     * Bounded by wall-clock time, not by an iteration count: a port access
+     * under emulation can be orders of magnitude slower than on the host, so
+     * a loop count that is a millisecond on hardware is a multi-second hang
+     * here. wait_spin_us() keeps the busy-wait (this runs before the
+     * scheduler exists, so it cannot sleep) but owns the deadline arithmetic.
+     */
+    u64 deadline = rdtsc() + wait_us_to_tsc(PS2_WAIT_US);
 
     for (;;) {
         uint8_t status = inb(PS2_STATUS);
 
         if (!!(status & mask) == set)
             return true;
-        if (rdtsc() >= deadline)
+        if ((s64)(rdtsc() - deadline) >= 0)
             return false;
         io_wait();
     }
