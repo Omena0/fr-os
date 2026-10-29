@@ -305,6 +305,34 @@ static char esc_params[64];
  * mode to set, but it must consume the whole sequence instead of treating
  * '?' as the final byte and printing the rest as text. */
 static bool esc_private;
+
+/*
+ * Value of the index-th ';'-separated parameter in an already-collected CSI
+ * parameter string. Missing or empty parameters are 0, which is what the
+ * cursor-position sequences mean by "use the default" (row 1, column 1).
+ */
+static uint32_t esc_param_at(const char *params, int index)
+{
+    int seen = 0;
+
+    if (!params)
+        return 0;
+
+    while (*params) {
+        unsigned long value = 0;
+
+        if (seen == index) {
+            kstrtoul(params, &value, 10);
+            return (uint32_t)value;
+        }
+        while (*params && *params != ';')
+            params++;
+        if (*params == ';')
+            params++;
+        seen++;
+    }
+    return 0;
+}
 static uint8_t esc_param_count;
 
 static void console_fb_init(struct framebuffer_info *info);
@@ -924,21 +952,35 @@ static bool handle_escape(char c)
         }
 
         switch (c) {
-            case 'H':       /* cursor position, 1-based */
-                {
-                uint32_t row = n ? n - 1 : 0;
-                uint32_t col = 0;
+            case 'H':       /* cursor position, 1-based row;col */
+            case 'f': {     /* same as H (HVP) */
+                /*
+                 * Both parameters matter. This used to parse only the row
+                 * and hard-code col = 0 ("only single-parameter forms appear
+                 * in kernel output today"), so every ESC[r;cH clamped to
+                 * column 0. A full-screen program that positions its cursor
+                 * cell by cell therefore drew its cursor down the left edge,
+                 * which is exactly what the paint demo did.
+                 */
+                uint32_t row = esc_param_at(esc_params, 0);
+                uint32_t col = esc_param_at(esc_params, 1);
+                uint32_t max_rows = FB_TEXT_ROWS();
+                uint32_t max_cols = console_fb_active() && fb.cols
+                                        ? fb.cols : VGA_COLS;
 
-                /* A second parameter is the column; only single-parameter
-                 * forms appear in kernel output today. */
-                col = 0;
-                cursor_y = row;
+                if (row)
+                    row--;
+                if (col)
+                    col--;
+                if (row >= max_rows)
+                    row = max_rows - 1;
+                if (col >= max_cols)
+                    col = max_cols - 1;
+
                 cursor_x = col;
-                if (vga_enabled) {
-                    if (cursor_y >= VGA_ROWS)
-                        cursor_y = VGA_ROWS - 1;
+                cursor_y = row;
+                if (vga_enabled)
                     vga_putc_at(cursor_x, cursor_y, ' ', current_attr);
-                }
                 if (console_fb_active())
                     console_fb_move(cursor_x, cursor_y);
                 return true;
