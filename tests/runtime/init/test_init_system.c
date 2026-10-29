@@ -288,8 +288,37 @@ static int test_clock_basic(void) {
 static int test_clock_realtime(void) {
     struct timespec ts;
     long ret = clock_gettime(CLOCK_REALTIME, &ts);
-    /* CLOCK_REALTIME may or may not be implemented */
-    TEST_ASSERT(ret == 0 || ret == -EINVAL, "clock_gettime REALTIME should succeed or return ENOSYS");
+
+    TEST_ASSERT(ret == 0, "clock_gettime REALTIME should succeed");
+    /* The kernel reads the CMOS RTC, which QEMU sets from the host clock.
+     * A value before 2020 means it is still returning uptime. */
+    TEST_ASSERT(ts.tv_sec > 1600000000L, "realtime should be a Unix timestamp");
+    TEST_ASSERT(ts.tv_sec < 4102444800L, "realtime should be before 2100");
+    TEST_ASSERT(ts.tv_nsec >= 0 && ts.tv_nsec < 1000000000L,
+                "tv_nsec should be valid");
+    return TEST_PASS;
+}
+
+static int test_clock_monotonic_precision(void) {
+    struct timespec prev, ts;
+
+    TEST_ASSERT(clock_gettime(CLOCK_MONOTONIC, &prev) == 0,
+                "first MONOTONIC read should succeed");
+
+    /* The PIT-only clock can only return multiples of 10 ms. The TSC
+     * clocksource resolves below that; require evidence of it. */
+    int subtick = (prev.tv_nsec % 10000000L) != 0;
+    for (int i = 0; i < 100000 && !subtick; i++) {
+        TEST_ASSERT(clock_gettime(CLOCK_MONOTONIC, &ts) == 0,
+                    "MONOTONIC read should succeed");
+        long long d = (long long)(ts.tv_sec - prev.tv_sec) * 1000000000LL +
+                      (long long)(ts.tv_nsec - prev.tv_nsec);
+        TEST_ASSERT(d >= 0, "MONOTONIC must not go backwards");
+        if (ts.tv_nsec % 10000000L)
+            subtick = 1;
+        prev = ts;
+    }
+    TEST_ASSERT(subtick, "MONOTONIC should resolve below the 10 ms PIT tick");
     return TEST_PASS;
 }
 
@@ -380,11 +409,12 @@ struct test_suite test_init_system = {
         { "getline_basic", test_getline_basic, true },
         { "clock_basic", test_clock_basic, false },
         { "clock_realtime", test_clock_realtime, false },
+        { "clock_monotonic_precision", test_clock_monotonic_precision, false },
         { "getpid_basic", test_getpid_basic, false },
         { "getppid_basic", test_getppid_basic, false },
         { "graphics_triangle", test_graphics_triangle, false },
         { "exit_basic", test_exit_basic, true },
         { "abort_basic", test_abort_basic, true },
     },
-    .num_cases = 32,
+    .num_cases = 33,
 };
