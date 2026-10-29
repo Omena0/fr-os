@@ -597,7 +597,7 @@ static void console_fb_init(struct framebuffer_info *info)
     if (fb.rows > 200)
         fb.rows = 200;
 
-    cell_bytes = fb.cols * fb.rows * sizeof(struct fb_cell);
+    cell_bytes = (size_t)fb.cols * fb.rows * sizeof(struct fb_cell);
     fb.cells = (struct fb_cell *)kmalloc(cell_bytes);
     if (!fb.cells) {
         /* Without the cell buffer there is no scrollback or repaint, but
@@ -632,7 +632,7 @@ static void console_fb_scroll(void)
         return;
 
     memmove(&fb.cells[0], &fb.cells[fb.cols],
-        (fb.rows - 1) * fb.cols * sizeof(struct fb_cell));
+        (size_t)(fb.rows - 1) * fb.cols * sizeof(struct fb_cell));
     for (uint32_t c = 0; c < fb.cols; c++) {
         struct fb_cell *cell = &fb.cells[(fb.rows - 1) * fb.cols + c];
         cell->ch = ' ';
