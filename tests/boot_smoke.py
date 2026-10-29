@@ -367,7 +367,17 @@ def newest_input(root, image):
         if m > newest[0]:
             newest = (m, path)
 
-    for base in ("src", "tools"):
+    # A source tree is not the same input set for both images. The main image
+    # embeds every userspace program; the runtime image embeds init and the
+    # test runner only, so editing e.g. tetris.c must not make os-runtime.img
+    # look stale.
+    if runtime_image:
+        src_bases = ("src/kernel", "src/include", "src/libc",
+                     "src/userspace/init", "tools")
+    else:
+        src_bases = ("src", "tools")
+
+    for base in src_bases:
         top = os.path.join(root, base)
         for dirpath, dirnames, filenames in os.walk(top):
             dirnames[:] = [d for d in dirnames if d != "__pycache__"]
@@ -384,6 +394,11 @@ def newest_input(root, image):
                 # `make test-runtime` before `make check` would otherwise make
                 # a perfectly current os.img look stale.
                 if not runtime_image and "runtime" in name:
+                    continue
+                # Conversely, the main initrd object is not an input to the
+                # runtime image. Shared objects (libk, libc) are inputs to both
+                # and stay in the scan.
+                if runtime_image and name in ("initrd.c.o", "initrd.c.o.d"):
                     continue
                 consider(os.path.join(dirpath, name))
 
