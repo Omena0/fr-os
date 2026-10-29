@@ -957,10 +957,22 @@ static bool handle_escape(char c)
             case 'u':       /* restore cursor (RCP) */
                 console_restore_cursor();
                 return true;
-            case 'K':       /* erase line */
-                for (uint32_t x = cursor_x; x < VGA_COLS; x++)
-                    vga_putc_at(x, cursor_y, ' ', current_attr);
+            case 'K':       /* erase line, from the cursor to the end */
+                {
+                uint32_t saved = cursor_x;
+                uint32_t cols = console_fb_active() ? fb.cols : VGA_COLS;
+
+                for (uint32_t x = cursor_x; x < cols; x++) {
+                    if (vga_enabled)
+                        vga_putc_at(x, cursor_y, ' ', current_attr);
+                    if (console_fb_active()) {
+                        cursor_x = x;
+                        console_fb_putc(' ', current_attr);
+                    }
+                }
+                cursor_x = saved;
                 return true;
+                }
             case 'm':       /* SGR: set attributes */
                 console_apply_sgr(esc_params);
                 return true;
