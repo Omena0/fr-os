@@ -71,8 +71,13 @@ static bool ps2_wait(uint8_t mask, bool set)
 
 static bool ps2_write_port(uint16_t port, uint8_t value)
 {
-    if (!ps2_wait(PS2_STATUS_IBF, false))
+    if (!ps2_wait(PS2_STATUS_IBF, false)) {
+        klog(KLOG_DEBUG, "ps2kbd: port 0x%04x write 0x%02x blocked (IBF stuck)\n",
+              (unsigned)port, (unsigned)value);
         return false;
+    }
+    klog(KLOG_DEBUG, "ps2kbd: outb(0x%04x, 0x%02x)\n",
+          (unsigned)port, (unsigned)value);
     outb(port, value);
     return true;
 }
@@ -81,14 +86,20 @@ static void ps2_expect_ack(uint8_t cmd, uint8_t want)
 {
     uint8_t resp;
 
-    if (!ps2_wait(PS2_STATUS_OBF, true))
+    if (!ps2_wait(PS2_STATUS_OBF, true)) {
+        klog(KLOG_DEBUG, "ps2kbd: 0x%02x timed out waiting for ack\n",
+              (unsigned)cmd);
         return;
+    }
     resp = inb(PS2_DATA);
 
     if (resp != want)
         klog(KLOG_WARN, "ps2kbd: 8042 command 0x%02x answered 0x%02x, "
              "expected 0x%02x\n", (unsigned)cmd, (unsigned)resp,
              (unsigned)want);
+    else
+        klog(KLOG_DEBUG, "ps2kbd: 0x%02x acked 0x%02x\n",
+              (unsigned)cmd, (unsigned)resp);
 }
 
 /* --- scancode translation --- */
@@ -146,42 +157,69 @@ static void keyboard_scancode(uint8_t sc)
     uint8_t code = make ? sc : (uint8_t)(sc & 0x7F);
     char c;
 
-    if (sc == 0xFA || sc == 0xFE || sc == 0xFF || (sc >= 0xF0 && sc <= 0xFD))
-        return;
+    klog(KLOG_DEBUG, "ps2kbd: scancode 0x%02x (%s, code 0x%02x)\n",
+          (unsigned)sc, make ? "make" : "break", (unsigned)code);
 
-    if (sc == 0xE1)
+    if (sc == 0xFA || sc == 0xFE || sc == 0xFF || (sc >= 0xF0 && sc <= 0xFD)) {
+        klog(KLOG_DEBUG, "ps2kbd: special scancode 0x%02x dropped\n",
+              (unsigned)sc);
         return;
-    if (sc == 0xE0)
+    }
+
+    if (sc == 0xE1) {
+        klog(KLOG_DEBUG, "ps2kbd: 0xE1 prefix dropped\n");
         return;
+    }
+    if (sc == 0xE0) {
+        klog(KLOG_DEBUG, "ps2kbd: 0xE0 prefix dropped\n");
+        return;
+    }
 
     if (code == SC_LSHIFT || code == SC_RSHIFT) {
         shift_held = make;
+        klog(KLOG_DEBUG, "ps2kbd: shift %s\n", make ? "pressed" : "released");
         return;
     }
     if (code == SC_LCTRL) {
         ctrl_held = make;
+        klog(KLOG_DEBUG, "ps2kbd: ctrl %s\n", make ? "pressed" : "released");
         return;
     }
 
-    if (!make)
+    if (!make) {
+        klog(KLOG_DEBUG, "ps2kbd: break for 0x%02x dropped\n", (unsigned)code);
         return;
+    }
 
     /* Translate. */
-    if (code >= ARRAY_SIZE(scancode_base))
+    if (code >= ARRAY_SIZE(scancode_base)) {
+        klog(KLOG_DEBUG, "ps2kbd: code 0x%02x out of range\n",
+              (unsigned)code);
         return;
+    }
     c = scancode_base[code];
-    if (c == 0)
+    if (c == 0) {
+        klog(KLOG_DEBUG, "ps2kbd: code 0x%02x unmapped\n", (unsigned)code);
         return;
+    }
 
     /* Ctrl+letter: convert to Ctrl code. */
     if (ctrl_held && c >= 'a' && c <= 'z') {
-        if (keyboard_callback)
+        if (keyboard_callback) {
+            klog(KLOG_DEBUG, "ps2kbd: ctrl+%c -> 0x%02x\n", c, (unsigned)(c & 0x1F));
             keyboard_callback((char)(c & 0x1F));
+        } else {
+            klog(KLOG_DEBUG, "ps2kbd: ctrl+%c no callback\n", c);
+        }
         return;
     }
     if (ctrl_held && c >= 'A' && c <= 'Z') {
-        if (keyboard_callback)
+        if (keyboard_callback) {
+            klog(KLOG_DEBUG, "ps2kbd: ctrl+%c -> 0x%02x\n", c, (unsigned)(c & 0x1F));
             keyboard_callback((char)(c & 0x1F));
+        } else {
+            klog(KLOG_DEBUG, "ps2kbd: ctrl+%c no callback\n", c);
+        }
         return;
     }
 
@@ -191,13 +229,19 @@ static void keyboard_scancode(uint8_t sc)
             s = scancode_shifted[code];
         if (s != 0) {
             c = s;
+            klog(KLOG_DEBUG, "ps2kbd: shifted -> '%c'\n", c);
         } else if (c >= 'a' && c <= 'z') {
             c = (char)(c - ('a' - 'A'));
+            klog(KLOG_DEBUG, "ps2kbd: shifted upper -> '%c'\n", c);
         }
     }
 
-    if (keyboard_callback)
+    if (keyboard_callback) {
+        klog(KLOG_DEBUG, "ps2kbd: delivering '%c' (0x%02x) to tty\n", c, (unsigned)c);
         keyboard_callback(c);
+    } else {
+        klog(KLOG_DEBUG, "ps2kbd: '%c' no callback registered\n", c);
+    }
 }
 
 /* IRQ1 handler. Drains the 8042 output buffer to avoid losing keystrokes. */
@@ -208,19 +252,26 @@ void ps2kbd_irq(struct interrupt_frame *frame)
 
     UNUSED(frame);
 
+    klog(KLOG_DEBUG, "ps2kbd: IRQ1 fired\n");
     for (guard = 0; guard < 32; guard++) {
         status = inb(PS2_STATUS);
 
-        if (!(status & PS2_STATUS_OBF))
+        if (!(status & PS2_STATUS_OBF)) {
+            klog(KLOG_DEBUG, "ps2kbd: drained %u bytes, OBF clear\n", guard);
             return;
+        }
 
         /* Mouse byte — leave it for the mouse driver. */
-        if (status & PS2_STATUS_SYS)
+        if (status & PS2_STATUS_SYS) {
+            klog(KLOG_DEBUG, "ps2kbd: mouse byte 0x%02x dropped\n",
+                  (unsigned)inb(PS2_DATA));
             return;
+        }
 
         keyboard_scancode(inb(PS2_DATA));
         status = inb(PS2_STATUS);
     }
+    klog(KLOG_WARN, "ps2kbd: drained 32 bytes without OBF clearing\n");
 }
 
 /* Initialize the PS/2 keyboard controller, install IRQ1 handler, and register
@@ -232,14 +283,19 @@ void ps2kbd_init(ps2kbd_callback_t cb)
 
     keyboard_callback = cb;
 
+    klog(KLOG_DEBUG, "ps2kbd: init start\n");
     /* Drain pre-existing bytes. */
     {
         unsigned int guard = 1024;
-        while ((inb(PS2_STATUS) & PS2_STATUS_OBF) && guard--)
+        while ((inb(PS2_STATUS) & PS2_STATUS_OBF) && guard--) {
+            klog(KLOG_DEBUG, "ps2kbd: drained pre-existing 0x%02x\n",
+                  (unsigned)inb(PS2_DATA));
             (void)inb(PS2_DATA);
+        }
     }
 
     /* Enable keyboard interface (no response). */
+    klog(KLOG_DEBUG, "ps2kbd: enable kbd\n");
     outb(PS2_CMD, PS2_CMD_ENABLE_KBD);
 
     /* Enable IRQ1 + scancode translation. */
@@ -255,8 +311,10 @@ void ps2kbd_init(ps2kbd_callback_t cb)
     /* Flush any response from the enable command. */
     {
         unsigned int guard = 1024;
-        while ((inb(PS2_STATUS) & PS2_STATUS_OBF) && guard--)
-            (void)inb(PS2_DATA);
+        while ((inb(PS2_STATUS) & PS2_STATUS_OBF) && guard--) {
+            klog(KLOG_DEBUG, "ps2kbd: flushed enable-ack 0x%02x\n",
+                  (unsigned)inb(PS2_DATA));
+        }
     }
 
     /* Install the IRQ1 handler before unmasking. */
