@@ -793,8 +793,14 @@ void console_putc_attr(char c, uint8_t attr)
          * unbroken line, with the next message appended to the
          * previous one.
          */
-        if (serial_enabled)
+        if (serial_enabled) {
+            /* A host terminal attached to QEMU's stdio chardev is in raw
+             * mode, so LF alone moves down without returning to column 0.
+             * Every terminal accepts CRLF whether or not the host is raw,
+             * so send the pair. */
+            serial_putc_blocking('\r');
             serial_putc_blocking('\n');
+        }
         return;
     }
     if (c == '\r') {
@@ -867,8 +873,10 @@ void console_write_raw(const char *s, size_t n)
         char c = s[i];
 
         if (c == '\n') {
-            if (serial_enabled)
+            if (serial_enabled) {
+                serial_putc_blocking('\r');
                 serial_putc_blocking('\n');
+            }
             console_newline();
             continue;
         }
