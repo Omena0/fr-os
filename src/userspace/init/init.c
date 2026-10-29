@@ -6,10 +6,11 @@
  * EOF. Every byte emitted is tagged "Fr Init: " so a multiplexed console log
  * still says which process said what.
  */
+#include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <errno.h>
+#include <fcntl.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
@@ -443,6 +444,19 @@ static int dispatch(int argc, char **argv)
         /* Parent: wait for the child */
         int status;
         waitpid(pid, &status, 0);
+
+        /*
+         * A child may have put the shared console description into
+         * non-blocking mode (the game polls input while it animates). The
+         * REPL reads blocking; clear the bit so an idle prompt does not spin
+         * on empty reads or look like EOF after the program leaves.
+         */
+        {
+            int fl = fcntl(0, F_GETFL, 0);
+
+            if (fl >= 0)
+                fcntl(0, F_SETFL, fl & ~O_NONBLOCK);
+        }
 
         if (WIFEXITED(status)) {
             say("run: program exited with status %d", WEXITSTATUS(status));
