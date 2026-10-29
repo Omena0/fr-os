@@ -166,6 +166,93 @@ char *strstr(const char *haystack, const char *needle)
     return NULL;
 }
 
+char *strcpy(char *dst, const char *src)
+{
+    char *ret = dst;
+
+    while ((*dst++ = *src++))
+        ;
+    return ret;
+}
+
+char *strncpy(char *dst, const char *src, size_t n)
+{
+    char *ret = dst;
+
+    while (n > 0 && *src) {
+        *dst++ = *src++;
+        n--;
+    }
+    while (n > 0) {
+        *dst++ = '\0';
+        n--;
+    }
+    return ret;
+}
+
+char *strcat(char *dst, const char *src)
+{
+    char *ret = dst;
+
+    while (*dst)
+        dst++;
+    while ((*dst++ = *src++))
+        ;
+    return ret;
+}
+
+char *strncat(char *dst, const char *src, size_t n)
+{
+    char *ret = dst;
+
+    while (*dst)
+        dst++;
+    while (n > 0 && *src) {
+        *dst++ = *src++;
+        n--;
+    }
+    *dst = '\0';
+    return ret;
+}
+
+char *strpbrk(const char *s, const char *accept)
+{
+    for (; *s; s++)
+        if (strchr(accept, (unsigned char)*s))
+            return (char *)s;
+    return NULL;
+}
+
+char *strndup(const char *s, size_t n)
+{
+    size_t len = strnlen(s, n);
+    char *p = malloc(len + 1);
+
+    if (!p)
+        return NULL;
+    memcpy(p, s, len);
+    p[len] = '\0';
+    return p;
+}
+
+char *strsep(char **stringp, const char *delim)
+{
+    char *s = *stringp;
+    char *end;
+
+    if (!s)
+        return NULL;
+
+    end = s + strcspn(s, delim);
+    if (*end) {
+        *end = '\0';
+        *stringp = end + 1;
+    } else {
+        *stringp = NULL;
+    }
+    return s;
+}
+
 char *strdup(const char *s)
 {
     size_t len = strlen(s) + 1;
