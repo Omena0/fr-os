@@ -9,7 +9,12 @@
  *     all-spin detection for every other piece (last action was a rotation and
  *     the piece is immobile).
  *   - TETR.IO-style scoring: line values, spin values, back-to-back x1.5,
- *     combo, soft/hard drop points, level scaling.
+ *     combo, soft/hard drop points, level scaling, and a level-scaled
+ *     all-clear (perfect clear) bonus.
+ *   - TETR.IO-style feedback: cleared rows flash before collapsing, the
+ *     board shakes on clears and spins, and a label (T-SPIN DOUBLE, TETRIS,
+ *     ALL CLEAR, ...) pops over the playfield. B2B and COMBO are shown beside
+ *     the playfield while they are active.
  *
  * Tuning constants are here as #defines so the feel can be changed without
  * reading the game loop.
@@ -43,6 +48,14 @@
 #define DAS_DELAY_MS       167
 #define DAS_REPEAT_MS      35
 #define SOFT_REPEAT_MS     35
+
+/* Effects, in the spirit of TETR.IO: cleared rows flash before collapsing,
+ * the board shakes, and a short label pops over the playfield. */
+#define CLEAR_FLASH_MS     140
+#define SHAKE_MS           220
+#define POPUP_MS           750
+/* TETR.IO's all-clear (perfect clear) value, scaled by level like the rest. */
+#define PERFECT_CLEAR_BONUS 3500
 #define LOCK_RESET_LIMIT   15
 #define SOFT_DROP_MS       40
 #define DAS_MS             140     /* delayed auto shift */
@@ -122,6 +135,18 @@ static int next_queue[NEXT_COUNT];
 
 static int score, lines, level, combo;
 static bool back_to_back;
+
+/* Clear animation state. While clearing_timer runs, the cleared rows are
+ * still in `board` and are drawn flashing; finish_clear() removes them and
+ * spawns the next piece. */
+static int clearing_timer;
+static bool clearing_rows[BOARD_H];
+static int clearing_count;
+
+static int shake_timer, shake_mag;
+static char popup_text[24];
+static int popup_timer;
+static uint32_t popup_colour;
 static bool game_over, paused, quit_game;
 static bool dirty = true;
 
@@ -198,6 +223,13 @@ static void draw_number(int x, int y, int value, int scale, uint32_t colour)
 
     snprintf(buf, sizeof(buf), "%d", value);
     draw_text(x, y, buf, scale, colour);
+}
+
+static void set_popup(const char *text, uint32_t colour, int ms)
+{
+    snprintf(popup_text, sizeof(popup_text), "%s", text);
+    popup_colour = colour;
+    popup_timer = ms;
 }
 
 /* --------------------------------------------------------------- board ----- */
@@ -335,23 +367,49 @@ static void draw_piece_preview(int type, int x, int y, int cell)
 
 static void render(void)
 {
+    int sx = 0, sy = 0;
+
+    if (shake_timer > 0) {
+        int amp = shake_mag * shake_timer / SHAKE_MS;
+
+        if (amp < 1)
+            amp = 1;
+        sx = ((shake_timer / 18) & 1) ? amp : -amp;
+        sy = ((shake_timer / 27) & 1) ? amp : -amp;
+    }
+
+    int ox = board_x, oy = board_y;
+
+    board_x += sx;
+    board_y += sy;
+
     gfx_clear(&canvas, background);
 
     /* Playfield */
     gfx_fill_rect(&canvas, board_x - 4, board_y - 4,
                   BOARD_W * CELL_PX + 8, BOARD_H * CELL_PX + 8, cell_edge);
 
-    for (int y = 0; y < BOARD_H; y++)
-        for (int x = 0; x < BOARD_W; x++)
+    bool flash = clearing_timer > 0 && ((clearing_timer / 35) & 1) != 0;
+
+    for (int y = 0; y < BOARD_H; y++) {
+        for (int x = 0; x < BOARD_W; x++) {
+            if (clearing_rows[y] && flash) {
+                gfx_fill_rect(&canvas, board_x + x * CELL_PX,
+                              board_y + y * CELL_PX, CELL_PX - 1,
+                              CELL_PX - 1, 0xFFFFFF);
+                continue;
+            }
             if (board[y][x])
                 draw_cell(x, y, piece_colours[board[y][x]]);
             else
                 gfx_fill_rect(&canvas, board_x + x * CELL_PX,
                               board_y + y * CELL_PX, CELL_PX - 1, CELL_PX - 1,
                               background);
+        }
+    }
 
-    /* Ghost */
-    if (!game_over) {
+    /* Ghost and active piece */
+    if (!game_over && clearing_timer <= 0) {
         int gy = py;
 
         while (!collides(piece, rot, px, gy + 1))
@@ -370,6 +428,9 @@ static void render(void)
             if (cy[i] >= 0)
                 draw_cell(cx[i], cy[i], piece_colours[piece]);
     }
+
+    board_x = ox;
+    board_y = oy;
 
     /* Panel */
     int cell = 18;
@@ -392,15 +453,38 @@ static void render(void)
         y += 3 * cell + 18;
     }
 
-    y = board_y + BOARD_H * CELL_PX - 90;
+    y = board_y + BOARD_H * CELL_PX - 110;
     draw_text(panel_x, y, "SCORE", 2, 0xAAAAAA);
     draw_number(panel_x, y + 18, score, 2, 0xFFFFFF);
-    y += 54;
+    y += 50;
     draw_text(panel_x, y, "LEVEL", 2, 0xAAAAAA);
     draw_number(panel_x, y + 18, level, 2, 0xFFFFFF);
-    y += 54;
+    y += 50;
     draw_text(panel_x, y, "LINES", 2, 0xAAAAAA);
     draw_number(panel_x, y + 18, lines, 2, 0xFFFFFF);
+
+    /* Chain indicators, as TETR.IO shows them beside the playfield. */
+    if (back_to_back) {
+        y += 40;
+        draw_text(panel_x, y, "B2B", 2, gfx_rgb(&canvas, 255, 150, 60));
+    }
+    if (combo > 1) {
+        y += 22;
+        char buf[16];
+
+        snprintf(buf, sizeof(buf), "COMBO %d", combo);
+        draw_text(panel_x, y, buf, 2, gfx_rgb(&canvas, 120, 220, 255));
+    }
+
+    /* Popup over the playfield. */
+    if (popup_timer > 0 && popup_text[0]) {
+        int scale = 3;
+        int w = text_width(popup_text, scale);
+        int px_ = board_x + (BOARD_W * CELL_PX - w) / 2;
+        int py_ = board_y + 150;
+
+        draw_text(px_, py_, popup_text, scale, popup_colour);
+    }
 
     if (paused)
         draw_text(board_x + 30, board_y + 260, "PAUSED", 5, 0xFFFFFF);
@@ -533,8 +617,64 @@ static int rotate_piece(int delta)
     return -1;
 }
 
+static void finish_clear(void)
+{
+    bool perfect = clearing_count > 0;
+
+    /* All clear: no cell may survive outside the rows being removed. */
+    for (int y = 0; y < BOARD_H && perfect; y++) {
+        if (clearing_rows[y])
+            continue;
+        for (int x = 0; x < BOARD_W; x++)
+            if (board[y][x]) {
+                perfect = false;
+                break;
+            }
+    }
+
+    /* Collapse the surviving rows down in one pass. */
+    int dst = BOARD_H - 1;
+
+    for (int src = BOARD_H - 1; src >= 0; src--) {
+        if (clearing_rows[src])
+            continue;
+        if (dst != src)
+            memcpy(board[dst], board[src], BOARD_W);
+        dst--;
+    }
+    for (; dst >= 0; dst--)
+        memset(board[dst], 0, BOARD_W);
+
+    memset(clearing_rows, 0, sizeof(clearing_rows));
+    clearing_count = 0;
+    clearing_timer = 0;
+
+    if (perfect) {
+        /* TETR.IO's perfect-clear value, level-scaled like every other bonus. */
+        score += PERFECT_CLEAR_BONUS * (level + 1);
+        set_popup("ALL CLEAR", gfx_rgb(&canvas, 255, 215, 80), POPUP_MS + 250);
+        shake_timer = SHAKE_MS + 120;
+        shake_mag = 14;
+    }
+
+    hold_used = false;
+    refill_next();
+
+    if (!spawn_piece(next_queue[0])) {
+        game_over = true;
+        return;
+    }
+    for (int i = 0; i < NEXT_COUNT - 1; i++)
+        next_queue[i] = next_queue[i + 1];
+    next_queue[NEXT_COUNT - 1] = 0;
+    refill_next();
+}
+
 static void lock_piece(void)
 {
+    static const char *const clear_name[] = {
+        "", "SINGLE", "DOUBLE", "TRIPLE", "TETRIS"
+    };
     int cx[4], cy[4];
     bool is_spin = last_was_rotation && immobile();
     bool is_t = piece == P_T;
@@ -555,10 +695,11 @@ static void lock_piece(void)
             mini = !front_pair;
     }
 
-    /* Clear lines. */
-    int cleared = 0;
+    /* Mark full rows; they stay on the board while they flash. */
+    memset(clearing_rows, 0, sizeof(clearing_rows));
+    clearing_count = 0;
 
-    for (int y = BOARD_H - 1; y >= 0; y--) {
+    for (int y = 0; y < BOARD_H; y++) {
         bool full = true;
 
         for (int x = 0; x < BOARD_W; x++)
@@ -566,22 +707,21 @@ static void lock_piece(void)
                 full = false;
                 break;
             }
-        if (!full)
-            continue;
-        cleared++;
-        for (int yy = y; yy > 0; yy--)
-            memcpy(board[yy], board[yy - 1], BOARD_W);
-        memset(board[0], 0, BOARD_W);
-        y++;      /* recheck this row after the shift */
+        if (full) {
+            clearing_rows[y] = true;
+            clearing_count++;
+        }
     }
 
-    int gained = 0;
+    int cleared = clearing_count;
 
     if (cleared > 0 || is_spin) {
         int base = is_spin ? spin_value(cleared, mini, is_t)
                            : line_value(cleared);
         bool b2b_clear = cleared == 4 || (is_spin && cleared > 0);
 
+        /* Back-to-back: a tetris or a spin line clear keeps the chain alive
+         * and scores 1.5x; TETR.IO rounds the product down. */
         if (b2b_clear && back_to_back)
             base = base * 3 / 2;
         if (b2b_clear)
@@ -589,6 +729,8 @@ static void lock_piece(void)
         else if (cleared > 0)
             back_to_back = false;
 
+        /* Combo: 50 points per consecutive clear after the first, scaled by
+         * level with everything else. */
         if (cleared > 0) {
             combo++;
             if (combo > 1)
@@ -597,10 +739,49 @@ static void lock_piece(void)
             combo = 0;
         }
 
-        gained = base * (level + 1);
-        score += gained;
+        score += base * (level + 1);
         lines += cleared;
         level = lines / LINES_PER_LEVEL;
+    }
+
+    /* Label and shake. */
+    if (cleared > 0 || is_spin) {
+        char label[32] = "";
+        const char *spin_name = is_spin
+            ? (is_t ? (mini ? "T-SPIN MINI" : "T-SPIN") : "ALL-SPIN")
+            : NULL;
+
+        if (spin_name && cleared > 0)
+            snprintf(label, sizeof(label), "%s %s", spin_name,
+                     clear_name[cleared > 4 ? 4 : cleared]);
+        else if (spin_name)
+            snprintf(label, sizeof(label), "%s", spin_name);
+        else if (cleared > 0)
+            snprintf(label, sizeof(label), "%s",
+                     clear_name[cleared > 4 ? 4 : cleared]);
+
+        if (label[0]) {
+            uint32_t colour = 0xFFFFFF;
+
+            if (is_t)
+                colour = gfx_rgb(&canvas, 205, 140, 255);
+            else if (cleared == 4)
+                colour = gfx_rgb(&canvas, 80, 225, 225);
+            else if (is_spin)
+                colour = gfx_rgb(&canvas, 255, 170, 120);
+            set_popup(label, colour, POPUP_MS);
+        }
+
+        shake_timer = SHAKE_MS;
+        shake_mag = 3 + cleared * 2 + (is_spin ? 3 : 0);
+    }
+
+    /* Cleared rows flash for a moment before the board collapses; the next
+     * piece spawns from finish_clear(). */
+    if (cleared > 0) {
+        clearing_timer = CLEAR_FLASH_MS;
+        dirty = true;
+        return;
     }
 
     hold_used = false;
@@ -726,8 +907,23 @@ int main(void)
 
         last = now;
 
+        if (popup_timer > 0)
+            popup_timer -= elapsed;
+        if (shake_timer > 0)
+            shake_timer -= elapsed;
+
         if (!paused && !game_over) {
             uint64_t keys = 0;
+
+            /* Cleared rows flash before collapsing; the board is frozen (no
+             * input, no gravity) until the animation finishes. */
+            if (clearing_timer > 0) {
+                clearing_timer -= elapsed;
+                if (clearing_timer <= 0)
+                    finish_clear();
+                dirty = true;
+                goto frame_done;
+            }
 
             if (kbd_state(&keys) < 0)
                 keys = 0;
@@ -905,6 +1101,7 @@ int main(void)
             }
         }
 
+frame_done:
         if (dirty) {
             render();
             dirty = false;
