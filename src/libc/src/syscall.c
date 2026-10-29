@@ -18,6 +18,7 @@
 #include <sys/mman.h>
 #include <sys/ioctl.h>
 #include <uapi/sysinfo.h>
+#include <uapi/signal.h>
 #include <fcntl.h>
 #include <time.h>
 #include <unistd.h>
@@ -111,6 +112,21 @@ int sys_getrlimit(int resource, struct rlimit *rlim)
 int sys_setrlimit(int resource, const struct rlimit *rlim)
 {
     return (int)check0(__syscall2(SYS_setrlimit, resource, (long)rlim));
+}
+
+int sys_rt_sigaction(int sig, const struct kernel_sigaction *act, struct kernel_sigaction *oact)
+{
+    return (int)check0(__syscall4(SYS_rt_sigaction, sig, (long)act, (long)oact, sizeof(sigset_t)));
+}
+
+int sys_rt_sigprocmask(int how, const sigset_t *set, sigset_t *oset)
+{
+    return (int)check0(__syscall4(SYS_rt_sigprocmask, how, (long)set, (long)oset, sizeof(sigset_t)));
+}
+
+int sys_rt_sigpending(sigset_t *set)
+{
+    return (int)check0(__syscall2(SYS_rt_sigpending, (long)set, sizeof(sigset_t)));
 }
 
 int sys_ioctl(int fd, unsigned long request, ...)

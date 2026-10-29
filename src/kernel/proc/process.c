@@ -32,6 +32,7 @@
 #include <sched.h>
 #include <interrupt.h>
 #include <process.h>
+#include <signals.h>
 #include <uapi/syscall.h>
 #include <uapi/errno.h>
 #include "console.h"
@@ -1908,6 +1909,7 @@ static long execve_common(struct task *t, u64 path, u64 argv, u64 envp)
      * for the measurement that pinned it.
      */
     fd_close_on_exec(t);
+    signal_exec_reset(t);
     exec_enter_image(t, old_mm);
 }
 

@@ -53,6 +53,7 @@
 #include <percpu.h>
 #include <spinlock.h>
 #include <uapi/sysinfo.h>
+#include <uapi/signal.h>
 
 /*
  * vmm.h's struct vma carries a file offset. Defining the two POSIX scalar types
@@ -360,6 +361,12 @@ struct task {
     /* Resource limits, indexed by RLIMIT_*. Stored per task and inherited by
      * fork/clone. Reported and validated; not enforced yet. */
     struct rlimit rlim[RLIMIT_NLIMITS];
+
+    /* Signal state. Dispositions and the blocked set are inherited by fork;
+     * the pending set is not. */
+    struct kernel_sigaction sig_actions[NSIG];
+    u64 sig_blocked;
+    u64 sig_pending;
 
     /* --- process relationships ------------------------------------------- */
     struct list_head sibling;   /* on the parent's children list */

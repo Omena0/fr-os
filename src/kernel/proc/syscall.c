@@ -42,6 +42,7 @@
 #include <uapi/graphics.h>
 #include <uapi/mouse.h>
 #include <uapi/sysinfo.h>
+#include <signals.h>
 #include <version.h>
 #include <drivers/ps2mouse.h>
 #include <drivers/ps2kbd.h>
@@ -276,6 +277,21 @@ static long sc_sysinfo(struct syscall_regs *r)
  * reported and validated, but nothing enforces them yet: a process can read
  * and lower its limits, which is what shells and configure scripts need.
  */
+static long sc_rt_sigaction(struct syscall_regs *r)
+{
+    return sys_rt_sigaction((int)(s32)arg0(r), arg1(r), arg2(r), arg3(r));
+}
+
+static long sc_rt_sigprocmask(struct syscall_regs *r)
+{
+    return sys_rt_sigprocmask((int)(s32)arg0(r), arg1(r), arg2(r), arg3(r));
+}
+
+static long sc_rt_sigpending(struct syscall_regs *r)
+{
+    return sys_rt_sigpending(arg0(r), arg1(r));
+}
+
 static long sc_getrlimit(struct syscall_regs *r)
 {
     struct task *t = caller();
@@ -1620,6 +1636,9 @@ void syscall_init(void)
     syscall_table[SYS_sysinfo] = sc_sysinfo;
     syscall_table[SYS_getrlimit] = sc_getrlimit;
     syscall_table[SYS_setrlimit] = sc_setrlimit;
+    syscall_table[SYS_rt_sigaction] = sc_rt_sigaction;
+    syscall_table[SYS_rt_sigprocmask] = sc_rt_sigprocmask;
+    syscall_table[SYS_rt_sigpending] = sc_rt_sigpending;
 
     /*
      * STAR carries both selector bases. SYSCALL loads CS from bits 47:32

@@ -73,6 +73,9 @@
 #define SYS_sysinfo      19u
 #define SYS_getrlimit    20u
 #define SYS_setrlimit    21u
+#define SYS_rt_sigaction 22u
+#define SYS_rt_sigprocmask 23u
+#define SYS_rt_sigpending 25u
 
 /* Memory management. */
 #define SYS_mmap         32u

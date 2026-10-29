@@ -200,6 +200,8 @@ void task_inherit(struct task *child, struct task *parent)
     child->policy = parent->policy;
     child->cred = parent->cred;
     memcpy(child->rlim, parent->rlim, sizeof(child->rlim));
+    memcpy(child->sig_actions, parent->sig_actions, sizeof(child->sig_actions));
+    child->sig_blocked = parent->sig_blocked;
     cpumask_copy(&child->cpumask, &parent->cpumask);
     child->affinity_mask = parent->affinity_mask;
     /*

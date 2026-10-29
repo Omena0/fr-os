@@ -14,6 +14,8 @@
 
 /* include libc headers that come with the kernel's uapi headers */
 #include <uapi/sysinfo.h>
+#include <uapi/signal.h>
+#include <stdint.h>
 #include "time.h"  /* defines CLOCK_REALTIME, CLOCK_MONOTONIC from <uapi/syscall.h> */
 
 /* Do NOT redefine SYS_* macros - they come from the kernel ABI header already via <unistd.h> */
@@ -405,6 +407,83 @@ static int test_setrlimit_raise_hard_eperm(void) {
     return TEST_PASS;
 }
 
+static void sig_test_handler(int sig) {
+    (void)sig;
+}
+
+static int test_rt_sigaction_roundtrip(void) {
+    struct kernel_sigaction act = { (uint64_t)(uintptr_t)sig_test_handler, SA_RESTART, 0, 0 };
+    struct kernel_sigaction now = { 0, 0, 0, 0 };
+    struct kernel_sigaction dfl = { SIGACT_DFL, 0, 0, 0 };
+    TEST_ASSERT_EQ(syscall4(SYS_rt_sigaction, SIGUSR1, (long)&act, 0, 8), 0, "rt_sigaction should accept a user handler");
+    TEST_ASSERT_EQ(syscall4(SYS_rt_sigaction, SIGUSR1, 0, (long)&now, 8), 0, "rt_sigaction should report the disposition");
+    TEST_ASSERT(now.sa_handler == act.sa_handler, "handler should read back as set");
+    TEST_ASSERT(now.sa_flags == SA_RESTART, "flags should read back as set");
+    TEST_ASSERT_EQ(syscall4(SYS_rt_sigaction, SIGUSR1, (long)&dfl, 0, 8), 0, "rt_sigaction should restore SIG_DFL");
+    return TEST_PASS;
+}
+
+static int test_rt_sigaction_unblockable(void) {
+    struct kernel_sigaction act = { SIGACT_IGN, 0, 0, 0 };
+    TEST_ASSERT_EQ(syscall4(SYS_rt_sigaction, SIGKILL, (long)&act, 0, 8), -EINVAL, "SIGKILL cannot be caught or ignored");
+    TEST_ASSERT_EQ(syscall4(SYS_rt_sigaction, SIGSTOP, (long)&act, 0, 8), -EINVAL, "SIGSTOP cannot be caught or ignored");
+    return TEST_PASS;
+}
+
+static int test_rt_sigaction_bad_signal(void) {
+    TEST_ASSERT_EQ(syscall4(SYS_rt_sigaction, 0, 0, 0, 8), -EINVAL, "signal 0 is not valid");
+    TEST_ASSERT_EQ(syscall4(SYS_rt_sigaction, 65, 0, 0, 8), -EINVAL, "signal 65 is not valid");
+    return TEST_PASS;
+}
+
+static int test_rt_sigaction_bad_sigsetsize(void) {
+    TEST_ASSERT_EQ(syscall4(SYS_rt_sigaction, SIGUSR1, 0, 0, 16), -EINVAL, "a sigset size other than 8 should return EINVAL");
+    return TEST_PASS;
+}
+
+static int test_rt_sigaction_bad_handler(void) {
+    struct kernel_sigaction act = { 0xffff800000000000ULL, 0, 0, 0 };
+    TEST_ASSERT_EQ(syscall4(SYS_rt_sigaction, SIGUSR1, (long)&act, 0, 8), -EINVAL, "a kernel address is not a valid handler");
+    return TEST_PASS;
+}
+
+static int test_rt_sigprocmask_block_roundtrip(void) {
+    sigset_t bit = 1ULL << (SIGUSR2 - 1);
+    sigset_t old = 0, now = 0, restore;
+    TEST_ASSERT_EQ(syscall4(SYS_rt_sigprocmask, SIG_BLOCK, (long)&bit, (long)&old, 8), 0, "SIG_BLOCK should succeed");
+    TEST_ASSERT_EQ(syscall4(SYS_rt_sigprocmask, SIG_BLOCK, 0, (long)&now, 8), 0, "a NULL set should only read the mask");
+    TEST_ASSERT((now & bit) != 0, "SIGUSR2 should be blocked after SIG_BLOCK");
+    TEST_ASSERT_EQ(syscall4(SYS_rt_sigprocmask, SIG_UNBLOCK, (long)&bit, 0, 8), 0, "SIG_UNBLOCK should succeed");
+    TEST_ASSERT_EQ(syscall4(SYS_rt_sigprocmask, SIG_BLOCK, 0, (long)&now, 8), 0, "mask should be readable after unblock");
+    TEST_ASSERT((now & bit) == 0, "SIGUSR2 should be unblocked after SIG_UNBLOCK");
+    restore = old;
+    TEST_ASSERT_EQ(syscall4(SYS_rt_sigprocmask, SIG_SETMASK, (long)&restore, 0, 8), 0, "SIG_SETMASK should restore the original mask");
+    return TEST_PASS;
+}
+
+static int test_rt_sigprocmask_unblockable(void) {
+    sigset_t old = 0, want = (1ULL << (SIGKILL - 1)) | (1ULL << (SIGSTOP - 1)), now = ~0ULL;
+    TEST_ASSERT_EQ(syscall4(SYS_rt_sigprocmask, SIG_BLOCK, 0, (long)&old, 8), 0, "reading the mask should succeed");
+    TEST_ASSERT_EQ(syscall4(SYS_rt_sigprocmask, SIG_SETMASK, (long)&want, 0, 8), 0, "SIG_SETMASK should succeed");
+    TEST_ASSERT_EQ(syscall4(SYS_rt_sigprocmask, SIG_BLOCK, 0, (long)&now, 8), 0, "reading the mask should succeed");
+    TEST_ASSERT((now & want) == 0, "SIGKILL and SIGSTOP must never be blocked");
+    TEST_ASSERT_EQ(syscall4(SYS_rt_sigprocmask, SIG_SETMASK, (long)&old, 0, 8), 0, "mask should be restored");
+    return TEST_PASS;
+}
+
+static int test_rt_sigprocmask_bad_how(void) {
+    sigset_t set = 0;
+    TEST_ASSERT_EQ(syscall4(SYS_rt_sigprocmask, 99, (long)&set, 0, 8), -EINVAL, "an unknown how should return EINVAL");
+    return TEST_PASS;
+}
+
+static int test_rt_sigpending_empty(void) {
+    sigset_t pending = ~0ULL;
+    TEST_ASSERT_EQ(syscall2(SYS_rt_sigpending, (long)&pending, 8), 0, "rt_sigpending should succeed");
+    TEST_ASSERT_EQ(pending, 0, "nothing has been raised, so nothing should be pending");
+    return TEST_PASS;
+}
+
 /* ===== Test Suite Registration ===== */
 
 struct test_suite test_process_syscalls = {
@@ -434,6 +513,15 @@ struct test_suite test_process_syscalls = {
         { "uname_null", test_uname_null, false },
         { "sysinfo_basic", test_sysinfo_basic, false },
         { "sysinfo_null", test_sysinfo_null, false },
+        { "rt_sigaction_roundtrip", test_rt_sigaction_roundtrip, false },
+        { "rt_sigaction_unblockable", test_rt_sigaction_unblockable, false },
+        { "rt_sigaction_bad_signal", test_rt_sigaction_bad_signal, false },
+        { "rt_sigaction_bad_sigsetsize", test_rt_sigaction_bad_sigsetsize, false },
+        { "rt_sigaction_bad_handler", test_rt_sigaction_bad_handler, false },
+        { "rt_sigprocmask_block_roundtrip", test_rt_sigprocmask_block_roundtrip, false },
+        { "rt_sigprocmask_unblockable", test_rt_sigprocmask_unblockable, false },
+        { "rt_sigprocmask_bad_how", test_rt_sigprocmask_bad_how, false },
+        { "rt_sigpending_empty", test_rt_sigpending_empty, false },
         { "getrlimit_nofile", test_getrlimit_nofile, false },
         { "getrlimit_invalid_resource", test_getrlimit_invalid_resource, false },
         { "getrlimit_null", test_getrlimit_null, false },
@@ -447,5 +535,5 @@ struct test_suite test_process_syscalls = {
         { "arch_prctl_get_fs", test_arch_prctl_get_fs, false },
         { "arch_prctl_get_gs", test_arch_prctl_get_gs, false },
     },
-    .num_cases = 36,
+    .num_cases = 45,
 };
