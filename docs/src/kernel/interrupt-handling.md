@@ -168,10 +168,28 @@ CPU exceptions are handled according to their type[^intel-sdm-interrupts]:
 
 The #PF case delegates to `vmm_handle_page_fault(addr, error_code)`, which is where the VMM distinguishes a genuine bug from demand paging and from a stack growth. The exception layer classifies and reports; it does not decide what is recoverable, because that decision needs the page tables.
 
-The "deliver to process" actions for #DE, #UD and #BP use the signal subsystem,
-specified in [ipc/signals.md](../ipc/signals.md). The exception layer classifies
-and reports; it does not decide what is recoverable, because that decision needs
-the page tables.
+The exception layer classifies and reports; it does not decide what is
+recoverable, because that decision needs the page tables.
+
+A ring-3 exception that cannot be resumed kills the faulting process through
+`process_terminate_from_fault()`, which the exception layer calls through a weak
+hook. Until a signal subsystem exists that hook is the implementation:
+`process.c` provides it, maps the vector to a signal number (#DE/#XF -> SIGFPE,
+#UD -> SIGILL, #BP -> SIGTRAP, everything else -> SIGSEGV), and calls
+`task_exit_current(-signo)`. **No ring-3 fault may panic the kernel** — a bad
+userspace instruction is the process's problem, and the process dies with a
+nonzero exit status its parent can observe.
+
+The hook being weak matters: if nothing defines it, the pointer is NULL and the
+exception layer falls back to a kernel panic. That is the correct fallback for a
+kernel without process support, but with userspace present it means a single
+wild pointer in a test program takes the machine down. Check the symbol is
+defined (`nm build/kernel.elf | grep process_terminate_from_fault` should say
+`T`, not `W`) when adding a new build configuration.
+
+The "deliver a signal" behaviour for #DE, #UD and #BP described above is the
+eventual design, specified in [ipc/signals.md](../ipc/signals.md); today the
+process is terminated instead of a handler being invoked.
 
 ## Inter-Processor Interrupts (IPIs)
 

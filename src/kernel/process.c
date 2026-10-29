@@ -29,6 +29,7 @@
 #include <pmm.h>
 #include <task.h>
 #include <sched.h>
+#include <interrupt.h>
 #include <process.h>
 #include <uapi/syscall.h>
 #include <uapi/errno.h>
@@ -2084,4 +2085,70 @@ static long execve_common(struct task *t, u64 path, u64 argv, u64 envp)
 long sys_execve(u64 path, u64 argv, u64 envp)
 {
     return execve_common(current_task(), path, argv, envp);
+}
+
+/* ------------------------------------------------- fatal-fault termination -- */
+
+/* Signal numbers used when a process kills itself with a bad instruction.
+ * Only the ones the exception layer can raise are defined here; the full
+ * signal ABI belongs to the (not yet implemented) signal subsystem. */
+#define SIGILL   4
+#define SIGTRAP  5
+#define SIGFPE   8
+#define SIGSEGV  11
+
+/*
+ * process_terminate_from_fault - the process half of the exception layer.
+ *
+ * interrupt.h declares this weak so the kernel links without a signal
+ * subsystem, and the exception layer falls back to it when a ring-3 process
+ * takes an exception that is fatal to that process. Until this function
+ * existed the weak symbol was NULL, so the fallback did not exist either and
+ * *any* such fault — a bad userspace instruction, a wild pointer dereference —
+ * panicked the whole machine. A userspace bug must never be able to stop the
+ * kernel; the fault belongs to the process, and killing that process is the
+ * documented behaviour (docs/src/kernel/interrupt-handling.md).
+ *
+ * Called from the exception handler, i.e. from interrupt context, on the
+ * faulting task's own kernel stack. task_exit_current() does not return: it
+ * drops the task from the run queue, releases its address space, wakes its
+ * parent and switches this CPU to the idle task.
+ */
+void process_terminate_from_fault(struct interrupt_frame *frame)
+{
+    struct task *t = current_task();
+    int signo;
+
+    switch (frame->vector) {
+    case VECTOR_DIVIDE_ERROR:
+    case VECTOR_SIMD_FP_ERROR:
+        signo = SIGFPE;
+        break;
+    case VECTOR_INVALID_OPCODE:
+        signo = SIGILL;
+        break;
+    case VECTOR_BREAKPOINT:
+        signo = SIGTRAP;
+        break;
+    default:
+        /* #GP, #SS, #NP, #AC, and anything else a ring-3 access can raise. */
+        signo = SIGSEGV;
+        break;
+    }
+
+    if (!t) {
+        /*
+         * No current task means the fault arrived before the scheduler had
+         * one, which a ring-3 fault cannot do. Treat it as a kernel fault.
+         */
+        panic("user fault with no current task: vector %lu rip 0x%lx",
+              (unsigned long)frame->vector, (unsigned long)frame->rip);
+    }
+
+    klog_emit(KLOG_WARN, "process",
+              "pid %u killed: fatal exception vector %lu (sig %d) at rip 0x%lx",
+              t->pid, (unsigned long)frame->vector, signo,
+              (unsigned long)frame->rip);
+
+    task_exit_current(-signo);
 }

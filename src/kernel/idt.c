@@ -424,6 +424,25 @@ static void report_exception(struct interrupt_frame *f, const char *action)
 }
 
 /*
+ * Terminate the current process from exception context, balancing the
+ * preemption depth. interrupt_dispatch() raises preempt_count before it calls
+ * this handler and only lowers it if the handler returns. A task kill switches
+ * this CPU to the idle task and never returns, so the depth must be dropped
+ * here — otherwise the idle task inherits a phantom preemption and this CPU can
+ * never be rescheduled again.
+ */
+static void terminate_current_user(struct interrupt_frame *f)
+{
+    if (per_cpu(preempt_count) > 0)
+        per_cpu(preempt_count)--;
+    process_terminate_from_fault(f);
+    /* The current implementation is noreturn, so the line below is not
+     * reached. It restores the depth interrupt_dispatch() still expects to
+     * undo on its way out if a returning substitute is ever linked. */
+    per_cpu(preempt_count)++;
+}
+
+/*
  * The generic exception handler, installed on all 32 vectors so none can reach
  * an empty gate. The decision it makes is: is this the process's problem or the
  * kernel's?
@@ -451,6 +470,18 @@ static void exception_handler(struct interrupt_frame *f){
                            f->error_code);
         if (r == 0)
             return;
+        /*
+         * The VMM refused the access. When the fault came from ring 3 that is
+         * the process's address-space bug (an unmapped access, a write to a
+         * read-only VMA, a reserved-bit PTE it walked into): it must kill the
+         * process, not the kernel. Only a ring-0 #PF that the VMM cannot
+         * satisfy is a kernel bug worth panicking on.
+         */
+        if (from_user && process_terminate_from_fault) {
+            report_exception(f, "unrecoverable page fault; killing process");
+            terminate_current_user(f);
+            return;
+        }
         report_exception(f, "unrecoverable page fault");
         goto fatal;
     }
@@ -474,7 +505,7 @@ static void exception_handler(struct interrupt_frame *f){
          * instruction and take the same exception forever. */
         if (process_terminate_from_fault) {
             report_exception(f, "no signal subsystem; killing process");
-            process_terminate_from_fault(f);
+            terminate_current_user(f);
             return;
         }
         report_exception(f, "no process-control hook; panicking");
@@ -502,7 +533,7 @@ static void exception_handler(struct interrupt_frame *f){
         case VECTOR_DEVICE_NOT_AVAILABLE:
             if (process_terminate_from_fault) {
                 report_exception(f, "killing process");
-                process_terminate_from_fault(f);
+                terminate_current_user(f);
                 return;
             }
             report_exception(f, "no process-control hook; panicking");
