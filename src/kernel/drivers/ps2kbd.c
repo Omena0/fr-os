@@ -307,11 +307,15 @@ void ps2kbd_irq(struct interrupt_frame *frame)
             return;
         }
 
-        /* Mouse byte — leave it for the mouse driver. */
+        /* A mouse byte. IRQ1 and IRQ12 can both fire for the same output
+         * buffer, and the mouse IRQ may be the one that does not run; hand the
+         * byte to the mouse driver instead of dropping it. */
         if (status & PS2_STATUS_AUX) {
-            klog(KLOG_DEBUG, "ps2kbd: mouse byte 0x%02x dropped\n",
-                  (unsigned)inb(PS2_DATA));
-            return;
+            u8 aux = inb(PS2_DATA);
+
+            ps2mouse_handle_byte(aux);
+            status = inb(PS2_STATUS);
+            continue;
         }
 
         keyboard_scancode(inb(PS2_DATA));

@@ -27,7 +27,7 @@
 #include <cpu_features.h>
 #include <drivers/serial.h>
 #include <drivers/ps2kbd.h>
-#include <drivers/ps2kbd.h>
+#include <drivers/ps2mouse.h>
 
 KLOG_SUBSYSTEM("tty");
 
@@ -668,6 +668,11 @@ void tty_init(void)
      * keystrokes into the input ring.
      */
     ps2kbd_init(keyboard_callback);
+
+    /* The mouse shares the 8042 output buffer with the keyboard, so it is
+     * initialised after the keyboard driver has written the controller
+     * configuration byte it owns. */
+    ps2mouse_init();
 
     spinlock_init(&out_lock);
     spinlock_init(&in_lock);

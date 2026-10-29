@@ -40,6 +40,8 @@
 #include <console.h>
 #include <tty.h>
 #include <uapi/graphics.h>
+#include <uapi/mouse.h>
+#include <drivers/ps2mouse.h>
 
 #define SYSCALL_LOG(level, ...)                                              \
     do {                                                               \
@@ -248,6 +250,31 @@ static long sc_gfx_info(struct syscall_regs *r)
     info.green_shift = fb.green_shift;
     info.blue_shift = fb.blue_shift;
     return copy_to_user(arg0(r), &info, sizeof(info)) < 0 ? -EFAULT : 0;
+}
+
+/*
+ * mouse_info(state) — copy the pointer snapshot out.
+ *
+ * The kernel owns the pointer position; a process only reads it. The return is
+ * the number of bytes copied (the struct size) on success, so a future larger
+ * struct can be negotiated by `size` without breaking old callers.
+ */
+static long sc_mouse_info(struct syscall_regs *r)
+{
+    struct mouse_state state;
+    u64 dst = arg0(r);
+
+    if (!dst)
+        return -EFAULT;
+    if (!user_range_ok(syscall_user_mm(), dst, sizeof(state)))
+        return -EFAULT;
+
+    memset(&state, 0, sizeof(state));
+    ps2mouse_get_state(&state);
+    state.size = sizeof(state);
+
+    return copy_to_user(dst, &state, sizeof(state)) < 0 ? -EFAULT
+                                                        : (long)sizeof(state);
 }
 
 static long sc_gfx_present(struct syscall_regs *r)
@@ -1418,6 +1445,7 @@ void syscall_init(void)
     syscall_table[SYS_mremap] = sc_mremap;
     syscall_table[SYS_mlock] = sc_mlock;
     syscall_table[SYS_shutdown] = sc_shutdown;
+    syscall_table[SYS_mouse_info] = sc_mouse_info;
 
     /*
      * STAR carries both selector bases. SYSCALL loads CS from bits 47:32
