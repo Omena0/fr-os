@@ -6,7 +6,10 @@
 
 #include "test_framework.h"
 #include <gfx.h>
+#include <ctype.h>
 #include <errno.h>
+#include <getopt.h>
+#include <libgen.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,47 +20,8 @@
 #define ENOMEM      12
 #define EINVAL      22
 
-/* Implement missing string functions */
-char *strcpy(char *dst, const char *src) {
-    char *ret = dst;
-    while ((*dst++ = *src++))
-        ;
-    return ret;
-}
-
-char *strncpy(char *dst, const char *src, size_t n) {
-    char *ret = dst;
-    while (n > 0 && *src) {
-        *dst++ = *src++;
-        n--;
-    }
-    while (n > 0) {
-        *dst++ = '\0';
-        n--;
-    }
-    return ret;
-}
-
-char *strcat(char *dst, const char *src) {
-    char *ret = dst;
-    while (*dst)
-        dst++;
-    while ((*dst++ = *src++))
-        ;
-    return ret;
-}
-
-char *strncat(char *dst, const char *src, size_t n) {
-    char *ret = dst;
-    while (*dst)
-        dst++;
-    while (n > 0 && *src) {
-        *dst++ = *src++;
-        n--;
-    }
-    *dst = '\0';
-    return ret;
-}
+/* strcpy/strncpy/strcat/strncat used to be defined here because libc lacked
+ * them; they now live in libc and the tests below cover them. */
 
 /* ===== String functions ===== */
 
@@ -379,6 +343,44 @@ static int test_abort_basic(void) {
 
 /* ===== Test Suite Registration ===== */
 
+static int test_libc_qol(void)
+{
+    int n = 0;
+    char word[16];
+    char *ap = NULL;
+    char date[32];
+    struct tm tm;
+    time_t epoch = 0;
+    char base[] = "a/b/c";
+    char dir[] = "a/b/c";
+    char *av[] = { "prog", "-x", "-n", "5", NULL };
+
+    TEST_ASSERT(isdigit('7') && !isdigit('x'), "ctype digit classes");
+    TEST_ASSERT(toupper('q') == 'Q' && tolower('Q') == 'q', "ctype case");
+
+    TEST_ASSERT(sscanf("  -42 hello", "%d %15s", &n, word) == 2 &&
+                n == -42 && strcmp(word, "hello") == 0, "sscanf");
+
+    TEST_ASSERT(asprintf(&ap, "%s-%d", "x", 7) == 3 &&
+                strcmp(ap, "x-7") == 0, "asprintf");
+    free(ap);
+
+    TEST_ASSERT(gmtime_r(&epoch, &tm) != NULL, "gmtime_r");
+    TEST_ASSERT(strftime(date, sizeof(date), "%Y-%m-%d %H:%M:%S", &tm) == 19 &&
+                strcmp(date, "1970-01-01 00:00:00") == 0, "strftime");
+
+    TEST_ASSERT(strcmp(basename(base), "c") == 0, "basename");
+    TEST_ASSERT(strcmp(dirname(dir), "a/b") == 0, "dirname");
+
+    optind = 1;
+    optreset = 1;
+    TEST_ASSERT(getopt(4, av, "xn:") == 'x', "getopt short option");
+    TEST_ASSERT(getopt(4, av, "xn:") == 'n' && strcmp(optarg, "5") == 0,
+                "getopt argument");
+    TEST_ASSERT(getopt(4, av, "xn:") == -1, "getopt end");
+    return TEST_PASS;
+}
+
 struct test_suite test_init_system = {
     .name = "Userspace Tests",
     .cases = (struct test_case[]) {
@@ -410,11 +412,12 @@ struct test_suite test_init_system = {
         { "clock_basic", test_clock_basic, false },
         { "clock_realtime", test_clock_realtime, false },
         { "clock_monotonic_precision", test_clock_monotonic_precision, false },
+        { "libc_qol", test_libc_qol, false },
         { "getpid_basic", test_getpid_basic, false },
         { "getppid_basic", test_getppid_basic, false },
         { "graphics_triangle", test_graphics_triangle, false },
         { "exit_basic", test_exit_basic, true },
         { "abort_basic", test_abort_basic, true },
     },
-    .num_cases = 33,
+    .num_cases = 34,
 };
