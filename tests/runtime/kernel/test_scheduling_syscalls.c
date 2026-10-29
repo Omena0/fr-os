@@ -31,6 +31,7 @@ static inline long syscall4(long n, long a1, long a2, long a3, long a4) {
 
 /* wait.h macros */
 #define WIFEXITED(status)   (((status) & 0x7f) == 0)
+#define WEXITSTATUS(status) (((status) >> 8) & 0xff)
 
 static int test_sched_yield_basic(void) {
     long ret = syscall1(SYS_sched_yield, 0);
@@ -69,8 +70,55 @@ static int test_sched_yield_with_fork(void) {
     return TEST_PASS;
 }
 
-/* ===== getcpu ===== */
+/*
+ * fork() must hand the child the parent's callee-saved registers.
+ *
+ * The child resumes the parent's compiled code at the instruction after the
+ * syscall, and the C ABI promises rbx/rbp/r12-r15 survive an ordinary call.
+ * The kernel used to restore only RIP/RSP/RFLAGS and leave the rest as kernel
+ * residue, so a caller that kept a loop index in rbx across fork() indexed
+ * with garbage in the child. That is not visible from portable C (the
+ * compiler is free to reload from the stack), so this test sets the registers
+ * explicitly and checks them on the far side of the syscall.
+ */
+static int test_fork_preserves_callee_saved(void) {
+    long pid = -1;
+    long ok = 0;
+    long magic = 0x1122334455667788L;
 
+    __asm__ __volatile__(
+        "movq %[magic], %%rbx\n\t"
+        "movq %[magic], %%r12\n\t"
+        "movl %[nr], %%eax\n\t"
+        "syscall\n\t"
+        "movq %%rax, %[pid]\n\t"
+        "cmpq %[magic], %%rbx\n\t"
+        "jne 1f\n\t"
+        "cmpq %[magic], %%r12\n\t"
+        "jne 1f\n\t"
+        "movq $1, %[ok]\n\t"
+        "1:\n\t"
+        : [pid] "=m"(pid), [ok] "+m"(ok)
+        : [magic] "r"(magic), [nr] "i"(SYS_fork)
+        : "rax", "rcx", "r11", "rbx", "r12", "memory");
+
+    if (pid == 0) {
+        /* Child: report through the exit status, do not run the rest. */
+        syscall1(SYS_exit, ok ? 0 : 1);
+        for (;;)
+            ;
+    }
+    TEST_ASSERT(pid > 0, "fork should succeed in the parent");
+
+    int wstatus = 0;
+    syscall4(SYS_wait4, pid, (long)&wstatus, 0, 0);
+    TEST_ASSERT(WIFEXITED(wstatus), "child should exit normally");
+    TEST_ASSERT(WEXITSTATUS(wstatus) == 0,
+                "fork must preserve rbx/r12 in the child");
+    return TEST_PASS;
+}
+
+/* ===== getcpu ===== */
 static int test_getcpu_basic(void) {
     int cpu = 0, node = 0;
     long ret = syscall2(SYS_getcpu, (long)&cpu, (long)&node);
@@ -100,8 +148,9 @@ struct test_suite test_scheduling_syscalls = {
         { "sched_yield_basic", test_sched_yield_basic, false },
         { "sched_yield_many_times", test_sched_yield_many_times, false },
         { "sched_yield_with_fork", test_sched_yield_with_fork, false },
+        { "fork_preserves_callee_saved", test_fork_preserves_callee_saved, false },
         { "getcpu_basic", test_getcpu_basic, false },
         { "getcpu_invalid_ptr", test_getcpu_invalid_ptr, false },
     },
-    .num_cases = 5,
+    .num_cases = 6,
 };
