@@ -237,6 +237,7 @@ bool ps2mouse_get_state(struct mouse_state *out)
 {
     struct mouse_state state;
     u32 cols, rows;
+    u32 cell_w = 8, cell_h = 16;
 
     if (!out)
         return false;
@@ -258,13 +259,18 @@ bool ps2mouse_get_state(struct mouse_state *out)
         cols = 80;
     if (!rows)
         rows = 25;
+    console_font_cell(&cell_w, &cell_h);
+    if (!cell_w)
+        cell_w = 8;
+    if (!cell_h)
+        cell_h = 16;
 
     state.pixel_width = screen_w;
     state.pixel_height = screen_h;
     state.char_width = cols;
     state.char_height = rows;
-    state.char_x = (s32)(cursor_x / 8);
-    state.char_y = (s32)(cursor_y / 16);
+    state.char_x = (s32)(cursor_x / (s32)cell_w);
+    state.char_y = (s32)(cursor_y / (s32)cell_h);
     if (state.char_x >= (s32)cols)
         state.char_x = (s32)cols - 1;
     if (state.char_y >= (s32)rows)

@@ -1306,6 +1306,28 @@ uint32_t console_rows(void)
     return VGA_ROWS;
 }
 
+/*
+ * The size of one text cell in pixels. Callers that convert between pixel and
+ * character coordinates must use this rather than assuming 8x16: the value is
+ * a property of the console's font, and hard-coding it in a second place is how
+ * a mouse ends up reporting a character column that the console does not agree
+ * with.
+ */
+void console_font_cell(uint32_t *width, uint32_t *height)
+{
+    if (console_fb_active()) {
+        if (width)
+            *width = fb.font_width;
+        if (height)
+            *height = fb.font_height;
+        return;
+    }
+    if (width)
+        *width = 8;
+    if (height)
+        *height = 16;
+}
+
 uint64_t console_scrollback(void)
 {
     return scrollback;

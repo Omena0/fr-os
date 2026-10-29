@@ -79,6 +79,10 @@ void console_reset_attr(void);
 uint32_t console_columns(void);
 uint32_t console_rows(void);
 
+/* Pixel size of one text cell. Pixel/character conversion must use this, not a
+ * hard-coded 8x16: the metrics belong to the console's font. */
+void console_font_cell(uint32_t *width, uint32_t *height);
+
 /* Where the console currently is, for the framebuffer/GUI work later. */
 void console_clear(void);
 
