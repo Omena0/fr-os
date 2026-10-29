@@ -13,7 +13,7 @@ set -e
 
 cd "$(dirname "$0")/.."
 
-: "${TMPDIR:=/home/omena0/.fr-tmp}"
+: "${TMPDIR:=$(pwd)/build/tmp}"
 export TMPDIR
 mkdir -p "$TMPDIR"
 

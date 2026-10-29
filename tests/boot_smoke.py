@@ -135,7 +135,7 @@ Environment
 -----------
 
   FR_TMPDIR       scratch directory for the image copy and the serial log.
-                  Defaults to $TMPDIR, then to /home/omena0/.fr-tmp. Do not
+                  Defaults to $TMPDIR, then to build/tmp in the repo. Do not
                   point this at /tmp: it has hit its quota in this project,
                   and a full filesystem here produces a 0-byte serial log
                   and a zero exit code, which reads as a healthy guest.
@@ -823,7 +823,7 @@ def classify_startup(info):
 
 def scratch_dir(root):
     base = (os.environ.get("FR_TMPDIR") or os.environ.get("TMPDIR")
-            or "/home/omena0/.fr-tmp")
+            or os.path.join(root, "build", "tmp"))
     return os.path.join(base, "boot-smoke")
 
 
