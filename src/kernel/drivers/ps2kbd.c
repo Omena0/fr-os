@@ -152,6 +152,10 @@ static const char scancode_shifted[0x40] = {
 bool shift_held;
 bool ctrl_held;
 
+/* True after an E0 prefix, so the next code is an extended key (arrows,
+ * keypad, etc.) rather than a normal scancode. */
+static bool e0_prefix;
+
 static ps2kbd_callback_t keyboard_callback;
 
 /* One scancode from port 0x60. Called from IRQ1 with interrupts off. */
@@ -175,7 +179,33 @@ static void keyboard_scancode(uint8_t sc)
         return;
     }
     if (sc == 0xE0) {
-        klog(KLOG_DEBUG, "ps2kbd: 0xE0 prefix dropped\n");
+        e0_prefix = true;
+        return;
+    }
+    if (e0_prefix) {
+        /* Extended keys. Emit the same escape sequences a serial terminal
+         * sends, so the tty/game input path does not need a second protocol.
+         * Only make codes act; the break code ends the key. */
+        const char *seq = NULL;
+
+        e0_prefix = false;
+        if (!make)
+            return;
+        switch (code) {
+        case 0x48: seq = "\033[A"; break;   /* up */
+        case 0x50: seq = "\033[B"; break;   /* down */
+        case 0x4D: seq = "\033[C"; break;   /* right */
+        case 0x4B: seq = "\033[D"; break;   /* left */
+        case 0x1C:                           /* keypad Enter */
+            if (keyboard_callback)
+                keyboard_callback('\n');
+            return;
+        default:
+            return;
+        }
+        if (keyboard_callback)
+            for (const char *p = seq; *p; p++)
+                keyboard_callback(*p);
         return;
     }
 
