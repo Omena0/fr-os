@@ -57,15 +57,26 @@ static inline void spinlock_release(spinlock_t *lock)
     __atomic_store_n(&lock->owner, lock->owner + 1, __ATOMIC_RELEASE);
 }
 
+/*
+ * A ticket lock reserves a ticket by advancing next and serves it by advancing
+ * owner; release() is what advances owner. So a successful trylock must only
+ * advance next and leave owner alone. The earlier versions got one half of
+ * that wrong: one advanced owner without next, the other advanced both, and
+ * either way release() then pushed owner past next and the lock was stuck
+ * forever. Nothing had called trylock until the console blink timer.
+ */
 static inline bool spinlock_trylock(spinlock_t *lock)
 {
-    u32 owner = __atomic_load_n(&lock->owner, __ATOMIC_RELAXED);
+    u32 ticket = __atomic_load_n(&lock->next, __ATOMIC_RELAXED);
 
-    if (owner != __atomic_load_n(&lock->next, __ATOMIC_RELAXED))
+    if (__atomic_load_n(&lock->owner, __ATOMIC_ACQUIRE) != ticket)
         return false;
-    return __atomic_compare_exchange_n(&lock->owner, &owner, owner + 1,
-                      false, __ATOMIC_ACQUIRE,
-                      __ATOMIC_RELAXED);
+
+    /* Reserve `ticket`. Only one contender can move next; if that fails,
+     * someone else got in first and this is a miss, not a wait. */
+    return __atomic_compare_exchange_n(&lock->next, &ticket, ticket + 1,
+                                       false, __ATOMIC_ACQUIRE,
+                                       __ATOMIC_RELAXED);
 }
 
 static inline bool spinlock_is_held(spinlock_t *lock)
