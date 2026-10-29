@@ -1369,7 +1369,13 @@ void sched_tick(void)
 
 int sched_sleep_ns(u64 ns)
 {
-    u64 ticks = (ns + 999999ULL) / 1000000ULL;
+    /*
+     * wake_tick is in PIT ticks, and now_ticks() counts at 100 Hz: one tick
+     * is 10 ms, not 1 ms. This used to round ns up to milliseconds and add
+     * that to now_ticks(), so every sleep was ten times too long -- a 160 ms
+     * game tick slept 1.6 s. Round up to a whole 10 ms tick instead.
+     */
+    u64 ticks = (ns + 9999999ULL) / 10000000ULL;
     u64 now = now_ticks();
     u64 flags = spinlock_irqsave(&sleep_lock[this_cpu_id()]);
     struct task *t = current_task();
