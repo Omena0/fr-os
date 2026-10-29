@@ -13,6 +13,7 @@
 #include <errno.h>
 
 /* include libc headers that come with the kernel's uapi headers */
+#include <uapi/sysinfo.h>
 #include "time.h"  /* defines CLOCK_REALTIME, CLOCK_MONOTONIC from <uapi/syscall.h> */
 
 /* Do NOT redefine SYS_* macros - they come from the kernel ABI header already via <unistd.h> */
@@ -333,6 +334,35 @@ static int test_arch_prctl_get_gs(void) {
     return TEST_PASS;
 }
 
+static int test_uname_basic(void) {
+    struct utsname u;
+    TEST_ASSERT_EQ(syscall1(SYS_uname, (long)&u), 0, "uname should succeed");
+    TEST_ASSERT(strlen(u.sysname) > 0, "sysname should be set");
+    TEST_ASSERT(strlen(u.release) > 0, "release should be set");
+    TEST_ASSERT(strcmp(u.machine, "x86_64") == 0, "machine should be x86_64");
+    return TEST_PASS;
+}
+
+static int test_uname_null(void) {
+    TEST_ASSERT_EQ(syscall1(SYS_uname, 0), -EFAULT, "uname into NULL should return EFAULT");
+    return TEST_PASS;
+}
+
+static int test_sysinfo_basic(void) {
+    struct sysinfo si;
+    TEST_ASSERT_EQ(syscall1(SYS_sysinfo, (long)&si), 0, "sysinfo should succeed");
+    TEST_ASSERT(si.totalram > 0, "totalram should be nonzero");
+    TEST_ASSERT(si.freeram <= si.totalram, "freeram should not exceed totalram");
+    TEST_ASSERT_EQ(si.mem_unit, 1, "mem_unit should be 1 (bytes)");
+    TEST_ASSERT(si.procs >= 1, "at least the caller should be counted");
+    return TEST_PASS;
+}
+
+static int test_sysinfo_null(void) {
+    TEST_ASSERT_EQ(syscall1(SYS_sysinfo, 0), -EFAULT, "sysinfo into NULL should return EFAULT");
+    return TEST_PASS;
+}
+
 /* ===== Test Suite Registration ===== */
 
 struct test_suite test_process_syscalls = {
@@ -358,6 +388,10 @@ struct test_suite test_process_syscalls = {
         { "nanosleep_zero", test_nanosleep_zero, false },
         { "nanosleep_invalid", test_nanosleep_invalid, false },
         { "clock_gettime_realtime", test_clock_gettime_realtime, false },
+        { "uname_basic", test_uname_basic, false },
+        { "uname_null", test_uname_null, false },
+        { "sysinfo_basic", test_sysinfo_basic, false },
+        { "sysinfo_null", test_sysinfo_null, false },
         { "clock_gettime_monotonic", test_clock_gettime_monotonic, false },
         { "clock_gettime_invalid", test_clock_gettime_invalid, false },
         { "getuid_nonnegative", test_getuid_nonnegative, false },
@@ -365,5 +399,5 @@ struct test_suite test_process_syscalls = {
         { "arch_prctl_get_fs", test_arch_prctl_get_fs, false },
         { "arch_prctl_get_gs", test_arch_prctl_get_gs, false },
     },
-    .num_cases = 26,
+    .num_cases = 30,
 };

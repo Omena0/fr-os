@@ -41,6 +41,8 @@
 #include <tty.h>
 #include <uapi/graphics.h>
 #include <uapi/mouse.h>
+#include <uapi/sysinfo.h>
+#include <version.h>
 #include <drivers/ps2mouse.h>
 #include <drivers/ps2kbd.h>
 
@@ -232,6 +234,41 @@ static long sc_screen_release(struct syscall_regs *r)
     UNUSED(r);
     tty_screen_release();
     return 0;
+}
+
+static long sc_uname(struct syscall_regs *r)
+{
+    struct utsname u;
+
+    if (!arg0(r))
+        return -EFAULT;
+
+    memset(&u, 0, sizeof(u));
+    strlcpy(u.sysname, FR_PROJECT_NAME, sizeof(u.sysname));
+    strlcpy(u.nodename, "fr-os", sizeof(u.nodename));
+    strlcpy(u.release, KERNEL_VERSION, sizeof(u.release));
+    strlcpy(u.version, KERNEL_BUILD_STAMP, sizeof(u.version));
+    strlcpy(u.machine, "x86_64", sizeof(u.machine));
+    strlcpy(u.domainname, "", sizeof(u.domainname));
+
+    return copy_to_user(arg0(r), &u, sizeof(u)) < 0 ? -EFAULT : 0;
+}
+
+static long sc_sysinfo(struct syscall_regs *r)
+{
+    struct sysinfo si;
+
+    if (!arg0(r))
+        return -EFAULT;
+
+    memset(&si, 0, sizeof(si));
+    si.uptime = ktime_mono_ns() / 1000000000ULL;
+    si.totalram = (u64)pmm_total_bytes();
+    si.freeram = (u64)pmm_free_bytes();
+    si.mem_unit = 1;
+    si.procs = 1;
+
+    return copy_to_user(arg0(r), &si, sizeof(si)) < 0 ? -EFAULT : 0;
 }
 
 static long sc_gfx_info(struct syscall_regs *r)
@@ -1528,6 +1565,8 @@ void syscall_init(void)
     syscall_table[SYS_mouse_info] = sc_mouse_info;
     syscall_table[SYS_kbd_typematic] = sc_kbd_typematic;
     syscall_table[SYS_kbd_state] = sc_kbd_state;
+    syscall_table[SYS_uname] = sc_uname;
+    syscall_table[SYS_sysinfo] = sc_sysinfo;
 
     /*
      * STAR carries both selector bases. SYSCALL loads CS from bits 47:32

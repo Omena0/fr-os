@@ -17,6 +17,7 @@
 #include <sys/syscall.h>
 #include <sys/mman.h>
 #include <sys/ioctl.h>
+#include <uapi/sysinfo.h>
 #include <fcntl.h>
 #include <time.h>
 #include <unistd.h>
@@ -90,6 +91,16 @@ int fcntl(int fd, int cmd, ...)
     }
 
     return (int)check0(__syscall3(SYS_fcntl, fd, cmd, arg));
+}
+
+int sys_uname(struct utsname *buf)
+{
+    return (int)check0(__syscall1(SYS_uname, (long)buf));
+}
+
+int sys_sysinfo(struct sysinfo *info)
+{
+    return (int)check0(__syscall1(SYS_sysinfo, (long)info));
 }
 
 int sys_ioctl(int fd, unsigned long request, ...)

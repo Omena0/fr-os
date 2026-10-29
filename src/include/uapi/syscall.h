@@ -69,6 +69,8 @@
 #define SYS_getuid       15u
 #define SYS_getgid       16u
 #define SYS_arch_prctl   17u
+#define SYS_uname        18u
+#define SYS_sysinfo      19u
 
 /* Memory management. */
 #define SYS_mmap         32u
