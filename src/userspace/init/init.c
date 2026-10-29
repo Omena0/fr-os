@@ -299,7 +299,7 @@ static void cmd_help(void)
     say("  clear                clear the screen and home the cursor");
     say("  lscpu                page size, cpu count, getauxval() entries");
     say("  strlen <string>      print the length of <string>");
-    say("  run <program> [args] exec an initrd program (hello, triangle)");
+    say("  run <program> [args] exec an initrd program (hello, ansi, ansi2)");
     say("  exit                 explain that reboot is not implemented yet");
 }
 
@@ -414,7 +414,7 @@ static int dispatch(int argc, char **argv)
          */
         if (argc < 2) {
             say("run: expected a program name");
-            say("     the initrd carries: init, hello, triangle");
+            say("     the initrd carries: init, hello, ansi, ansi2");
             return 0;
         }
 
@@ -470,6 +470,35 @@ int main(void)
            getpagesize());
     printf("%srunning on %s\n", TAG, KERNEL_VERSION_STRING);
     printf("%stype 'help' for the command list, EOF to stop\n", TAG);
+    fflush(stdout);
+
+    /* Auto-run the ANSI test programs at boot, then drop into the REPL.
+     *
+     * The tests are a startup demonstration and a smoke check, not the whole
+     * system: control must return to the prompt so a person can run more
+     * programs and so the runtime-test harness can drive `run runtime-tests`
+     * through this same init. A test that is missing from the initrd (execve
+     * fails, child exits 127) or that dies just stops the sequence; the REPL
+     * is always reached. */
+    {
+        static const char *tests[] = { "ansi", "ansi2" };
+
+        for (size_t i = 0; i < sizeof(tests) / sizeof(tests[0]); i++) {
+            pid_t pid = fork();
+            int status;
+
+            if (pid < 0)
+                break;
+            if (pid == 0) {
+                char *argv[2] = { (char *)tests[i], NULL };
+                execve(argv[0], argv, environ);
+                _exit(127);
+            }
+            waitpid(pid, &status, 0);
+            if (!WIFEXITED(status) || WEXITSTATUS(status) == 127)
+                break;
+        }
+    }
 
     for (;;) {
         int argc;
