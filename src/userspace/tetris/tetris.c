@@ -943,9 +943,14 @@ int main(void)
                 uint64_t edges;
 
                 /* Actions come from the bitmap; discard the character events
-                 * the make codes also produced. */
-                while (read_key() >= 0)
-                    ;
+                 * the make codes also produced. Quit is still honoured from
+                 * the character path so a serial console can stop the game
+                 * even after a PS/2 key has latched bitmap mode. */
+                int ch;
+
+                while ((ch = read_key()) >= 0)
+                    if (ch == 'q' || ch == 'Q' || ch == 0x03)
+                        quit_game = true;
 
                 edges = keys & ~keys_prev;
 
