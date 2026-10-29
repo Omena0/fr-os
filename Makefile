@@ -70,6 +70,7 @@ ANSI2_ELF := build/ansi2.elf
 SNAKE_ELF := build/snake.elf
 PAINT_ELF := build/paint.elf
 PAINT_GUI_ELF := build/paint_gui.elf
+TETRIS_ELF := build/tetris.elf
 INITRD := build/initrd.img
 
 DISK := build/os.img
@@ -228,7 +229,15 @@ $(PAINT_GUI_ELF): src/userspace/paint/paint_gui.c $(LIBC_OBJ) $(BUILD)/libc.a \
 	$(HOST_OBJCOPY) $(STRIP_DEBUG) $@
 	@$(MAKE) --no-print-directory verify-isa PROFILE=user FILE=$@
 
-$(INITRD): $(INIT_ELF) $(HELLO_ELF) $(ANSI_ELF) $(ANSI2_ELF) $(SNAKE_ELF) $(TRIANGLE_ELF) $(PAINT_ELF) $(PAINT_GUI_ELF) tools/initrd.py
+$(TETRIS_ELF): src/userspace/tetris/tetris.c $(LIBC_OBJ) $(BUILD)/libc.a \
+		src/include/version.h $(VERIFY_ISA_PY)
+	@mkdir -p $(dir $@)
+	$(HOST_CC_64) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $< \
+		$(BUILD)/libc.a $(KERNEL_VERSION_DEFS)
+	$(HOST_OBJCOPY) $(STRIP_DEBUG) $@
+	@$(MAKE) --no-print-directory verify-isa PROFILE=user FILE=$@
+
+$(INITRD): $(INIT_ELF) $(HELLO_ELF) $(ANSI_ELF) $(ANSI2_ELF) $(SNAKE_ELF) $(TRIANGLE_ELF) $(PAINT_ELF) $(PAINT_GUI_ELF) $(TETRIS_ELF) tools/initrd.py
 	@mkdir -p $(dir $@)
 	python3 tools/initrd.py --out $@ --program init=$(INIT_ELF) \
 		--program hello=$(HELLO_ELF) \
@@ -236,7 +245,8 @@ $(INITRD): $(INIT_ELF) $(HELLO_ELF) $(ANSI_ELF) $(ANSI2_ELF) $(SNAKE_ELF) $(TRIA
 		--program snake=$(SNAKE_ELF) \
 		--program triangle=$(TRIANGLE_ELF) \
 		--program paint=$(PAINT_ELF) \
-		--program paint_gui=$(PAINT_GUI_ELF)
+		--program paint_gui=$(PAINT_GUI_ELF) \
+		--program tetris=$(TETRIS_ELF)
 
 # version.h supplies KERNEL_VERSION/KERNEL_GIT_REV/KERNEL_BUILD_STAMP, which
 # reach the image as -D flags on the link line rather than through a header
