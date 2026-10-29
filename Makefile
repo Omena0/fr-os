@@ -210,12 +210,13 @@ $(SNAKE_ELF): src/userspace/snake/snake.c $(LIBC_OBJ) $(BUILD)/libc.a \
 	$(HOST_OBJCOPY) $(STRIP_DEBUG) $@
 	@$(MAKE) --no-print-directory verify-isa PROFILE=user FILE=$@
 
-$(INITRD): $(INIT_ELF) $(HELLO_ELF) $(ANSI_ELF) $(ANSI2_ELF) $(SNAKE_ELF) tools/initrd.py
+$(INITRD): $(INIT_ELF) $(HELLO_ELF) $(ANSI_ELF) $(ANSI2_ELF) $(SNAKE_ELF) $(TRIANGLE_ELF) tools/initrd.py
 	@mkdir -p $(dir $@)
 	python3 tools/initrd.py --out $@ --program init=$(INIT_ELF) \
 		--program hello=$(HELLO_ELF) \
 		--program ansi=$(ANSI_ELF) --program ansi2=$(ANSI2_ELF) \
-		--program snake=$(SNAKE_ELF)
+		--program snake=$(SNAKE_ELF) \
+		--program triangle=$(TRIANGLE_ELF)
 
 # version.h supplies KERNEL_VERSION/KERNEL_GIT_REV/KERNEL_BUILD_STAMP, which
 # reach the image as -D flags on the link line rather than through a header

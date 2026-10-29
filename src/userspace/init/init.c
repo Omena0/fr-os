@@ -289,7 +289,8 @@ static void cmd_help(void)
     say("  clear                clear the screen and home the cursor");
     say("  lscpu                page size, cpu count, getauxval() entries");
     say("  strlen <string>      print the length of <string>");
-    say("  run <program> [args] exec an initrd program (hello, ansi, ansi2)");
+    say("  run <program> [args] exec an initrd program (hello, ansi, ansi2,\n"
+        "                       snake, triangle)");
     say("  exit                 explain that reboot is not implemented yet");
 }
 
@@ -406,7 +407,8 @@ static int dispatch(int argc, char **argv)
          */
         if (argc < 2) {
             say("run: expected a program name");
-            say("     the initrd carries: init, hello, ansi, ansi2, snake");
+            say("     the initrd carries: init, hello, ansi, ansi2, snake, "
+                "triangle");
             return 0;
         }
 
