@@ -44,8 +44,8 @@ static const char level_names[] = { 'D', 'I', 'W', 'E', 'F' };
 #define LOG_SGR_LEVEL_FATAL        "\033[97;41m"
 #define LOG_SGR_LEVEL_UNKNOWN      "\033[37m"
 
-#define LOG_SGR_MSG_DEBUG          "\033[38;5;250m"
-#define LOG_SGR_MSG_INFO         "\033[37m"
+#define LOG_SGR_MSG_DEBUG          "\033[38;5;248m"
+#define LOG_SGR_MSG_INFO           "\033[38;5;253m"
 #define LOG_SGR_MSG_WARN           "\033[33m"
 #define LOG_SGR_MSG_ERROR          "\033[31m"
 #define LOG_SGR_MSG_FATAL          "\033[97;41m"
