@@ -526,7 +526,7 @@ int main(int argc, char **argv)
         nanosleep(&ts, NULL);
     }
 
-    render(body, len, apples, n_apples, eaten, 60);
+    render(body, len, apples, n_apples, eaten, 80);
 
     if (won)
         printf("\n\033[1;33m*** YOU WIN! the board is full (%d cells) ***\033[0m",
