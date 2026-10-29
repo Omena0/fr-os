@@ -97,10 +97,7 @@ static void draw_cursor(int cx, int cy)
 
 static void brush_dab(int x, int y, uint32_t colour)
 {
-    for (int dy = -BRUSH_RADIUS; dy <= BRUSH_RADIUS; dy++)
-        for (int dx = -BRUSH_RADIUS; dx <= BRUSH_RADIUS; dx++)
-            if (dx * dx + dy * dy <= BRUSH_RADIUS * BRUSH_RADIUS)
-                gfx_pixel(&canvas, x + dx, y + dy, colour);
+    gfx_fill_circle(&canvas, x, y, BRUSH_RADIUS, colour);
 }
 
 /* Interpolate between two pointer samples so a quick flick of the mouse paints

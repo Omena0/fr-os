@@ -24,6 +24,12 @@ void gfx_line(struct gfx_canvas *canvas, int x0, int y0, int x1, int y1,
               int thickness, uint32_t color);
 void gfx_fill_rect(struct gfx_canvas *canvas, int x, int y, int width, int height,
                    uint32_t color);
+/* Filled circle. Replaces the per-pixel loop every caller was writing. */
+void gfx_fill_circle(struct gfx_canvas *canvas, int cx, int cy, int radius,
+                     uint32_t color);
+/* Rectangle border of the given thickness, drawn inside [x,y,w,h]. */
+void gfx_rect_outline(struct gfx_canvas *canvas, int x, int y, int width,
+                      int height, int thickness, uint32_t color);
 void gfx_fill_triangle(struct gfx_canvas *canvas, int x0, int y0, int x1, int y1,
                        int x2, int y2, uint32_t color);
 int gfx_present(struct gfx_canvas *canvas);

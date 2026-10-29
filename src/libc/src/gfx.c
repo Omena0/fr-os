@@ -138,6 +138,50 @@ static int64_t edge(int ax, int ay, int bx, int by, int px, int py)
            ((int64_t)py - ay) * ((int64_t)bx - ax);
 }
 
+void gfx_fill_circle(struct gfx_canvas *canvas, int cx, int cy, int radius,
+                     uint32_t color)
+{
+    if (!canvas || !canvas->pixels || radius < 0)
+        return;
+    if (radius == 0) {
+        gfx_pixel(canvas, cx, cy, color);
+        return;
+    }
+    /*
+     * One run per row. For each dy, grow dx while dx^2 + dy^2 <= r^2. That is
+     * O(r^2/2) integer comparisons, which for a brush-sized radius is far
+     * cheaper than clipping and writing (2r+1)^2 individual pixels.
+     */
+    int r2 = radius * radius;
+
+    for (int dy = -radius; dy <= radius; dy++) {
+        int dx = 0;
+
+        while ((dx + 1) * (dx + 1) + dy * dy <= r2)
+            dx++;
+        gfx_fill_rect(canvas, cx - dx, cy + dy, 2 * dx + 1, 1, color);
+    }
+}
+
+void gfx_rect_outline(struct gfx_canvas *canvas, int x, int y, int width,
+                      int height, int thickness, uint32_t color)
+{
+    if (!canvas || !canvas->pixels || width <= 0 || height <= 0 ||
+        thickness <= 0)
+        return;
+    if (thickness * 2 >= width || thickness * 2 >= height) {
+        gfx_fill_rect(canvas, x, y, width, height, color);
+        return;
+    }
+    gfx_fill_rect(canvas, x, y, width, thickness, color);              /* top */
+    gfx_fill_rect(canvas, x, y + height - thickness, width, thickness,
+                  color);                                              /* bottom */
+    gfx_fill_rect(canvas, x, y + thickness, thickness,
+                  height - 2 * thickness, color);                      /* left */
+    gfx_fill_rect(canvas, x + width - thickness, y + thickness, thickness,
+                  height - 2 * thickness, color);                      /* right */
+}
+
 void gfx_fill_triangle(struct gfx_canvas *canvas, int x0, int y0, int x1, int y1,
                        int x2, int y2, uint32_t color)
 {
