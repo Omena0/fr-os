@@ -1,6 +1,7 @@
 /*
- * process.c — file objects, descriptors, user memory access, and the process
- * lifecycle syscalls.
+ * process.c — the process lifecycle: user-pointer access, exit/wait,
+ * fork/clone, exec/ELF entry, init creation, and fatal-fault termination.
+ * File objects and the descriptor table live in proc/file.c.
  *
  * Two things live here that a reader might not expect.
  *
