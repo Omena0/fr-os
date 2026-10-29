@@ -456,7 +456,10 @@ int main(int argc, char **argv)
                 n_apples++;
         }
 
-        int tick_ms = MAX(60, 140 - eaten * 2);
+        /* Gentle ramp: one millisecond faster per two apples, from 150 ms
+         * down to a floor of 80 ms. The old curve lost 2 ms per apple and hit
+         * 60 ms after 40 apples, which made the mid-game unplayable quickly. */
+        int tick_ms = MAX(80, 150 - eaten / 2);
 
         render(body, len, apples, n_apples, eaten, tick_ms);
 
