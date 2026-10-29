@@ -69,10 +69,10 @@ it no longer depends on a byte the loader is currently emitting wrongly.
 
 And their absence:
 
-  KERNEL PANIC                     src/kernel/panic.c:170
-  #EXC                             src/kernel/idt.c:410
-  unrecoverable page fault         src/kernel/idt.c:453
-  could not create the init process  src/kernel/main.c:368
+  KERNEL PANIC                     src/kernel/core/panic.c:170
+  #EXC                             src/kernel/arch/idt.c:410
+  unrecoverable page fault         src/kernel/arch/idt.c:453
+  could not create the init process  src/kernel/core/main.c:368
   [boot2] FATAL:                   src/boot/stage2.c:218
 
 These are checked over the WHOLE log, not only up to the last milestone. A
@@ -205,12 +205,12 @@ MILESTONES = (
 
 # (name, needle, source of truth)
 SIGNATURES = (
-    ("kernel panic", "KERNEL PANIC", "src/kernel/panic.c:170"),
-    ("exception report", "#EXC", "src/kernel/idt.c:410"),
+    ("kernel panic", "KERNEL PANIC", "src/kernel/core/panic.c:170"),
+    ("exception report", "#EXC", "src/kernel/arch/idt.c:410"),
     ("unrecoverable page fault", "unrecoverable page fault",
-     "src/kernel/idt.c:453"),
+     "src/kernel/arch/idt.c:453"),
     ("init process creation failed", "could not create the init process",
-     "src/kernel/main.c:368"),
+     "src/kernel/core/main.c:368"),
     ("bootloader fatal", "[boot2] FATAL:", "src/boot/stage2.c:218"),
 )
 

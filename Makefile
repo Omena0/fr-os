@@ -35,13 +35,14 @@ STAGE2_SRC := src/boot/stage2_entry.S src/boot/stage2_long.S src/boot/stage2.c
 STAGE2_OBJ := $(OBJ)/boot/stage2_entry.S.o $(OBJ)/boot/stage2_long.S.o \
               $(OBJ)/boot/stage2.c.o
 
-# The kernel.
-KERNEL_C_SRC := $(sort $(wildcard src/kernel/*.c)) \
-                $(sort $(wildcard src/kernel/drivers/*.c))
-KERNEL_S_SRC := $(sort $(wildcard src/kernel/*.S))
+# The kernel. Sources are grouped by subsystem under src/kernel; the wildcard
+# is recursive so a new file in an existing folder is picked up without a
+# Makefile edit. Object paths mirror the source paths.
+KERNEL_C_SRC := $(sort $(shell find src/kernel -name '*.c'))
+KERNEL_S_SRC := $(sort $(shell find src/kernel -name '*.S'))
 KERNEL_OBJ := $(patsubst src/%.c,$(OBJ)/%.c.o,$(KERNEL_C_SRC)) \
               $(patsubst src/%.S,$(OBJ)/%.S.o,$(KERNEL_S_SRC))
-KERNEL_ENTRY_OBJ := $(OBJ)/kernel/kmain.S.o $(OBJ)/kernel/main.c.o
+KERNEL_ENTRY_OBJ := $(OBJ)/kernel/core/kmain.S.o $(OBJ)/kernel/core/main.c.o
 
 # The libc. Compiled like a kernel object but with the small code model and no
 # -mcmodel=kernel, because user space has no negative address range to reach and

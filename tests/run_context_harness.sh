@@ -1,7 +1,7 @@
 #!/bin/sh
 # run.sh — build and run the host-side context switch harness.
 #
-# src/kernel/context.S is assembled for the host with no source changes: it is
+# src/kernel/arch/context.S is assembled for the host with no source changes: it is
 # pure register-and-stack code, and gcc's x86-64 defaults already cover fxsave,
 # fxrstor and rdmsr.
 #
@@ -22,7 +22,7 @@ OUT="$TMPDIR/context-harness"
 CC=${CC:-gcc}
 CFLAGS="-O2 -g -std=gnu11 -Wall -Wextra -Wno-unused-parameter -fno-omit-frame-pointer"
 
-$CC $CFLAGS -c src/kernel/context.S -o "$TMPDIR/context.host.o"
+$CC $CFLAGS -c src/kernel/arch/context.S -o "$TMPDIR/context.host.o"
 $CC $CFLAGS -c tests/resume_stub.S -o "$TMPDIR/resume_stub.host.o"
 $CC $CFLAGS -c tests/context_switch_harness.c -o "$TMPDIR/harness.o"
 $CC $CFLAGS -o "$OUT" "$TMPDIR/context.host.o" "$TMPDIR/resume_stub.host.o" \

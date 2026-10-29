@@ -7,7 +7,7 @@
  * fixed by reading the comments in sched.c is not a decision procedure — the
  * comments in this tree have been wrong in both directions. This harness is.
  *
- * The context primitives in src/kernel/context.S are pure register-and-stack
+ * The context primitives in src/kernel/arch/context.S are pure register-and-stack
  * code: no MMIO, no CR3, no globals, no memory side effects beyond the two
  * stack words the caller names. That makes them compilable and runnable as-is
  * on an ordinary x86-64 host, so the frame contract can be exercised against
@@ -98,7 +98,7 @@ extern u64 resume_offs_ok, resume_offs_bad;
 /* ------------------------------------------------------------------- frame -- */
 
 /*
- * Must match src/kernel/context.S exactly: context_switch pushes rbp, rbx, r12,
+ * Must match src/kernel/arch/context.S exactly: context_switch pushes rbp, rbx, r12,
  * r13, r14, r15 and publishes the resulting RSP, so r15 is at offset 0 and the
  * return address `ret` consumes is at +48.
  */

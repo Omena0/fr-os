@@ -20,7 +20,7 @@
  *   instructions immediately after the call, with nothing in between to move
  *   rsp.
  *
- * The frame being restored is exactly what src/kernel/context.S restores:
+ * The frame being restored is exactly what src/kernel/arch/context.S restores:
  *
  *     +0 r15  +8 r14  +16 r13  +24 r12  +32 rbx  +40 rbp  +48 ret
  */
