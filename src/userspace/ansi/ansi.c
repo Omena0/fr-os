@@ -205,6 +205,10 @@ static void matrix(void)
 
 int main(void)
 {
+    /* Take the screen before drawing: the matrix is the whole point of the
+     * program and must not be painted over boot logs or a previous program.
+     * ESC[2J clears, ESC[H homes. */
+    printf("\033[2J\033[H");
     matrix();
     return 0;
 }
