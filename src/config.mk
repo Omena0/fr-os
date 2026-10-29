@@ -138,6 +138,13 @@ KERNEL_CFLAGS := \
     -mno-sse -mno-sse2 -mno-avx -mno-avx2 -mno-fma -mno-f16c \
     -mno-mmx -mno-80387 -msoft-float -mno-red-zone
 
+# The host's keyboard layout, selected at build time. The guest cannot ask the
+# host what keyboard is attached, so the scancode tables are compiled in. The
+# detector prefers the X11/vconsole keymap (what the physical keys do) over
+# LANG (what language the user reads); override with `make KBD_LAYOUT=us`.
+KBD_LAYOUT ?= $(shell sh tools/detect_kbd_layout.sh)
+KERNEL_CFLAGS += -DKBD_LAYOUT_$(shell printf '%s' '$(KBD_LAYOUT)' | tr a-z A-Z)
+
 # The kernel is loaded by stage2 at a fixed physical address, so the link
 # script pins the physical placement too.
 #

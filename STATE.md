@@ -131,6 +131,13 @@ them is how time is lost.
   the PIC/IDT/handler were all correct, and no key ever arrived. The lesson:
   when an interrupt fires but the device seems empty, print the status byte
   the handler reads; do not infer it from the fact that the IRQ fired.
+- **A PS/2 keyboard is not self-describing.** There is no protocol message
+  that says which national layout the keys are printed for, so the kernel
+  compiles the scancode tables in. `tools/detect_kbd_layout.sh` reads the
+  host's X11/vconsole keymap (preferring it over `LANG`, which can be fi_FI on
+  a US keyboard) and `src/config.mk` passes `-DKBD_LAYOUT_FI` or `_US`.
+  Changing the layout changes the build-inputs digest, so every object
+  rebuilds; override with `make KBD_LAYOUT=us`.
 - **The kernel image budget is a hard link-time assert, not a guideline.**
   `KERNEL_MAX_BYTES = 0x1D0000` (`src/kernel/link.ld`, mirroring the stage2
   landing zone). A `struct fork_regs fork_ctx[MAX_CPUS]` scratch array (256

@@ -591,7 +591,9 @@ deps:
 # every object on every single build.
 $(BUILD_INPUTS_STAMP): FORCE
 	@mkdir -p $(dir $@)
-	@digest=$$(cat $(BUILD_INPUTS) $(HEADER_FILES) 2>/dev/null | sha256sum | cut -d' ' -f1); \
+	@digest=$$( { cat $(BUILD_INPUTS) $(HEADER_FILES) 2>/dev/null; \
+	              printf 'kbd-layout %s\n' '$(KBD_LAYOUT)'; } \
+	            | sha256sum | cut -d' ' -f1); \
 	 if [ -r $@ ] && [ "$$(cat $@)" = "$$digest" ]; then exit 0; fi; \
 	 printf '%s\n' "$$digest" > $@.tmp && mv -f $@.tmp $@; \
 	 echo "make: build inputs changed ($$digest), rebuilding every object"

@@ -109,7 +109,61 @@ static void ps2_expect_ack(uint8_t cmd, uint8_t want)
 
 /* --- scancode translation --- */
 
-/* Make codes 0x00-0x3F, set 1, unshifted. Zero = no ASCII. */
+/*
+ * The layout is chosen at build time (KBD_LAYOUT in src/config.mk) because a
+ * PS/2 keyboard is not self-describing: there is no protocol message that says
+ * "I am Finnish". The detector reads the host's X11/vconsole keymap and the
+ * kernel compiles in the matching tables.
+ *
+ * Letters are in the same physical places in both layouts (Finnish is QWERTY,
+ * not QWERTZ); what differs is punctuation and the three Nordic letter keys.
+ *
+ * The Nordic letters (å, ä, ö) and the dead keys are not ASCII and the console
+ * is byte-oriented with an 8-bit font, so those keys currently produce
+ * nothing rather than a wrong ASCII character. Everything needed for the REPL
+ * and the games is ASCII.
+ */
+#if defined(KBD_LAYOUT_FI)
+
+/* Make codes 0x00-0x3F, set 1, unshifted: Finnish (fi). */
+static const char scancode_base[0x40] = {
+    [0x01] = 0x1B,
+    [0x02] = '1', [0x03] = '2', [0x04] = '3', [0x05] = '4',
+    [0x06] = '5', [0x07] = '6', [0x08] = '7', [0x09] = '8',
+    [0x0A] = '9', [0x0B] = '0',
+    [0x0C] = '+', [0x0D] = '`',          /* +? and the acute dead key */
+    [0x0E] = '\b',
+    [0x0F] = '\t',
+    [0x10] = 'q', [0x11] = 'w', [0x12] = 'e', [0x13] = 'r',
+    [0x14] = 't', [0x15] = 'y', [0x16] = 'u', [0x17] = 'i',
+    [0x18] = 'o', [0x19] = 'p',
+    [0x1A] = 0, [0x1B] = 0,              /* å, ¨ (not ASCII) */
+    [0x1C] = '\n',
+    [0x1E] = 'a', [0x1F] = 's', [0x20] = 'd', [0x21] = 'f',
+    [0x22] = 'g', [0x23] = 'h', [0x24] = 'j', [0x25] = 'k',
+    [0x26] = 'l',
+    [0x27] = 0, [0x28] = 0, [0x29] = 0,  /* ö, ä, § (not ASCII) */
+    [0x2B] = '\'',                       /* the ' * key */
+    [0x2C] = 'z', [0x2D] = 'x', [0x2E] = 'c', [0x2F] = 'v',
+    [0x30] = 'b', [0x31] = 'n', [0x32] = 'm',
+    [0x33] = ',', [0x34] = '.', [0x35] = '-',
+    [0x39] = ' ',
+};
+
+static const char scancode_shifted[0x40] = {
+    [0x02] = '!', [0x03] = '"', [0x04] = '#', [0x05] = 0,   /* ¤ */
+    [0x06] = '%', [0x07] = '&', [0x08] = '/', [0x09] = '(',
+    [0x0A] = ')', [0x0B] = '=',
+    [0x0C] = '?', [0x0D] = '~',          /* the grave dead key */
+    [0x1A] = 0, [0x1B] = '^',            /* Å */
+    [0x27] = 0, [0x28] = 0, [0x29] = 0,  /* Ö, Ä, ½ */
+    [0x2B] = '*',
+    [0x33] = ';', [0x34] = ':', [0x35] = '_',
+};
+
+#elif defined(KBD_LAYOUT_US)
+
+/* Make codes 0x00-0x3F, set 1, unshifted: US. */
 static const char scancode_base[0x40] = {
     [0x01] = 0x1B,
     [0x02] = '1', [0x03] = '2', [0x04] = '3', [0x05] = '4',
@@ -144,6 +198,10 @@ static const char scancode_shifted[0x40] = {
     [0x2B] = '|',
     [0x33] = '<', [0x34] = '>', [0x35] = '?',
 };
+
+#else
+#error "KBD_LAYOUT must be US or FI (see src/config.mk)"
+#endif
 
 #define SC_LSHIFT 0x2A
 #define SC_RSHIFT 0x36
@@ -333,6 +391,13 @@ void ps2kbd_init(ps2kbd_callback_t cb)
 
     keyboard_callback = cb;
 
+    klog(KLOG_INFO, "ps2kbd: scancode layout %s\n",
+#if defined(KBD_LAYOUT_FI)
+         "fi"
+#else
+         "us"
+#endif
+         );
     klog(KLOG_DEBUG, "ps2kbd: init start\n");
     /* Drain pre-existing bytes. */
     {
