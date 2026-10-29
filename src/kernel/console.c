@@ -132,6 +132,7 @@ static inline bool attr_bold(uint8_t attr)
 
 static spinlock_t console_lock;
 static uint32_t cursor_x, cursor_y;
+static uint32_t saved_cursor_x, saved_cursor_y;
 static uint8_t  current_attr = TERM_ATTR_NORMAL;
 static uint64_t scrollback;
 static bool vga_enabled;
@@ -158,6 +159,34 @@ static void console_fb_putc(char c, uint8_t attr);
 static void console_fb_scroll(void);
 static void console_fb_clear(void);
 static void console_fb_move(uint32_t x, uint32_t y);
+static bool console_fb_active(void);
+
+/* Cursor save/restore (DECSC/DECRC), used by tests that probe absolute cursor
+ * moves. Without it a sequence like ESC[1;1H leaves the serial terminal's
+ * cursor at the top of the screen, so the next prompt is drawn over earlier
+ * output even though the framebuffer console tracked its own cursor. */
+static void console_save_cursor(void)
+{
+    saved_cursor_x = cursor_x;
+    saved_cursor_y = cursor_y;
+}
+
+static void console_restore_cursor(void)
+{
+    uint32_t rows = FB_TEXT_ROWS();
+
+    cursor_x = saved_cursor_x;
+    cursor_y = saved_cursor_y;
+    /* The saved position was valid when it was taken; it can be out of range
+     * only if the display changed size in between. Clamp against the display
+     * that is active now, not VGA's 25 rows -- the framebuffer shows far more. */
+    if (cursor_x >= VGA_COLS)
+        cursor_x = VGA_COLS - 1;
+    if (cursor_y >= rows)
+        cursor_y = rows - 1;
+    if (console_fb_active())
+        console_fb_move(cursor_x, cursor_y);
+}
 
 /* ---------------------------------------------------------------- spin ----- */
 
@@ -613,6 +642,21 @@ static bool handle_escape(char c)
                 serial_putc_blocking(c);
             return true;
         }
+        /* DECSC/DECRC in their two-byte form. */
+        if (c == '7') {
+            esc_state = ESC_NONE;
+            console_save_cursor();
+            if (serial_enabled)
+                serial_putc_blocking(c);
+            return true;
+        }
+        if (c == '8') {
+            esc_state = ESC_NONE;
+            console_restore_cursor();
+            if (serial_enabled)
+                serial_putc_blocking(c);
+            return true;
+        }
         /* ESC followed by anything else is a two-byte sequence we do not
          * implement. Drop it rather than printing the second byte. */
         esc_state = ESC_NONE;
@@ -680,6 +724,12 @@ static bool handle_escape(char c)
                     console_fb_clear();
                 cursor_x = 0;
                 cursor_y = 0;
+                return true;
+            case 's':       /* save cursor (SCP) */
+                console_save_cursor();
+                return true;
+            case 'u':       /* restore cursor (RCP) */
+                console_restore_cursor();
                 return true;
             case 'K':       /* erase line */
                 for (uint32_t x = cursor_x; x < VGA_COLS; x++)
