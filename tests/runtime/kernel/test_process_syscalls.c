@@ -363,6 +363,48 @@ static int test_sysinfo_null(void) {
     return TEST_PASS;
 }
 
+static int test_getrlimit_nofile(void) {
+    struct rlimit rl;
+    TEST_ASSERT_EQ(syscall2(SYS_getrlimit, RLIMIT_NOFILE, (long)&rl), 0, "getrlimit NOFILE should succeed");
+    TEST_ASSERT(rl.rlim_cur > 0 && rl.rlim_cur <= rl.rlim_max, "NOFILE soft limit should be positive and <= hard");
+    return TEST_PASS;
+}
+
+static int test_getrlimit_invalid_resource(void) {
+    struct rlimit rl;
+    TEST_ASSERT_EQ(syscall2(SYS_getrlimit, 999, (long)&rl), -EINVAL, "getrlimit unknown resource should return EINVAL");
+    return TEST_PASS;
+}
+
+static int test_getrlimit_null(void) {
+    TEST_ASSERT_EQ(syscall2(SYS_getrlimit, RLIMIT_NOFILE, 0), -EFAULT, "getrlimit into NULL should return EFAULT");
+    return TEST_PASS;
+}
+
+static int test_setrlimit_roundtrip(void) {
+    struct rlimit before, lower, after;
+    TEST_ASSERT_EQ(syscall2(SYS_getrlimit, RLIMIT_NOFILE, (long)&before), 0, "getrlimit should succeed");
+    lower = before;
+    lower.rlim_cur = before.rlim_cur > 1 ? before.rlim_cur - 1 : before.rlim_cur;
+    TEST_ASSERT_EQ(syscall2(SYS_setrlimit, RLIMIT_NOFILE, (long)&lower), 0, "setrlimit lowering soft limit should succeed");
+    TEST_ASSERT_EQ(syscall2(SYS_getrlimit, RLIMIT_NOFILE, (long)&after), 0, "getrlimit should succeed after set");
+    TEST_ASSERT_EQ(after.rlim_cur, lower.rlim_cur, "soft limit should read back as set");
+    TEST_ASSERT_EQ(syscall2(SYS_setrlimit, RLIMIT_NOFILE, (long)&before), 0, "restoring the original limit should succeed");
+    return TEST_PASS;
+}
+
+static int test_setrlimit_cur_above_max(void) {
+    struct rlimit rl = { 10, 5 };
+    TEST_ASSERT_EQ(syscall2(SYS_setrlimit, RLIMIT_NOFILE, (long)&rl), -EINVAL, "soft limit above hard limit should return EINVAL");
+    return TEST_PASS;
+}
+
+static int test_setrlimit_raise_hard_eperm(void) {
+    struct rlimit rl = { 1, RLIM_INFINITY };
+    TEST_ASSERT_EQ(syscall2(SYS_setrlimit, RLIMIT_NOFILE, (long)&rl), -EPERM, "raising the hard limit should return EPERM");
+    return TEST_PASS;
+}
+
 /* ===== Test Suite Registration ===== */
 
 struct test_suite test_process_syscalls = {
@@ -392,6 +434,12 @@ struct test_suite test_process_syscalls = {
         { "uname_null", test_uname_null, false },
         { "sysinfo_basic", test_sysinfo_basic, false },
         { "sysinfo_null", test_sysinfo_null, false },
+        { "getrlimit_nofile", test_getrlimit_nofile, false },
+        { "getrlimit_invalid_resource", test_getrlimit_invalid_resource, false },
+        { "getrlimit_null", test_getrlimit_null, false },
+        { "setrlimit_roundtrip", test_setrlimit_roundtrip, false },
+        { "setrlimit_cur_above_max", test_setrlimit_cur_above_max, false },
+        { "setrlimit_raise_hard_eperm", test_setrlimit_raise_hard_eperm, false },
         { "clock_gettime_monotonic", test_clock_gettime_monotonic, false },
         { "clock_gettime_invalid", test_clock_gettime_invalid, false },
         { "getuid_nonnegative", test_getuid_nonnegative, false },
@@ -399,5 +447,5 @@ struct test_suite test_process_syscalls = {
         { "arch_prctl_get_fs", test_arch_prctl_get_fs, false },
         { "arch_prctl_get_gs", test_arch_prctl_get_gs, false },
     },
-    .num_cases = 30,
+    .num_cases = 36,
 };

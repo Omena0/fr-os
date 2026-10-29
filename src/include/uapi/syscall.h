@@ -71,6 +71,8 @@
 #define SYS_arch_prctl   17u
 #define SYS_uname        18u
 #define SYS_sysinfo      19u
+#define SYS_getrlimit    20u
+#define SYS_setrlimit    21u
 
 /* Memory management. */
 #define SYS_mmap         32u

@@ -52,6 +52,7 @@
 #include <list.h>
 #include <percpu.h>
 #include <spinlock.h>
+#include <uapi/sysinfo.h>
 
 /*
  * vmm.h's struct vma carries a file offset. Defining the two POSIX scalar types
@@ -356,6 +357,9 @@ struct task {
      * descriptors can share a file and only one can be close-on-exec. */
     u8 fd_flags[TASK_MAX_FDS];
     struct cred cred;
+    /* Resource limits, indexed by RLIMIT_*. Stored per task and inherited by
+     * fork/clone. Reported and validated; not enforced yet. */
+    struct rlimit rlim[RLIMIT_NLIMITS];
 
     /* --- process relationships ------------------------------------------- */
     struct list_head sibling;   /* on the parent's children list */
@@ -395,6 +399,9 @@ struct task *task_create_kernel(void (*fn)(void *), void *arg, const char *name)
 
 /* Set the process-level identity fields from a parent (fork/exec path). */
 void task_inherit(struct task *child, struct task *parent);
+
+/* Set every resource limit to its default. Called once from task_alloc(). */
+void task_rlimit_defaults(struct task *t);
 
 /* Give a task the full complement of MLFQ quantum for its level. */
 void task_reset_budget(struct task *t);

@@ -71,12 +71,24 @@ static void *build_initial_frame(void *stack_top)
     return c;
 }
 
+void task_rlimit_defaults(struct task *t)
+{
+    for (u32 i = 0; i < RLIMIT_NLIMITS; i++)
+        t->rlim[i].rlim_cur = t->rlim[i].rlim_max = RLIM_INFINITY;
+
+    t->rlim[RLIMIT_NOFILE].rlim_cur = t->rlim[RLIMIT_NOFILE].rlim_max = TASK_MAX_FDS;
+    t->rlim[RLIMIT_STACK].rlim_cur = t->rlim[RLIMIT_STACK].rlim_max = 8ULL * 1024 * 1024;
+    t->rlim[RLIMIT_NPROC].rlim_cur = t->rlim[RLIMIT_NPROC].rlim_max = 256;
+    t->rlim[RLIMIT_CORE].rlim_cur = t->rlim[RLIMIT_CORE].rlim_max = 0;
+}
+
 struct task *task_alloc(const char *name, struct address_space *mm)
 {
     struct task *t = kmalloc_zeroed(sizeof(*t));
 
     if (!t)
         return NULL;
+    task_rlimit_defaults(t);
 
     t->pid = alloc_pid();
     t->tid = t->pid;
@@ -187,6 +199,7 @@ void task_inherit(struct task *child, struct task *parent)
     child->nice = parent->nice;
     child->policy = parent->policy;
     child->cred = parent->cred;
+    memcpy(child->rlim, parent->rlim, sizeof(child->rlim));
     cpumask_copy(&child->cpumask, &parent->cpumask);
     child->affinity_mask = parent->affinity_mask;
     /*

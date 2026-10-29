@@ -271,6 +271,46 @@ static long sc_sysinfo(struct syscall_regs *r)
     return copy_to_user(arg0(r), &si, sizeof(si)) < 0 ? -EFAULT : 0;
 }
 
+/*
+ * Resource limits are stored per task and inherited across fork. They are
+ * reported and validated, but nothing enforces them yet: a process can read
+ * and lower its limits, which is what shells and configure scripts need.
+ */
+static long sc_getrlimit(struct syscall_regs *r)
+{
+    struct task *t = caller();
+    int resource = (int)(s32)arg0(r);
+
+    if (arg1(r) == 0)
+        return -EFAULT;
+    if (resource < 0 || resource >= RLIMIT_NLIMITS)
+        return -EINVAL;
+
+    return copy_to_user(arg1(r), &t->rlim[resource], sizeof(struct rlimit)) < 0 ? -EFAULT : 0;
+}
+
+static long sc_setrlimit(struct syscall_regs *r)
+{
+    struct task *t = caller();
+    int resource = (int)(s32)arg0(r);
+    struct rlimit rl;
+
+    if (arg1(r) == 0)
+        return -EFAULT;
+    if (resource < 0 || resource >= RLIMIT_NLIMITS)
+        return -EINVAL;
+    if (copy_from_user(&rl, arg1(r), sizeof(rl)) < 0)
+        return -EFAULT;
+    if (rl.rlim_cur > rl.rlim_max)
+        return -EINVAL;
+    /* A hard limit can only be lowered; raising it needs privilege. */
+    if (rl.rlim_max > t->rlim[resource].rlim_max)
+        return -EPERM;
+
+    t->rlim[resource] = rl;
+    return 0;
+}
+
 static long sc_gfx_info(struct syscall_regs *r)
 {
     struct framebuffer_info fb;
@@ -1567,6 +1607,8 @@ void syscall_init(void)
     syscall_table[SYS_kbd_state] = sc_kbd_state;
     syscall_table[SYS_uname] = sc_uname;
     syscall_table[SYS_sysinfo] = sc_sysinfo;
+    syscall_table[SYS_getrlimit] = sc_getrlimit;
+    syscall_table[SYS_setrlimit] = sc_setrlimit;
 
     /*
      * STAR carries both selector bases. SYSCALL loads CS from bits 47:32

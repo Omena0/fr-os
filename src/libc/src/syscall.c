@@ -103,6 +103,16 @@ int sys_sysinfo(struct sysinfo *info)
     return (int)check0(__syscall1(SYS_sysinfo, (long)info));
 }
 
+int sys_getrlimit(int resource, struct rlimit *rlim)
+{
+    return (int)check0(__syscall2(SYS_getrlimit, resource, (long)rlim));
+}
+
+int sys_setrlimit(int resource, const struct rlimit *rlim)
+{
+    return (int)check0(__syscall2(SYS_setrlimit, resource, (long)rlim));
+}
+
 int sys_ioctl(int fd, unsigned long request, ...)
 {
     void *argp;
