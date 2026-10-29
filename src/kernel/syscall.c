@@ -35,6 +35,7 @@
 #include <task.h>
 #include <sched.h>
 #include <process.h>
+#include <ktime.h>
 #include <syscall.h>
 #include <console.h>
 #include <tty.h>
@@ -310,18 +311,13 @@ static long sc_clock_gettime(struct syscall_regs *r)
     if (clock != 0 && clock != 1)
         return -EINVAL;
 
-    /* Both clocks are the same counter. There is no RTC driver, so
-     * CLOCK_REALTIME is uptime. */
+    /*
+     * CLOCK_REALTIME is the RTC-derived Unix clock; CLOCK_MONOTONIC is the
+     * TSC-based counter since ktime_init(). Both are read once so the pair
+     * cannot straddle an update and step backwards.
+     */
     {
-        /*
-         * Read the clock once. Two reads can straddle a tick; the second
-         * read can land in the next second, so if it lands in the next second
-         * the pair reconstructs as sec=N, nsec=small, which is *earlier* than
-         * the N-1 the previous call returned. A backwards step underflows
-         * init's unsigned ms computation and prints a number in the
-         * billions.
-         */
-        uint64_t now = sched_now_ns();
+        uint64_t now = (clock == 0) ? ktime_realtime_ns() : ktime_mono_ns();
 
         ts.tv_sec = (s64)(now / 1000000000ULL);
         ts.tv_nsec = (s64)(now % 1000000000ULL);

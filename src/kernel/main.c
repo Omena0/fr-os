@@ -27,6 +27,7 @@
 #include <gdt.h>
 #include <interrupt.h>
 #include <klog.h>
+#include <ktime.h>
 #include <panic.h>
 #include <percpu.h>
 #include <pmm.h>
@@ -407,6 +408,12 @@ void kmain(uint64_t bootinfo_phys)
      * task and the kernel stops being a boot sequence. Anything belonging to
      * user space that is not reachable later belongs here.
      */
+    /*
+     * The RTC is readable once port I/O is safe; note the instant now so the
+     * monotonic clock and the wall clock share an origin.
+     */
+    ktime_init();
+
     struct task *init = process_create_init();
     if (!init)
         panic("could not create the init process; there is nothing to run");
