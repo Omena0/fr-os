@@ -18,7 +18,11 @@
 
 #define PS2_STATUS_OBF  0x01   /* output buffer full: a byte is waiting */
 #define PS2_STATUS_IBF  0x02   /* input buffer full: the controller is busy */
-#define PS2_STATUS_SYS  0x04   /* the byte came from the aux port, not the kbd */
+/* Bit 2 is the system/self-test flag (1 after a successful POST), NOT the
+ * source of the byte. Auxiliary (mouse) data is flagged by the auxiliary
+ * output-buffer-full bit, bit 5. Treating bit 2 as "aux" discarded every
+ * keyboard byte on QEMU, where the self-test flag is set. */
+#define PS2_STATUS_AUX  0x20   /* output buffer holds data from the aux port */
 
 #define PS2_CMD_READ_CONFIG   0x20
 #define PS2_CMD_WRITE_CONFIG  0x60
@@ -262,7 +266,7 @@ void ps2kbd_irq(struct interrupt_frame *frame)
         }
 
         /* Mouse byte — leave it for the mouse driver. */
-        if (status & PS2_STATUS_SYS) {
+        if (status & PS2_STATUS_AUX) {
             klog(KLOG_DEBUG, "ps2kbd: mouse byte 0x%02x dropped\n",
                   (unsigned)inb(PS2_DATA));
             return;
