@@ -33,7 +33,11 @@ static void box(void)
     printf("TAB_BEFORE\033[0m\tTAB_AFTER\033[0m\n");
 
     /* Cursor move with SGR: move to column 1, bold text. */
-    printf("\033[1;1H\033[1mCURSOR_MOVE_BOLD\033[0m\n");
+    /* Save the cursor, exercise an absolute move, then put it back: a test
+     * that leaves the terminal cursor at the top of the screen makes the next
+     * prompt overwrite earlier output. The console implements DECSC/DECRC
+     * (ESC[s / ESC[u]) so the framebuffer and the serial terminal agree. */
+    printf("\033[s\033[1;1H\033[1mCURSOR_MOVE_BOLD\033[0m\033[u");
 
     /* Dim then normal. */
     printf("\033[2mDIM_TEXT\033[22m normal_after_dim\033[0m\n");
