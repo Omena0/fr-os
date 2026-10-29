@@ -220,6 +220,17 @@ static void keyboard_scancode(uint8_t sc)
         return;
     }
 
+    /*
+     * Ctrl+Backspace. A serial terminal usually sends ^W for this (and
+     * "delete word" is ^W in the line editor anyway), so map it to the same
+     * byte rather than delivering a plain backspace and losing the modifier.
+     */
+    if (ctrl_held && code == 0x0E) {
+        if (make && keyboard_callback)
+            keyboard_callback(0x17);
+        return;
+    }
+
     if (!make) {
         klog(KLOG_DEBUG, "ps2kbd: break for 0x%02x dropped\n", (unsigned)code);
         return;
