@@ -58,14 +58,14 @@ int clock_getres(clockid_t clk_id, struct timespec *res)
     }
 }
 
-long time(long *t)
+time_t time(time_t *t)
 {
     struct timespec ts;
     if (clock_gettime(CLOCK_REALTIME, &ts) == -1)
-        return -1;
+        return (time_t)-1;
     if (t)
-        *t = ts.tv_sec;
-    return ts.tv_sec;
+        *t = (time_t)ts.tv_sec;
+    return (time_t)ts.tv_sec;
 }
 
 int nanosleep(const struct timespec *req, struct timespec *rem)
