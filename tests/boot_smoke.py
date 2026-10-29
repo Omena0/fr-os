@@ -355,6 +355,7 @@ def newest_input(root, image):
     """
     newest = (0.0, None)
     img_real = os.path.realpath(image)
+    runtime_image = "runtime" in os.path.basename(image)
 
     def consider(path):
         nonlocal newest
@@ -377,6 +378,12 @@ def newest_input(root, image):
     for dirpath, _dirnames, filenames in os.walk(os.path.join(root, "build", "obj")):
         for name in filenames:
             if name.endswith(".o") or name.endswith(".d"):
+                # The runtime test image has its own initrd and kernel; an
+                # object built for it is not an input to the main image, and a
+                # `make test-runtime` before `make check` would otherwise make
+                # a perfectly current os.img look stale.
+                if not runtime_image and "runtime" in name:
+                    continue
                 consider(os.path.join(dirpath, name))
 
     for name in STALE_ARTEFACTS:
