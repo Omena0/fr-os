@@ -646,7 +646,15 @@ struct vmalloc_block {
     unsigned order;
 };
 
-#define VMALLOC_MAX_BLOCKS 2048
+/*
+ * Cap on simultaneous vmalloc extents, i.e. on fragmentation, not on memory.
+ * The table is static because vmalloc backs the allocator itself in places and
+ * cannot allocate its own bookkeeping. 2048 entries cost 80 KiB of BSS, which
+ * the kernel image budget (1.8 MiB incl. the embedded initrd) cannot spare
+ * once an extra userspace program is added; a boot uses zero and the runtime
+ * suite creates tasks one at a time, so 768 leaves ample headroom.
+ */
+#define VMALLOC_MAX_BLOCKS 768
 static struct vmalloc_block vmalloc_blocks[VMALLOC_MAX_BLOCKS];
 static unsigned vmalloc_block_count;
 static virt_addr_t vmalloc_brk = VMM_VMALLOC_BASE;
