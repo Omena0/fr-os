@@ -561,6 +561,35 @@ void console_apply_sgr(const char *params)
         case 1:   /* bold: set intensity bit */
             current_attr |= 0x08;
             break;
+        case 2:   /* faint: the 8-bit attribute has no dim level, so clear
+                   * the intensity bit rather than claim a shade we cannot
+                   * draw. */
+        case 22:  /* normal intensity */
+            current_attr &= (uint8_t)~0x08;
+            break;
+        case 7:   /* inverse: swap the 3-bit foreground and background */
+        case 27:  /* inverse off: the same swap puts them back */
+            {
+                uint8_t fg = current_attr & 0x07;
+                uint8_t bg = (uint8_t)((current_attr >> 4) & 0x07);
+                current_attr = (uint8_t)((current_attr & 0x08) |
+                             (fg << 4) | bg);
+            }
+            break;
+        case 8:   /* hidden: draw the foreground in the background colour */
+            current_attr = (uint8_t)((current_attr & 0xF8) |
+                         ((current_attr >> 4) & 0x07));
+            break;
+        case 3:   /* italic */
+        case 4:   /* underline */
+        case 5:   /* blink */
+        case 9:   /* strikethrough */
+        case 23:  /* not italic */
+        case 24:  /* not underlined */
+        case 25:  /* not blinking */
+            /* No representation in the VGA 8-bit text attribute; accepted
+             * and ignored rather than printed as part of the sequence. */
+            break;
         case 30:  /* black foreground, index 0 in bits 0-3 */
         case 31:  /* red foreground, index 1 */
         case 32:  /* green foreground, index 2 */
