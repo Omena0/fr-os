@@ -502,7 +502,7 @@ $(BUILD)/os-runtime.img: $(BUILD)/stage1.elf $(BUILD)/stage2.elf $(BUILD)/kernel
 .PHONY: test-runtime
 test-runtime: $(BUILD)/os-runtime.img build/test-runner
 	@echo "=== Booting runtime tests ==="
-	@FR_TMPDIR=$(BUILD) BOOT_SMOKE_TIMEOUT=60 python3 tests/boot_smoke.py --image $(BUILD)/os-runtime.img --run-tests
+	@FR_TMPDIR=$(BUILD) BOOT_SMOKE_TIMEOUT=60 BOOT_SMOKE_ALLOW_TCG=1 python3 tests/boot_smoke.py --image $(BUILD)/os-runtime.img --run-tests
 	@echo "=== Runtime tests complete ==="
 
 .PHONY: check
