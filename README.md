@@ -3,6 +3,8 @@
 
 [![Docs](https://github.com/Omena0/fr-os/actions/workflows/pages.yml/badge.svg)](https://github.com/Omena0/fr-os/actions/workflows/pages.yml)
 [![Test](https://github.com/Omena0/fr-os/actions/workflows/test.yml/badge.svg)](https://github.com/Omena0/fr-os/actions/workflows/test.yml)
+![LoC](https://img.shields.io/badge/Lines%20Of%20Code-65.3K-red?logo=code)
+![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)
 
 A x86-64 operating system for QEMU: a bootloader, a kernel, a C runtime and
 a userspace, written from scratch in C11 and x86-64 assembly.
