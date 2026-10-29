@@ -20,6 +20,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 /* Length modifier encoding. */
@@ -715,6 +716,49 @@ int sprintf(char *str, const char *format, ...)
 
     va_start(ap, format);
     ret = vsprintf(str, format, ap);
+    va_end(ap);
+    return ret;
+}
+
+int vasprintf(char **strp, const char *format, va_list ap)
+{
+    va_list count_ap;
+    char *buf;
+    int len;
+    int written;
+
+    if (!strp || !format)
+        return -1;
+
+    va_copy(count_ap, ap);
+    len = vsnprintf(NULL, 0, format, count_ap);
+    va_end(count_ap);
+    if (len < 0)
+        return -1;
+
+    buf = malloc((size_t)len + 1);
+    if (!buf)
+        return -1;
+
+    va_copy(count_ap, ap);
+    written = vsnprintf(buf, (size_t)len + 1, format, count_ap);
+    va_end(count_ap);
+    if (written < 0) {
+        free(buf);
+        return -1;
+    }
+
+    *strp = buf;
+    return written;
+}
+
+int asprintf(char **strp, const char *format, ...)
+{
+    va_list ap;
+    int ret;
+
+    va_start(ap, format);
+    ret = vasprintf(strp, format, ap);
     va_end(ap);
     return ret;
 }

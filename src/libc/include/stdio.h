@@ -72,6 +72,15 @@ extern int sprintf(char *str, const char *format, ...);
 extern int vsnprintf(char *str, size_t size, const char *format, va_list ap);
 extern int vsprintf(char *str, const char *format, va_list ap);
 
+/* Allocate a formatted string with malloc; free() the result. */
+extern int asprintf(char **strp, const char *format, ...);
+extern int vasprintf(char **strp, const char *format, va_list ap);
+
+/* Formatted input. Supports %d %i %u %o %x %X %s %c %n and the h/hh/l/ll/z
+ * length modifiers, field widths and '*' suppression. */
+extern int sscanf(const char *str, const char *format, ...);
+extern int vsscanf(const char *str, const char *format, va_list ap);
+
 extern int perror(const char *s);
 
 #ifdef __cplusplus
