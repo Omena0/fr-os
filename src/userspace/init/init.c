@@ -8,6 +8,7 @@
  */
 #include <errno.h>
 #include <fcntl.h>
+#include <kbd.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -450,6 +451,11 @@ static int dispatch(int argc, char **argv)
             if (fl >= 0)
                 fcntl(0, F_SETFL, fl & ~O_NONBLOCK);
         }
+
+        /* A program may have changed the keyboard's repeat rate (a game wants
+         * a faster one). Restore the prompt's rate, including when the program
+         * died without restoring it itself. */
+        kbd_typematic(KBD_TYPEMATIC_DEFAULT);
 
         if (WIFEXITED(status)) {
             say("run: program exited with status %d", WEXITSTATUS(status));

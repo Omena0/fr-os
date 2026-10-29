@@ -30,6 +30,19 @@
 
 /* Keyboard commands sent to the data port. */
 #define KBD_CMD_ENABLE_SCAN   0xF4
+#define KBD_CMD_SET_TYPEMATIC 0xF3
+
+/*
+ * Typematic parameter: bits 6-5 select the delay before a held key repeats,
+ * bits 4-0 the repeat period. 0x05 is delay 00 (250 ms) and rate index 5
+ * (75 ms, about 13 repeats per second). The keyboard's default is 500 ms,
+ * which made held movement in the games feel unresponsive; 250 ms starts
+ * repeating quickly without the 33 ms machine-gun rate of index 0.
+ *
+ * This configures the PS/2 keyboard only. A serial terminal's auto-repeat is
+ * the terminal emulator's setting, not the guest's.
+ */
+#define KBD_TYPEMATIC_VALUE   0x05
 
 /* Configuration byte bits. */
 #define PS2_CFG_KBD_INT   0x01   /* raise IRQ1 for keyboard bytes */
@@ -217,6 +230,10 @@ static bool e0_prefix;
 
 static ps2kbd_callback_t keyboard_callback;
 
+/* Last typematic parameter successfully applied, so a caller can query or
+ * restore it. */
+static u8 typematic_value = KBD_TYPEMATIC_VALUE;
+
 /* One scancode from port 0x60. Called from IRQ1 with interrupts off. */
 static void keyboard_scancode(uint8_t sc)
 {
@@ -382,6 +399,51 @@ void ps2kbd_irq(struct interrupt_frame *frame)
     klog(KLOG_WARN, "ps2kbd: drained 32 bytes without OBF clearing\n");
 }
 
+/*
+ * Change the keyboard's typematic delay/rate. Returns the previous value.
+ *
+ * This is a runtime setting, not a build-time one: a game wants a shorter
+ * delay and a faster rate than an interactive prompt, and must be able to put
+ * the old value back when it exits. Keystrokes already waiting in the output
+ * buffer are discarded, because the command's ACK and a keystroke both arrive
+ * as OBF bytes and reading a key as the ack would desynchronise the sequence.
+ */
+u8 ps2kbd_set_typematic(u8 value)
+{
+    u8 previous = typematic_value;
+    u64 flags;
+
+    if (value & 0x80)
+        return previous;
+
+    flags = irq_save();
+
+    for (unsigned i = 0; i < 64 && (inb(PS2_STATUS) & PS2_STATUS_OBF); i++)
+        (void)inb(PS2_DATA);
+
+    if (ps2_write_port(PS2_DATA, KBD_CMD_SET_TYPEMATIC)) {
+        if (ps2_wait(PS2_STATUS_OBF, true) && inb(PS2_DATA) == 0xFA) {
+            if (ps2_write_port(PS2_DATA, value)) {
+                if (ps2_wait(PS2_STATUS_OBF, true) &&
+                    inb(PS2_DATA) == 0xFA) {
+                    typematic_value = value;
+                    klog(KLOG_INFO,
+                         "ps2kbd: typematic %#02x -> %#02x\n",
+                         (unsigned)previous, (unsigned)value);
+                }
+            }
+        }
+    }
+
+    irq_restore(flags);
+    return previous;
+}
+
+u8 ps2kbd_get_typematic(void)
+{
+    return typematic_value;
+}
+
 /* Initialize the PS/2 keyboard controller, install IRQ1 handler, and register
  * the callback for keystroke delivery. */
 void ps2kbd_init(ps2kbd_callback_t cb)
@@ -422,6 +484,17 @@ void ps2kbd_init(ps2kbd_callback_t cb)
     /* Enable scanning. */
     if (ps2_write_port(PS2_DATA, KBD_CMD_ENABLE_SCAN))
         ps2_expect_ack(KBD_CMD_ENABLE_SCAN, 0xFA);
+
+    /*
+     * Set typematic delay/rate: a held key starts repeating after 250 ms and
+     * then repeats about 13 times a second. The keyboard acknowledges the
+     * command and then the parameter, so both acks are consumed here.
+     */
+    if (ps2_write_port(PS2_DATA, KBD_CMD_SET_TYPEMATIC)) {
+        ps2_expect_ack(KBD_CMD_SET_TYPEMATIC, 0xFA);
+        if (ps2_write_port(PS2_DATA, KBD_TYPEMATIC_VALUE))
+            ps2_expect_ack(KBD_TYPEMATIC_VALUE, 0xFA);
+    }
 
     /* Flush any response from the enable command. */
     {

@@ -20,6 +20,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <gfx.h>
+#include <kbd.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -42,6 +43,10 @@
 #define ARR_MS             35      /* auto repeat rate */
 #define NEXT_COUNT         4
 #define LINES_PER_LEVEL    10
+
+/* Held movement repeats at the keyboard's typematic rate. Tetris wants a
+ * shorter delay and a faster rate than the prompt; see kbd.h. The previous
+ * value is restored when the game exits. */
 
 /* Gravity in milliseconds per cell, indexed by level; the last entry repeats. */
 static const int gravity_ms[] = {
@@ -685,6 +690,8 @@ int main(void)
 
     rng_state ^= (uint32_t)now_ms();
 
+    int saved_repeat = kbd_typematic(KBD_TYPEMATIC_FAST);
+
     old_flags = fcntl(0, F_GETFL, 0);
     if (old_flags >= 0)
         fcntl(0, F_SETFL, old_flags | O_NONBLOCK);
@@ -795,6 +802,9 @@ int main(void)
         struct timespec ts = { 0, FRAME_MS * 1000000L };
         nanosleep(&ts, NULL);
     }
+
+    if (saved_repeat >= 0)
+        kbd_typematic(saved_repeat);
 
     gfx_claim_screen_release();
     gfx_close(&canvas);

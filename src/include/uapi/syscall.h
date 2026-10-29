@@ -109,6 +109,7 @@
 #define SYS_screen_release 205u
 #define SYS_shutdown        206u
 #define SYS_mouse_info      207u
+#define SYS_kbd_typematic   208u
 
 /* Highest number the kernel will accept before returning -ENOSYS without
  * consulting the dispatch table. Bounds-checking this is what keeps a garbage

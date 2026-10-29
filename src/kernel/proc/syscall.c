@@ -42,6 +42,7 @@
 #include <uapi/graphics.h>
 #include <uapi/mouse.h>
 #include <drivers/ps2mouse.h>
+#include <drivers/ps2kbd.h>
 
 #define SYSCALL_LOG(level, ...)                                              \
     do {                                                               \
@@ -259,6 +260,23 @@ static long sc_gfx_info(struct syscall_regs *r)
  * the number of bytes copied (the struct size) on success, so a future larger
  * struct can be negotiated by `size` without breaking old callers.
  */
+/*
+ * kbd_typematic(value) — set, or query with a negative value, the keyboard's
+ * typematic delay/rate byte. Returns the previous value (or the current one
+ * for a query), so a program can restore it when it exits.
+ */
+static long sc_kbd_typematic(struct syscall_regs *r)
+{
+    long value = (long)arg0(r);
+
+    if (value < 0)
+        return ps2kbd_get_typematic();
+    if (value > 0x7f)
+        return -EINVAL;
+
+    return ps2kbd_set_typematic((u8)value);
+}
+
 static long sc_mouse_info(struct syscall_regs *r)
 {
     struct mouse_state state;
@@ -1446,6 +1464,7 @@ void syscall_init(void)
     syscall_table[SYS_mlock] = sc_mlock;
     syscall_table[SYS_shutdown] = sc_shutdown;
     syscall_table[SYS_mouse_info] = sc_mouse_info;
+    syscall_table[SYS_kbd_typematic] = sc_kbd_typematic;
 
     /*
      * STAR carries both selector bases. SYSCALL loads CS from bits 47:32
