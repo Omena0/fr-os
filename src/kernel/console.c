@@ -50,13 +50,20 @@ struct vga_cell {
 /* ------------------------------------------------------- framebuffer text --- */
 
 /*
- * A rendered text cell. The framebuffer backend keeps its own attribute per cell
- * because it owns the pixels; there is no shared buffer with the VGA backend
- * when both are active.
+ * A rendered text cell.
+ *
+ * The framebuffer owns its pixels, so it is not limited to the VGA text
+ * attribute's 8 colours. A cell carries the resolved colour source (a palette
+ * index or direct RGB) and a style mask, and the renderer turns those into
+ * pixels. `attr` is kept as the best-effort VGA attribute so the text-mode
+ * backend and any legacy reader still see something sensible.
  */
 struct fb_cell {
     char ch;
     uint8_t attr;
+    uint16_t flags;
+    int16_t fg_idx;     /* 0..255 palette index, -1 = fg_* is RGB */
+    int16_t bg_idx;
     uint8_t fg_r, fg_g, fg_b;
     uint8_t bg_r, bg_g, bg_b;
 };
@@ -64,22 +71,14 @@ struct fb_cell {
 struct fb_text {
     struct framebuffer_info *info;
 
-    /*
-     * The framebuffer's physical base, as the firmware reported it. Kept as a
-     * physical address and resolved per use for the same reason the VGA
-     * buffer is: it is a low physical address, and the map that reaches it
-     * changes when vmm_switch_to_kernel_pgd() replaces the bootloader's
-     * identity view. VBE framebuffers are usually high (0xFD000000 on
-     * SeaBIOS), so this is not even always inside the 4 GiB either map
-     * covers.
-     */
+    /* The framebuffer's physical base, resolved per use: the mapping that
+     * reaches it changes when the boot page tables are replaced. */
     phys_addr_t phys;
 
     uint32_t pitch;
     uint32_t cols, rows;
     uint64_t scrollback;
 
-    /* Cell buffer and glyph atlas. */
     struct fb_cell *cells;
     const uint8_t (*font)[16];
     uint32_t font_width, font_height;
@@ -94,38 +93,183 @@ static inline uint8_t *fb_pixels(void)
 }
 
 /* Derive rows from the framebuffer height when it is active, rather than
-   hard-coding VGA_ROWS. This prevents a gap when the framebuffer is a
-   higher resolution than VGA (e.g. 1280x720 vs 800x600). */
+ * hard-coding VGA_ROWS. */
 #define FB_TEXT_ROWS() (console_fb_active() ? fb.rows : VGA_ROWS)
-
 
 extern const uint8_t font8x16[256][16];
 
-/* 3-3-2 RGB palette, indexed 0-7 by attribute bits 0-2. */
-static const uint8_t vga_palette_rgb[8][3] = {
-    { 0x00, 0x00, 0x00 },   /* black */
-    { 0xAA, 0x00, 0x00 },   /* red */
-    { 0x00, 0xAA, 0x00 },   /* green */
-    { 0xAA, 0x55, 0x00 },   /* brown */
-    { 0x00, 0x00, 0xAA },   /* blue */
-    { 0xAA, 0x00, 0xAA },   /* magenta */
-    { 0x00, 0xAA, 0xAA },   /* cyan */
-    { 0xAA, 0xAA, 0xAA },   /* light grey */
+/* SGR style bits, shared by the current attribute and every cell. */
+#define TA_BOLD      0x0001
+#define TA_DIM       0x0002
+#define TA_ITALIC    0x0004
+#define TA_UNDERLINE 0x0008
+#define TA_BLINK     0x0010
+#define TA_INVERSE   0x0020
+#define TA_HIDDEN    0x0040
+#define TA_STRIKE    0x0080
+#define TA_OVERLINE  0x0100
+
+/*
+ * The 16 ANSI/VGA colours. Indices 0-7 are the normal set, 8-15 the bright
+ * set; 90-97 selects the latter directly and bold promotes 30-37 into it.
+ */
+static const uint8_t ansi_palette16[16][3] = {
+    { 0x00, 0x00, 0x00 },   /* 0  black */
+    { 0xAA, 0x00, 0x00 },   /* 1  red */
+    { 0x00, 0xAA, 0x00 },   /* 2  green */
+    { 0xAA, 0x55, 0x00 },   /* 3  brown */
+    { 0x00, 0x00, 0xAA },   /* 4  blue */
+    { 0xAA, 0x00, 0xAA },   /* 5  magenta */
+    { 0x00, 0xAA, 0xAA },   /* 6  cyan */
+    { 0xAA, 0xAA, 0xAA },   /* 7  light grey */
+    { 0x55, 0x55, 0x55 },   /* 8  dark grey */
+    { 0xFF, 0x55, 0x55 },   /* 9  bright red */
+    { 0x55, 0xFF, 0x55 },   /* 10 bright green */
+    { 0xFF, 0xFF, 0x55 },   /* 11 yellow */
+    { 0x55, 0x55, 0xFF },   /* 12 bright blue */
+    { 0xFF, 0x55, 0xFF },   /* 13 bright magenta */
+    { 0x55, 0xFF, 0xFF },   /* 14 bright cyan */
+    { 0xFF, 0xFF, 0xFF },   /* 15 white */
 };
 
-static inline uint8_t attr_fg(uint8_t attr)
+/* The attribute a program is drawing with. Palette index -1 means the RGB
+ * fields hold the exact colour (256-colour or truecolour SGR). */
+struct term_attr {
+    int16_t fg_idx, bg_idx;
+    uint8_t fg_r, fg_g, fg_b;
+    uint8_t bg_r, bg_g, bg_b;
+    uint16_t flags;
+};
+
+static struct term_attr cur = {
+    .fg_idx = 7, .bg_idx = 0, .flags = 0,
+};
+
+static uint8_t current_attr = TERM_ATTR_NORMAL;
+
+/* xterm's 256-colour palette. */
+static void ansi256_to_rgb(uint8_t n, uint8_t *r, uint8_t *g, uint8_t *b)
 {
-    return attr & 0x07;
+    if (n < 16) {
+        *r = ansi_palette16[n][0];
+        *g = ansi_palette16[n][1];
+        *b = ansi_palette16[n][2];
+        return;
+    }
+    if (n < 232) {
+        static const uint8_t ramp[6] = { 0, 95, 135, 175, 215, 255 };
+        uint8_t i = (uint8_t)(n - 16);
+        *r = ramp[i / 36];
+        *g = ramp[(i / 6) % 6];
+        *b = ramp[i % 6];
+        return;
+    }
+    *r = *g = *b = (uint8_t)(8 + (n - 232) * 10);
 }
 
-static inline uint8_t attr_bg(uint8_t attr)
+/* Resolve a stored colour source to RGB. */
+static void term_color(int16_t idx, uint8_t r, uint8_t g, uint8_t b,
+                       uint8_t *or_, uint8_t *og, uint8_t *ob)
 {
-    return (attr >> 4) & 0x07;
+    if (idx >= 0 && idx < 256) {
+        ansi256_to_rgb((uint8_t)idx, or_, og, ob);
+    } else {
+        *or_ = r;
+        *og = g;
+        *ob = b;
+    }
 }
 
-static inline bool attr_bold(uint8_t attr)
+/* Compute the VGA attribute that best approximates the current attribute.
+ * VGA has 8 foreground colours plus an intensity bit and 8 background colours;
+ * bright backgrounds and truecolour have no exact representation. */
+static uint8_t term_vga_attr(void)
 {
-    return (attr & 0x08) != 0;
+    uint8_t fr, fg, fb, br, bg, bb;
+    unsigned fi = 7, bi = 0;
+    uint32_t fbest = 0xFFFFFFFFu, bbest = 0xFFFFFFFFu;
+
+    term_color(cur.fg_idx, cur.fg_r, cur.fg_g, cur.fg_b, &fr, &fg, &fb);
+    term_color(cur.bg_idx, cur.bg_r, cur.bg_g, cur.bg_b, &br, &bg, &bb);
+
+    for (unsigned i = 0; i < 16; i++) {
+        int dr = (int)fr - ansi_palette16[i][0];
+        int dg = (int)fg - ansi_palette16[i][1];
+        int db = (int)fb - ansi_palette16[i][2];
+        uint32_t d = (uint32_t)(dr * dr + dg * dg + db * db);
+        if (d < fbest) { fbest = d; fi = i; }
+    }
+    for (unsigned i = 0; i < 8; i++) {
+        int dr = (int)br - ansi_palette16[i][0];
+        int dg = (int)bg - ansi_palette16[i][1];
+        int db = (int)bb - ansi_palette16[i][2];
+        uint32_t d = (uint32_t)(dr * dr + dg * dg + db * db);
+        if (d < bbest) { bbest = d; bi = i; }
+    }
+
+    return (uint8_t)((fi & 0x07) | ((fi >= 8) ? 0x08 : 0) | (bi << 4));
+}
+
+/*
+ * Resolve a colour pair plus style mask into the two RGB values actually
+ * painted. Bold uses the bright half of the palette for indexed colours and
+ * lightens truecolour; dim halves it; inverse swaps the pair and hidden
+ * paints the foreground in the background colour.
+ */
+static void term_resolve(int16_t fg_idx, const uint8_t *fg_rgb,
+                         int16_t bg_idx, const uint8_t *bg_rgb,
+                         uint16_t flags,
+                         uint8_t *fr, uint8_t *fg, uint8_t *fb,
+                         uint8_t *br, uint8_t *bg, uint8_t *bb)
+{
+    term_color(fg_idx, fg_rgb[0], fg_rgb[1], fg_rgb[2], fr, fg, fb);
+    term_color(bg_idx, bg_rgb[0], bg_rgb[1], bg_rgb[2], br, bg, bb);
+
+    if ((flags & TA_BOLD) && fg_idx >= 0 && fg_idx < 8) {
+        *fr = ansi_palette16[fg_idx + 8][0];
+        *fg = ansi_palette16[fg_idx + 8][1];
+        *fb = ansi_palette16[fg_idx + 8][2];
+    } else if (flags & TA_BOLD) {
+        *fr = (uint8_t)(*fr + (255 - *fr) / 3);
+        *fg = (uint8_t)(*fg + (255 - *fg) / 3);
+        *fb = (uint8_t)(*fb + (255 - *fb) / 3);
+    }
+    if (flags & TA_DIM) {
+        *fr = (uint8_t)(*fr / 2);
+        *fg = (uint8_t)(*fg / 2);
+        *fb = (uint8_t)(*fb / 2);
+    }
+    if (flags & TA_INVERSE) {
+        uint8_t t0 = *fr, t1 = *fg, t2 = *fb;
+        *fr = *br; *fg = *bg; *fb = *bb;
+        *br = t0; *bg = t1; *bb = t2;
+    }
+    if (flags & TA_HIDDEN) {
+        *fr = *br; *fg = *bg; *fb = *bb;
+    }
+}
+
+/* Resolve a stored cell. */
+static void fb_cell_colors(const struct fb_cell *cell,
+                           uint8_t *fr, uint8_t *fg, uint8_t *fb,
+                           uint8_t *br, uint8_t *bg, uint8_t *bb)
+{
+    uint8_t fgrgb[3] = { cell->fg_r, cell->fg_g, cell->fg_b };
+    uint8_t bgrgb[3] = { cell->bg_r, cell->bg_g, cell->bg_b };
+
+    term_resolve(cell->fg_idx, fgrgb, cell->bg_idx, bgrgb, cell->flags,
+                 fr, fg, fb, br, bg, bb);
+}
+
+/* Copy the current attribute into a cell. */
+static void fb_cell_set_attr(struct fb_cell *cell)
+{
+    cell->attr = current_attr;
+    cell->flags = cur.flags;
+    cell->fg_idx = cur.fg_idx;
+    cell->bg_idx = cur.bg_idx;
+    cell->fg_r = cur.fg_r; cell->fg_g = cur.fg_g; cell->fg_b = cur.fg_b;
+    cell->bg_r = cur.bg_r; cell->bg_g = cur.bg_g; cell->bg_b = cur.bg_b;
 }
 
 /* ------------------------------------------------------------ state -------- */
@@ -133,7 +277,6 @@ static inline bool attr_bold(uint8_t attr)
 static spinlock_t console_lock;
 static uint32_t cursor_x, cursor_y;
 static uint32_t saved_cursor_x, saved_cursor_y;
-static uint8_t  current_attr = TERM_ATTR_NORMAL;
 static uint64_t scrollback;
 static bool vga_enabled;
 static bool serial_enabled = true;
@@ -328,7 +471,8 @@ long console_framebuffer_write(uint64_t offset, const void *src, size_t len)
  */
 static void fb_render_glyph(uint32_t col, uint32_t row, char c,
                 uint8_t fg_r, uint8_t fg_g, uint8_t fg_b,
-                uint8_t bg_r, uint8_t bg_g, uint8_t bg_b)
+                uint8_t bg_r, uint8_t bg_g, uint8_t bg_b,
+                uint16_t flags)
 {
     uint32_t px = col * fb.font_width;
     uint32_t py = row * fb.font_height;
@@ -348,8 +492,17 @@ static void fb_render_glyph(uint32_t col, uint32_t row, char c,
     for (uint32_t gy = 0; gy < fb.font_height; gy++) {
         uint8_t bits = glyph[gy];
 
+        /* Italic: lean the glyph right, more at the top. */
+        if (flags & TA_ITALIC)
+            bits = (uint8_t)(bits >> ((fb.font_height - 1 - gy) / 6));
+
+        /* Rules span the whole cell, not just the glyph's inked columns. */
+        bool rule = ((flags & TA_UNDERLINE) && gy == fb.font_height - 1) ||
+                    ((flags & TA_STRIKE) && gy == fb.font_height / 2) ||
+                    ((flags & TA_OVERLINE) && gy == 0);
+
         for (uint32_t gx = 0; gx < fb.font_width; gx++) {
-            bool on = (bits & (0x80 >> gx)) != 0;
+            bool on = rule || ((bits & (0x80 >> gx)) != 0);
             uint32_t x = px + gx;
             uint32_t y = py + gy;
             uint8_t r = on ? fg_r : bg_r;
@@ -416,15 +569,22 @@ static void console_fb_init(struct framebuffer_info *info)
         fb.rows = 0;
     }
 
+    current_attr = term_vga_attr();
     for (uint32_t i = 0; i < fb.cols * fb.rows; i++) {
         fb.cells[i].ch = ' ';
-        fb.cells[i].attr = TERM_ATTR_NORMAL;
+        fb_cell_set_attr(&fb.cells[i]);
     }
 
     /* Paint the whole background once so no garbage is visible. */
-    for (uint32_t r = 0; r < fb.rows; r++) {
-        for (uint32_t c = 0; c < fb.cols; c++)
-            fb_render_glyph(c, r, ' ', 0xAA, 0xAA, 0xAA, 0, 0, 0);
+    {
+        uint8_t fr, fg, fb_, br, bg, bb;
+        uint8_t fgrgb[3] = { cur.fg_r, cur.fg_g, cur.fg_b };
+        uint8_t bgrgb[3] = { cur.bg_r, cur.bg_g, cur.bg_b };
+        term_resolve(cur.fg_idx, fgrgb, cur.bg_idx, bgrgb, cur.flags,
+                     &fr, &fg, &fb_, &br, &bg, &bb);
+        for (uint32_t r = 0; r < fb.rows; r++)
+            for (uint32_t c = 0; c < fb.cols; c++)
+                fb_render_glyph(c, r, ' ', fr, fg, fb_, br, bg, bb, 0);
     }
 }
 
@@ -436,22 +596,20 @@ static void console_fb_scroll(void)
     memmove(&fb.cells[0], &fb.cells[fb.cols],
         (fb.rows - 1) * fb.cols * sizeof(struct fb_cell));
     for (uint32_t c = 0; c < fb.cols; c++) {
-        fb.cells[(fb.rows - 1) * fb.cols + c].ch = ' ';
-        fb.cells[(fb.rows - 1) * fb.cols + c].attr = current_attr;
+        struct fb_cell *cell = &fb.cells[(fb.rows - 1) * fb.cols + c];
+        cell->ch = ' ';
+        fb_cell_set_attr(cell);
     }
 
     /* Repaint entire screen since every row shifted up. */
     for (uint32_t r = 0; r < fb.rows; r++) {
         for (uint32_t c = 0; c < fb.cols; c++) {
             struct fb_cell *cell = &fb.cells[r * fb.cols + c];
-            const uint8_t *p = vga_palette_rgb[attr_fg(cell->attr)];
-            uint8_t fg_r = attr_bold(cell->attr) ? 0xFF : p[0];
-            uint8_t fg_g = attr_bold(cell->attr) ? 0xFF : p[1];
-            uint8_t fg_b = attr_bold(cell->attr) ? 0xFF : p[2];
-            const uint8_t *bg = vga_palette_rgb[attr_bg(cell->attr)];
+            uint8_t fr, fg, fb_, br, bg, bb;
 
-            fb_render_glyph(c, r, cell->ch, fg_r, fg_g, fg_b,
-                    bg[0], bg[1], bg[2]);
+            fb_cell_colors(cell, &fr, &fg, &fb_, &br, &bg, &bb);
+            fb_render_glyph(c, r, cell->ch, fr, fg, fb_, br, bg, bb,
+                            cell->flags);
         }
     }
     fb.scrollback++;
@@ -466,11 +624,18 @@ static void console_fb_clear(void)
 
     for (uint32_t i = 0; i < fb.cols * fb.rows; i++) {
         fb.cells[i].ch = ' ';
-        fb.cells[i].attr = current_attr;
+        fb_cell_set_attr(&fb.cells[i]);
     }
-    for (uint32_t r = 0; r < fb.rows; r++)
-        for (uint32_t c = 0; c < fb.cols; c++)
-            fb_render_glyph(c, r, ' ', 0xAA, 0xAA, 0xAA, 0, 0, 0);
+    {
+        uint8_t fr, fg, fb_, br, bg, bb;
+        uint8_t fgrgb[3] = { cur.fg_r, cur.fg_g, cur.fg_b };
+        uint8_t bgrgb[3] = { cur.bg_r, cur.bg_g, cur.bg_b };
+        term_resolve(cur.fg_idx, fgrgb, cur.bg_idx, bgrgb, cur.flags,
+                     &fr, &fg, &fb_, &br, &bg, &bb);
+        for (uint32_t r = 0; r < fb.rows; r++)
+            for (uint32_t c = 0; c < fb.cols; c++)
+                fb_render_glyph(c, r, ' ', fr, fg, fb_, br, bg, bb, 0);
+    }
 }
 
 static void console_fb_move(uint32_t x, uint32_t y)
@@ -484,30 +649,25 @@ static void console_fb_putc(char c, uint8_t attr)
     uint32_t x = cursor_x;
     uint32_t y = cursor_y;
 
+    uint8_t fgrgb[3] = { cur.fg_r, cur.fg_g, cur.fg_b };
+    uint8_t bgrgb[3] = { cur.bg_r, cur.bg_g, cur.bg_b };
+    uint8_t fg_r, fg_g, fg_b, bg_r, bg_g, bg_b;
+
+    term_resolve(cur.fg_idx, fgrgb, cur.bg_idx, bgrgb, cur.flags,
+                 &fg_r, &fg_g, &fg_b, &bg_r, &bg_g, &bg_b);
+
     if (fb.cells && fb.cols) {
         struct fb_cell *cell = &fb.cells[y * fb.cols + x];
 
         cell->ch = c;
-        cell->attr = attr;
-
-        const uint8_t *fg = vga_palette_rgb[attr_fg(attr)];
-        const uint8_t *bg = vga_palette_rgb[attr_bg(attr)];
-        uint8_t fg_r = attr_bold(attr) ? 0xFF : fg[0];
-        uint8_t fg_g = attr_bold(attr) ? 0xFF : fg[1];
-        uint8_t fg_b = attr_bold(attr) ? 0xFF : fg[2];
-
-        fb_render_glyph(x, y, c, fg_r, fg_g, fg_b, bg[0], bg[1], bg[2]);
+        fb_cell_set_attr(cell);
+        fb_render_glyph(x, y, c, fg_r, fg_g, fg_b, bg_r, bg_g, bg_b,
+                        cur.flags);
         return;
     }
 
     /* No cell buffer: draw directly. */
-    const uint8_t *fg = vga_palette_rgb[attr_fg(attr)];
-    const uint8_t *bg = vga_palette_rgb[attr_bg(attr)];
-    uint8_t fg_r = attr_bold(attr) ? 0xFF : fg[0];
-    uint8_t fg_g = attr_bold(attr) ? 0xFF : fg[1];
-    uint8_t fg_b = attr_bold(attr) ? 0xFF : fg[2];
-
-    fb_render_glyph(x, y, c, fg_r, fg_g, fg_b, bg[0], bg[1], bg[2]);
+    fb_render_glyph(x, y, c, fg_r, fg_g, fg_b, bg_r, bg_g, bg_b, cur.flags);
 }
 
 /* ------------------------------------------------------------- cursor ------ */
@@ -543,103 +703,114 @@ static void console_newline(void)
  */
 void console_apply_sgr(const char *params)
 {
-    for (char *p = (char *)params; *p; ) {
-        unsigned long n = 0;
-        kstrtoul(p, &n, 10);
-        uint32_t code = (uint32_t)n;
+    int v[32];
+    int n = 0;
+    const char *p = params;
 
-        /* Skip past this number. */
+    /* Collect the numeric parameters first: 38/48 consume one or four more,
+     * so the loop below needs to look ahead. */
+    while (*p && n < (int)(sizeof(v) / sizeof(v[0]))) {
+        unsigned long x = 0;
+        while (*p == ';')
+            p++;
+        if (*p < '0' || *p > '9') {
+            if (!*p)
+                break;
+            /* A non-numeric parameter is not valid SGR; skip it. */
+            while (*p && *p != ';')
+                p++;
+            continue;
+        }
+        kstrtoul(p, &x, 10);
+        v[n++] = (int)x;
         while (*p && *p != ';')
             p++;
-        if (*p == ';')
-            p++;
+    }
+    if (n == 0)
+        v[n++] = 0;             /* ESC[m == reset */
+
+    for (int i = 0; i < n; i++) {
+        int code = v[i];
 
         switch (code) {
-        case 0:   /* reset: normal attribute */
-            current_attr = TERM_ATTR_NORMAL;
+        case 0:                 /* reset */
+            cur.fg_idx = 7; cur.bg_idx = 0; cur.flags = 0;
+            cur.fg_r = cur.fg_g = cur.fg_b = 0;
+            cur.bg_r = cur.bg_g = cur.bg_b = 0;
             break;
-        case 1:   /* bold: set intensity bit */
-            current_attr |= 0x08;
+        case 1:  cur.flags |= TA_BOLD; break;
+        case 2:  cur.flags |= TA_DIM; break;
+        case 3:  cur.flags |= TA_ITALIC; break;
+        case 4:  cur.flags |= TA_UNDERLINE; break;
+        case 5:
+        case 6:  cur.flags |= TA_BLINK; break;
+        case 7:  cur.flags |= TA_INVERSE; break;
+        case 8:  cur.flags |= TA_HIDDEN; break;
+        case 9:  cur.flags |= TA_STRIKE; break;
+        case 21:
+        case 22: cur.flags &= (uint16_t)~(TA_BOLD | TA_DIM); break;
+        case 23: cur.flags &= (uint16_t)~TA_ITALIC; break;
+        case 24: cur.flags &= (uint16_t)~TA_UNDERLINE; break;
+        case 25: cur.flags &= (uint16_t)~TA_BLINK; break;
+        case 27: cur.flags &= (uint16_t)~TA_INVERSE; break;
+        case 28: cur.flags &= (uint16_t)~TA_HIDDEN; break;
+        case 29: cur.flags &= (uint16_t)~TA_STRIKE; break;
+        case 53: cur.flags |= TA_OVERLINE; break;
+        case 55: cur.flags &= (uint16_t)~TA_OVERLINE; break;
+
+        case 30: case 31: case 32: case 33:
+        case 34: case 35: case 36: case 37:
+            cur.fg_idx = (int16_t)(code - 30);
             break;
-        case 2:   /* faint: the 8-bit attribute has no dim level, so clear
-                   * the intensity bit rather than claim a shade we cannot
-                   * draw. */
-        case 22:  /* normal intensity */
-            current_attr &= (uint8_t)~0x08;
+        case 39:                /* default foreground */
+            cur.fg_idx = 7;
             break;
-        case 7:   /* inverse: swap the 3-bit foreground and background */
-        case 27:  /* inverse off: the same swap puts them back */
-            {
-                uint8_t fg = current_attr & 0x07;
-                uint8_t bg = (uint8_t)((current_attr >> 4) & 0x07);
-                current_attr = (uint8_t)((current_attr & 0x08) |
-                             (fg << 4) | bg);
+        case 90: case 91: case 92: case 93:
+        case 94: case 95: case 96: case 97:
+            cur.fg_idx = (int16_t)(code - 90 + 8);
+            break;
+
+        case 40: case 41: case 42: case 43:
+        case 44: case 45: case 46: case 47:
+            cur.bg_idx = (int16_t)(code - 40);
+            break;
+        case 49:                /* default background */
+            cur.bg_idx = 0;
+            break;
+        case 100: case 101: case 102: case 103:
+        case 104: case 105: case 106: case 107:
+            cur.bg_idx = (int16_t)(code - 100 + 8);
+            break;
+
+        case 38:                /* extended foreground colour */
+        case 48: {              /* extended background colour */
+            bool fg = (code == 38);
+            if (i + 2 < n && v[i + 1] == 5) {
+                if (fg) cur.fg_idx = (int16_t)(v[i + 2] & 0xFF);
+                else    cur.bg_idx = (int16_t)(v[i + 2] & 0xFF);
+                i += 2;
+            } else if (i + 4 < n && v[i + 1] == 2) {
+                uint8_t r = (uint8_t)v[i + 2];
+                uint8_t g = (uint8_t)v[i + 3];
+                uint8_t b = (uint8_t)v[i + 4];
+                if (fg) {
+                    cur.fg_idx = -1;
+                    cur.fg_r = r; cur.fg_g = g; cur.fg_b = b;
+                } else {
+                    cur.bg_idx = -1;
+                    cur.bg_r = r; cur.bg_g = g; cur.bg_b = b;
+                }
+                i += 4;
             }
             break;
-        case 8:   /* hidden: draw the foreground in the background colour */
-            current_attr = (uint8_t)((current_attr & 0xF8) |
-                         ((current_attr >> 4) & 0x07));
-            break;
-        case 3:   /* italic */
-        case 4:   /* underline */
-        case 5:   /* blink */
-        case 9:   /* strikethrough */
-        case 23:  /* not italic */
-        case 24:  /* not underlined */
-        case 25:  /* not blinking */
-            /* No representation in the VGA 8-bit text attribute; accepted
-             * and ignored rather than printed as part of the sequence. */
-            break;
-        case 30:  /* black foreground, index 0 in bits 0-3 */
-        case 31:  /* red foreground, index 1 */
-        case 32:  /* green foreground, index 2 */
-        case 33:  /* yellow foreground, index 3 */
-        case 34:  /* blue foreground, index 4 */
-        case 35:  /* magenta foreground, index 5 */
-        case 36:  /* cyan foreground, index 6 */
-        case 37:  /* white foreground, index 7 */
-            current_attr = (current_attr & 0xF0) | ((uint8_t)code - 30);
-            break;
-        case 39:  /* default foreground = white */
-            current_attr = (current_attr & 0xF0) | 7;
-            break;
-        case 40:  /* black background, index 0 in bits 4-6 */
-        case 41:  /* red background, index 1 */
-        case 42:  /* green background, index 2 */
-        case 43:  /* yellow background, index 3 */
-        case 44:  /* blue background, index 4 */
-        case 45:  /* magenta background, index 5 */
-        case 46:  /* cyan background, index 6 */
-        case 47:  /* white background, index 7 */
-            current_attr = ((uint8_t)(code - 40) << 4) | (current_attr & 0x07);
-            break;
-        case 49:  /* default background = black */
-            current_attr = current_attr & 0x07;
-            break;
-        case 90:  /* bright black (dark gray) foreground */
-        case 91:  /* bright red foreground */
-        case 92:  /* bright green foreground */
-        case 93:  /* bright yellow foreground */
-        case 94:  /* bright blue foreground */
-        case 95:  /* bright magenta foreground */
-        case 96:  /* bright cyan foreground */
-        case 97:  /* bright white foreground */
-            current_attr = 0x08 | ((current_attr & 0xF0) | ((uint8_t)code - 90));
-            break;
-        case 100: /* bright black background */
-        case 101: /* bright red background */
-        case 102: /* bright green background */
-        case 103: /* bright yellow background */
-        case 104: /* bright blue background */
-        case 105: /* bright magenta background */
-        case 106: /* bright cyan background */
-        case 107: /* bright white background */
-            current_attr = ((uint8_t)(code - 100) << 4) | (current_attr & 0x07);
-            break;
+        }
         default:
             break;
         }
     }
+
+    /* Keep the VGA text-mode attribute in step with the rich one. */
+    current_attr = term_vga_attr();
 }
 
 /*
@@ -973,14 +1144,29 @@ void kvprintf_to_console(const char *fmt, __builtin_va_list ap)
     console_write(stack_buf);
 }
 
+/* Derive the rich attribute from a legacy VGA attribute. */
+static void term_attr_from_vga(uint8_t attr)
+{
+    unsigned fg = attr & 0x07;
+    unsigned bg = (attr >> 4) & 0x07;
+
+    cur.fg_idx = (int16_t)((attr & 0x08) ? fg + 8 : fg);
+    cur.bg_idx = (int16_t)bg;
+    cur.flags = 0;
+    cur.fg_r = cur.fg_g = cur.fg_b = 0;
+    cur.bg_r = cur.bg_g = cur.bg_b = 0;
+}
+
 void console_set_attr(uint8_t attr)
 {
     current_attr = attr;
+    term_attr_from_vga(attr);
 }
 
 void console_reset_attr(void)
 {
     current_attr = TERM_ATTR_NORMAL;
+    term_attr_from_vga(TERM_ATTR_NORMAL);
 }
 
 uint8_t console_get_attr(void)
