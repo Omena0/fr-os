@@ -1,33 +1,47 @@
 /*
- * snake.c — a small terminal Snake.
+ * snake.c — terminal Snake.
  *
- * Usage: snake [width] [height] [apples]
- *   width, height   playfield cells (default 20 x 15)
- *   apples          apples on the board at once (default 3)
+ *   snake [-w width] [-H height] [-a apples]
+ *   snake [width [height [apples]]]        (positional fallback)
  *
- * The board is clamped to the terminal reported by TIOCGWINSZ, so the border
- * and score line always fit. Input is polled non-blocking while the game
- * animates: the tty delivers serial keys and PS/2 keys into the same ring, and
- * arrow keys arrive as the usual ESC [ A/B/C/D sequences. WASD works too.
+ * Defaults: 20 x 15 board, 3 apples on the board. The board is clamped to
+ * TIOCGWINSZ. WASD and arrow keys steer; q quits.
  *
- * Win condition: fill the whole board with snake. Apples are just the food;
- * eating one grows the snake by a cell and a new one is placed in a free cell
- * until none are left.
+ * Win condition: fill the whole board with snake. Apples are food: eating one
+ * grows the snake and a replacement is placed in a free cell until none are
+ * left.
+ *
+ * Input is polled non-blocking and queued: a burst of turns between two ticks
+ * is not lost, and each tick consumes one turn, so quick direction changes
+ * behave in the order they were typed. Bytes are buffered too, so an escape
+ * sequence split across two reads still parses.
  */
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <getopt.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/param.h>
 #include <time.h>
 #include <unistd.h>
 
 enum { DIR_UP, DIR_DOWN, DIR_LEFT, DIR_RIGHT };
+enum { KEY_QUEUE = 32, BYTE_QUEUE = 64 };
 
 struct point {
     int x, y;
+};
+
+struct keys {
+    unsigned char bytes[BYTE_QUEUE];   /* unparsed input, partial sequences */
+    int nbytes;
+    int dirs[KEY_QUEUE];               /* parsed directions, FIFO */
+    int head, tail;
+    int quit;
 };
 
 static int board_w = 20;
@@ -36,6 +50,122 @@ static int apple_count = 3;
 
 static const int dx[4] = { 0, 0, -1, 1 };
 static const int dy[4] = { -1, 1, 0, 0 };
+
+static void usage(const char *argv0)
+{
+    printf("usage: %s [-w width] [-H height] [-a apples]\n", argv0);
+    printf("       %s [width [height [apples]]]\n", argv0);
+    printf("  defaults: 20x15 board, 3 apples; apples are placed together\n");
+    printf("  controls: WASD or arrows, q quits; win by filling the board\n");
+}
+
+/* strtol with full validation, so bad input is a usage error rather than a
+ * silently clamped zero. */
+static int parse_int(const char *s, int min, int max, int *out)
+{
+    char *end;
+    long v;
+
+    errno = 0;
+    v = strtol(s, &end, 10);
+    if (errno || end == s || *end != '\0' || v < min || v > max)
+        return 0;
+    *out = (int)v;
+    return 1;
+}
+
+static void keys_push_dir(struct keys *k, int dir)
+{
+    if (k->tail - k->head >= KEY_QUEUE)
+        return;                         /* queue full: drop the newest */
+    k->dirs[k->tail % KEY_QUEUE] = dir;
+    k->tail++;
+}
+
+static int keys_pop_dir(struct keys *k)
+{
+    if (k->head == k->tail)
+        return -1;
+    int dir = k->dirs[k->head % KEY_QUEUE];
+
+    k->head++;
+    return dir;
+}
+
+static int char_dir(int c)
+{
+    switch (tolower((unsigned char)c)) {
+    case 'w': return DIR_UP;
+    case 's': return DIR_DOWN;
+    case 'a': return DIR_LEFT;
+    case 'd': return DIR_RIGHT;
+    default:  return -1;
+    }
+}
+
+/* Arrow keys send ESC [ A/B/C/D, where the letters are not the WASD ones. */
+static int arrow_dir(int c)
+{
+    switch (c) {
+    case 'A': return DIR_UP;
+    case 'B': return DIR_DOWN;
+    case 'C': return DIR_RIGHT;
+    case 'D': return DIR_LEFT;
+    default:  return -1;
+    }
+}
+
+/* Read everything available, append it to the byte buffer, and parse every
+ * complete key. Leftover bytes wait for the next call. */
+static void keys_fill(struct keys *k)
+{
+    char buf[64];
+    ssize_t n;
+
+    while ((n = read(0, buf, sizeof(buf))) > 0) {
+        for (ssize_t i = 0; i < n && k->nbytes < BYTE_QUEUE; i++)
+            k->bytes[k->nbytes++] = (unsigned char)buf[i];
+    }
+
+    int i = 0;
+
+    while (i < k->nbytes) {
+        unsigned char c = k->bytes[i];
+
+        if (c == 0x1b) {
+            if (k->nbytes - i < 3)
+                break;                  /* partial escape sequence */
+            if (k->bytes[i + 1] == '[' || k->bytes[i + 1] == 'O') {
+                int d = arrow_dir(k->bytes[i + 2]);
+
+                if (d >= 0)
+                    keys_push_dir(k, d);
+                else if (k->bytes[i + 2] == 'q' ||
+                         k->bytes[i + 2] == 'Q')
+                    k->quit = 1;
+                i += 3;
+                continue;
+            }
+            i++;
+            continue;
+        }
+
+        if (tolower(c) == 'q') {
+            k->quit = 1;
+        } else {
+            int d = char_dir(c);
+
+            if (d >= 0)
+                keys_push_dir(k, d);
+        }
+        i++;
+    }
+
+    if (i > 0) {
+        memmove(k->bytes, k->bytes + i, (size_t)(k->nbytes - i));
+        k->nbytes -= i;
+    }
+}
 
 static void render(const struct point *body, int len,
                    const struct point *apples, int n_apples,
@@ -58,18 +188,16 @@ static void render(const struct point *body, int len,
                 ch = '@';
                 colour = "\033[1;32m";
             } else {
-                bool is_apple = false;
+                bool drawn = false;
 
                 for (int i = 0; i < n_apples; i++)
                     if (apples[i].x == x && apples[i].y == y) {
                         ch = 'o';
                         colour = "\033[1;31m";
-                        is_apple = true;
+                        drawn = true;
                         break;
                     }
-                if (is_apple) {
-                    /* already chosen */
-                } else {
+                if (!drawn) {
                     for (int i = 1; i < len; i++)
                         if (body[i].x == x && body[i].y == y) {
                             ch = '#';
@@ -91,22 +219,23 @@ static void render(const struct point *body, int len,
         putchar('-');
     fputs("+\033[0m\n", stdout);
 
-    printf("\033[33m board %dx%d  on board %d  eaten %d  length %d/%d  "
-           "tick %dms  [WASD/arrows, q]\033[0m\033[K\n",
-           board_w, board_h, n_apples, eaten, len, board_w * board_h,
-           tick_ms);
+    char score[160];
+
+    snprintf(score, sizeof(score),
+             "\033[33m board %dx%d  on board %d  eaten %d  length %d/%d  "
+             "tick %dms  [WASD/arrows, q]\033[0m\033[K\n",
+             board_w, board_h, n_apples, eaten, len, board_w * board_h,
+             tick_ms);
+    fputs(score, stdout);
     fflush(stdout);
 }
 
-/*
- * Place one apple in a free cell. A cell is free if neither the snake nor an
- * existing apple occupies it. Returns 0 when the board has no free cell.
- */
+/* Place one apple in a free cell, excluding the snake and the other apples. */
 static int spawn_apple(struct point *out, const struct point *body, int len,
                        const struct point *apples, int n_apples)
 {
     int area = board_w * board_h;
-    unsigned char *used = malloc((size_t)area);
+    unsigned char *used = calloc((size_t)area, 1);
     struct point *free_cells = malloc(sizeof(*free_cells) * (size_t)area);
     int nfree = 0;
 
@@ -115,7 +244,6 @@ static int spawn_apple(struct point *out, const struct point *body, int len,
         free(free_cells);
         return 0;
     }
-    memset(used, 0, (size_t)area);
     for (int i = 0; i < len; i++)
         used[body[i].y * board_w + body[i].x] = 1;
     for (int i = 0; i < n_apples; i++)
@@ -137,64 +265,6 @@ static int spawn_apple(struct point *out, const struct point *body, int len,
     return nfree > 0;
 }
 
-/*
- * Consume pending input and return the last direction seen, or -1. Bytes are
- * buffered across reads so an arrow sequence split between two reads is not
- * mistaken for a lone ESC.
- */
-static int read_direction(int *quit)
-{
-    static unsigned char inbuf[32];
-    static int inlen;
-    char buf[64];
-    ssize_t n;
-    int dir = -1;
-
-    while ((n = read(0, buf, sizeof(buf))) > 0) {
-        for (ssize_t i = 0; i < n && inlen < (int)sizeof(inbuf); i++)
-            inbuf[inlen++] = (unsigned char)buf[i];
-    }
-
-    int pos = 0;
-
-    while (pos < inlen) {
-        unsigned char c = inbuf[pos];
-
-        if (c == 0x1b) {
-            if (inlen - pos < 3)
-                break;              /* wait for the rest of the sequence */
-            if (inbuf[pos + 1] == '[' || inbuf[pos + 1] == 'O') {
-                switch (inbuf[pos + 2]) {
-                case 'A': dir = DIR_UP; break;
-                case 'B': dir = DIR_DOWN; break;
-                case 'C': dir = DIR_RIGHT; break;
-                case 'D': dir = DIR_LEFT; break;
-                default: break;
-                }
-                pos += 3;
-                continue;
-            }
-            pos++;
-            continue;
-        }
-        switch (c) {
-        case 'w': case 'W': dir = DIR_UP; break;
-        case 's': case 'S': dir = DIR_DOWN; break;
-        case 'a': case 'A': dir = DIR_LEFT; break;
-        case 'd': case 'D': dir = DIR_RIGHT; break;
-        case 'q': case 'Q': *quit = 1; break;
-        default: break;
-        }
-        pos++;
-    }
-
-    if (pos > 0) {
-        memmove(inbuf, inbuf + pos, (size_t)(inlen - pos));
-        inlen -= pos;
-    }
-    return dir;
-}
-
 static int opposite(int a, int b)
 {
     return (a == DIR_UP && b == DIR_DOWN) ||
@@ -205,41 +275,94 @@ static int opposite(int a, int b)
 
 int main(int argc, char **argv)
 {
+    static const struct option longopts[] = {
+        { "width",  required_argument, NULL, 'w' },
+        { "height", required_argument, NULL, 'H' },
+        { "apples", required_argument, NULL, 'a' },
+        { "help",   no_argument,       NULL, 'h' },
+        { NULL, 0, NULL, 0 },
+    };
     int req_w = 20, req_h = 15, req_apples = 3;
+    int have_w = 0, have_h = 0, have_a = 0;
     int max_w = 78, max_h = 21;
     struct winsize ws;
+    int opt;
 
-    if (argc > 1)
-        req_w = atoi(argv[1]);
-    if (argc > 2)
-        req_h = atoi(argv[2]);
-    if (argc > 3)
-        req_apples = atoi(argv[3]);
+    while ((opt = getopt_long(argc, argv, "w:H:a:h", longopts, NULL)) != -1) {
+        switch (opt) {
+        case 'w':
+            if (!parse_int(optarg, 5, 1000, &req_w)) {
+                usage(argv[0]);
+                return 2;
+            }
+            have_w = 1;
+            break;
+        case 'H':
+            if (!parse_int(optarg, 5, 1000, &req_h)) {
+                usage(argv[0]);
+                return 2;
+            }
+            have_h = 1;
+            break;
+        case 'a':
+            if (!parse_int(optarg, 1, 1000, &req_apples)) {
+                usage(argv[0]);
+                return 2;
+            }
+            have_a = 1;
+            break;
+        case 'h':
+            usage(argv[0]);
+            return 0;
+        default:
+            usage(argv[0]);
+            return 2;
+        }
+    }
+
+    /* Positional fallback, so `run snake 10 8 5` keeps working. */
+    int pos = optind;
+
+    if (!have_w && pos < argc) {
+        if (!parse_int(argv[pos++], 5, 1000, &req_w)) {
+            usage(argv[0]);
+            return 2;
+        }
+        have_w = 1;
+    }
+    if (!have_h && pos < argc) {
+        if (!parse_int(argv[pos++], 5, 1000, &req_h)) {
+            usage(argv[0]);
+            return 2;
+        }
+        have_h = 1;
+    }
+    if (!have_a && pos < argc) {
+        if (!parse_int(argv[pos++], 1, 1000, &req_apples)) {
+            usage(argv[0]);
+            return 2;
+        }
+        have_a = 1;
+    }
+    if (pos < argc) {
+        usage(argv[0]);
+        return 2;
+    }
 
     if (ioctl(0, TIOCGWINSZ, &ws) == 0 && ws.ws_col && ws.ws_row) {
         max_w = (int)ws.ws_col - 2;
         max_h = (int)ws.ws_row - 4;
     }
-    if (req_w < 5)
-        req_w = 5;
-    if (req_h < 5)
-        req_h = 5;
-    if (req_w > max_w)
-        req_w = max_w;
-    if (req_h > max_h)
-        req_h = max_h;
-    board_w = req_w;
-    board_h = req_h;
+
+    board_w = MAX(5, MIN(req_w, max_w));
+    board_h = MAX(5, MIN(req_h, max_h));
 
     int area = board_w * board_h;
-    if (req_apples < 1)
-        req_apples = 1;
-    if (req_apples > area - 3)
-        req_apples = area - 3;
-    apple_count = req_apples;
 
-    struct point *body = malloc(sizeof(*body) * (size_t)area);
-    struct point *apples = malloc(sizeof(*apples) * (size_t)apple_count);
+    apple_count = MAX(1, MIN(req_apples, area - 3));
+
+    struct point *body = calloc((size_t)area, sizeof(*body));
+    struct point *apples = calloc((size_t)apple_count, sizeof(*apples));
     if (!body || !apples) {
         free(body);
         free(apples);
@@ -248,9 +371,11 @@ int main(int argc, char **argv)
     }
 
     srand((unsigned)time(NULL) ^ (unsigned)(unsigned long)argv);
+
     int len = 3;
     int cx = board_w / 2;
     int cy = board_h / 2;
+
     body[0].x = cx;     body[0].y = cy;
     body[1].x = cx - 1; body[1].y = cy;
     body[2].x = cx - 2; body[2].y = cy;
@@ -263,25 +388,25 @@ int main(int argc, char **argv)
         n_apples++;
     }
 
-    /*
-     * Animate while polling: a blocking read would freeze the snake. The old
-     * flags are restored before returning, because fd 0 is shared with the
-     * parent REPL and O_NONBLOCK would otherwise make the prompt spin on
-     * empty reads.
-     */
+    /* Animate while polling. fd 0 is shared with the REPL, so restore its
+     * flags before returning or the prompt would spin on empty reads. */
     int old_flags = fcntl(0, F_GETFL, 0);
     if (old_flags >= 0)
         fcntl(0, F_SETFL, old_flags | O_NONBLOCK);
 
     fputs("\033[2J\033[?25l", stdout);
 
+    struct keys keys = { 0 };
     int dir = DIR_RIGHT, next_dir = DIR_RIGHT;
-    int won = 0, lost = 0, quit = 0;
+    int won = 0, lost = 0;
 
     for (;;) {
-        int d = read_direction(&quit);
-        if (quit)
+        keys_fill(&keys);
+        if (keys.quit)
             break;
+
+        int d = keys_pop_dir(&keys);
+
         if (d >= 0 && !opposite(d, dir))
             next_dir = d;
         dir = next_dir;
@@ -302,7 +427,6 @@ int main(int argc, char **argv)
             }
         int grow = apple_at >= 0;
 
-        /* The tail moves out of the way unless the snake is growing. */
         int limit = grow ? len : len - 1;
         for (int i = 0; i < limit; i++)
             if (body[i].x == nx && body[i].y == ny) {
@@ -323,7 +447,6 @@ int main(int argc, char **argv)
             eaten++;
             apples[apple_at] = apples[--n_apples];
 
-            /* The whole board filled with snake is the win. */
             if (len >= area) {
                 won = 1;
                 break;
@@ -333,9 +456,8 @@ int main(int argc, char **argv)
                 n_apples++;
         }
 
-        int tick_ms = 160 - eaten;
-        if (tick_ms < 60)
-            tick_ms = 60;
+        int tick_ms = MAX(60, 140 - eaten * 2);
+
         render(body, len, apples, n_apples, eaten, tick_ms);
 
         struct timespec ts = { 0, tick_ms * 1000000L };
@@ -353,7 +475,6 @@ int main(int argc, char **argv)
     else
         printf("\n\033[0mbye (length %d/%d)", len, board_w * board_h);
 
-    /* Leave the terminal and stdin usable for the REPL. */
     if (old_flags >= 0)
         fcntl(0, F_SETFL, old_flags);
     fputs("\033[0m\033[?25h\n", stdout);
