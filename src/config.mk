@@ -212,6 +212,7 @@ USER_CFLAGS := \
     -std=gnu11 -ffreestanding -nostdlib -fno-builtin -fno-stack-protector \
     -fno-pic -fno-pie -fno-asynchronous-unwind-tables -fno-unwind-tables \
     -fno-strict-aliasing -fno-common -m64 -mno-red-zone -mcmodel=small \
+    -ffunction-sections -fdata-sections \
     -O2 -g3 -Wall -Wextra -Wno-unused-parameter \
     -mbmi -mbmi2 -mpopcnt \
     -I src/include -I src/libc/include \
@@ -219,6 +220,10 @@ USER_CFLAGS := \
 
 # -static keeps the user image free of an interpreter: the kernel's ELF loader
 # maps PT_LOAD segments and jumps to e_entry. There is no dynamic linker yet.
-USER_LDFLAGS := -no-pie -nostdlib -static -z noexecstack -Wl,--build-id=none
+# --gc-sections drops the parts of libc.a a program never calls; libc is linked
+# as a few large objects, so without it every image carries every string and
+# stdio function in the tree.
+USER_LDFLAGS := -no-pie -nostdlib -static -z noexecstack -Wl,--build-id=none \
+    -Wl,--gc-sections
 
 QEMU := qemu-system-x86_64
