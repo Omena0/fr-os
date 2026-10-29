@@ -20,7 +20,12 @@
 #include <string.h>
 
 #define COL_W 2            /* each cell is two characters wide */
-#define COL_COUNT 40       /* 40 cells * 2 chars = 80 columns */
+/* Each cell is rendered as two digits plus a separating space (3 columns),
+ * after a 9-column row label, so COL_COUNT * 3 + 9 has to stay within the
+ * 80-column console the kernel actually drives. 40 cells came to 129 columns,
+ * which wrapped on every terminal the OS is normally run in and made the
+ * absolute-cursor tests land on the wrong row. */
+#define COL_COUNT 23       /* 23 * 3 + 9 = 78 columns */
 #define ROW_HEADER_W 8     /* width of the row label column */
 
 static void row_label(const char *tag)
