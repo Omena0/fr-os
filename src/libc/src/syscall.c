@@ -81,7 +81,7 @@ int fcntl(int fd, int cmd, ...)
 {
     long arg = 0;
 
-    if (cmd != F_GETFL) {
+    if (cmd != F_GETFL && cmd != F_GETFD) {
         va_list ap;
 
         va_start(ap, cmd);
@@ -211,23 +211,21 @@ int sys_dup(int oldfd)
     return (int)check0(__syscall1(SYS_dup, oldfd));
 }
 
+int sys_dup3(int oldfd, int newfd, int flags)
+{
+    return (int)check0(__syscall3(SYS_dup3, oldfd, newfd, flags));
+}
+
 int sys_dup2(int oldfd, int newfd)
 {
-    /*
-     * There is no SYS_dup2 number in the ABI: the file domain stops at
-     * SYS_fcntl, and the kernel's SYS_dup handler has no newfd operand to
-     * read. dup2 is therefore layered on dup and close here rather than
-     * asking the kernel for a syscall that would only ever answer -ENOSYS.
-     */
-    int ret = (int)check0(__syscall1(SYS_dup, oldfd));
-
-    if (ret < 0)
-        return ret;
-    if (ret == newfd)
-        return ret;
-    if (sys_close(newfd) < 0 && __errno != EBADF)
-        return -1;
-    return ret;
+    /* dup2 must return newfd exactly, which dup() cannot do. When the two
+     * numbers are equal POSIX only asks that oldfd be valid. */
+    if (oldfd == newfd) {
+        if (check0(__syscall3(SYS_fcntl, oldfd, F_GETFD, 0)) < 0)
+            return -1;
+        return newfd;
+    }
+    return (int)check0(__syscall3(SYS_dup3, oldfd, newfd, 0));
 }
 
 int sys_execve(const char *path, char *const argv[], char *const envp[])

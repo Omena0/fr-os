@@ -351,6 +351,10 @@ struct task {
     /* --- files ------------------------------------------------------------ */
     struct file **fds;
     u32 fd_count;
+    /* Per-descriptor status flags (FD_CLOEXEC). Kept beside the fd table, not
+     * on struct file, because status flags belong to the descriptor: two
+     * descriptors can share a file and only one can be close-on-exec. */
+    u8 fd_flags[TASK_MAX_FDS];
     struct cred cred;
 
     /* --- process relationships ------------------------------------------- */

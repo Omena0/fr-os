@@ -836,6 +836,7 @@ long sys_fork(const struct fork_regs *fr)
      * copy is the correct behaviour for fork. */
     for (u32 i = 0; i < me->fd_count; i++) {
         child->fds[i] = me->fds[i];
+        child->fd_flags[i] = me->fd_flags[i];
         file_get(child->fds[i]);
     }
 
@@ -945,6 +946,7 @@ long sys_clone(u64 flags, u64 child_stack, u64 parent_tid, u64 child_tid, u64 tl
     if (flags & CLONE_FILES) {
         for (u32 i = 0; i < me->fd_count; i++) {
             child->fds[i] = me->fds[i];
+            child->fd_flags[i] = me->fd_flags[i];
             if (child->fds[i])
                 file_get(child->fds[i]);
         }
@@ -952,6 +954,7 @@ long sys_clone(u64 flags, u64 child_stack, u64 parent_tid, u64 child_tid, u64 tl
         for (u32 i = 0; i < me->fd_count; i++) {
             if (me->fds[i]) {
                 child->fds[i] = me->fds[i];
+                child->fd_flags[i] = me->fd_flags[i];
                 file_get(child->fds[i]);
             }
         }
@@ -1904,6 +1907,7 @@ static long execve_common(struct task *t, u64 path, u64 argv, u64 envp)
      * resolving its pointers in the new address space. See exec_enter_image()
      * for the measurement that pinned it.
      */
+    fd_close_on_exec(t);
     exec_enter_image(t, old_mm);
 }
 

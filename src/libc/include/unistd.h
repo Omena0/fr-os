@@ -58,6 +58,7 @@ extern gid_t  getegid(void);
 
 extern int    dup(int oldfd);
 extern int    dup2(int oldfd, int newfd);
+extern int    dup3(int oldfd, int newfd, int flags);
 extern int    pipe(int pipefd[2]);
 
 extern pid_t  fork(void);

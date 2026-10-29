@@ -52,6 +52,7 @@ int fd_install(struct task *t, struct file *f);
 struct file *fd_lookup(struct task *t, int fd);
 int fd_close(struct task *t, int fd);
 void fd_table_close_all(struct task *t);
+void fd_close_on_exec(struct task *t);
 
 /* --------------------------------------------------------------- fds -------- */
 

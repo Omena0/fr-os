@@ -575,7 +575,9 @@ static long sc_fstat(struct syscall_regs *r)
 
 static long sc_fcntl(struct syscall_regs *r)
 {
-    struct file *f = fd_lookup(caller(), (int)(s32)arg0(r));
+    struct task *t = caller();
+    int fd = (int)(s32)arg0(r);
+    struct file *f = fd_lookup(t, fd);
     int cmd = (int)(s32)arg1(r);
     long arg = (long)(s32)arg2(r);
 
@@ -583,6 +585,25 @@ static long sc_fcntl(struct syscall_regs *r)
         return -EBADF;
 
     switch (cmd) {
+    case F_DUPFD:
+    case F_DUPFD_CLOEXEC: {
+        if (arg < 0)
+            return -EINVAL;
+        for (u32 i = (u32)arg; i < t->fd_count; i++) {
+            if (t->fds[i])
+                continue;
+            file_get(f);
+            t->fds[i] = f;
+            t->fd_flags[i] = (cmd == F_DUPFD_CLOEXEC) ? FD_CLOEXEC : 0;
+            return (long)i;
+        }
+        return -EMFILE;
+    }
+    case F_GETFD:
+        return t->fd_flags[fd] & FD_CLOEXEC;
+    case F_SETFD:
+        t->fd_flags[fd] = (u8)(arg & FD_CLOEXEC);
+        return 0;
     case F_GETFL:
         return (long)f->f_flags;
     case F_SETFL:
@@ -593,6 +614,32 @@ static long sc_fcntl(struct syscall_regs *r)
     default:
         return -EINVAL;
     }
+}
+
+static long sc_dup3(struct syscall_regs *r)
+{
+    struct task *t = caller();
+    int oldfd = (int)(s32)arg0(r);
+    int newfd = (int)(s32)arg1(r);
+    u64 flags = arg2(r);
+    struct file *f = fd_lookup(t, oldfd);
+
+    if (!f)
+        return -EBADF;
+    if (oldfd == newfd)
+        return -EINVAL;
+    if ((u32)newfd >= t->fd_count)
+        return -EBADF;
+    if (flags & ~(u64)O_CLOEXEC)
+        return -EINVAL;
+
+    if (t->fds[newfd])
+        fd_close(t, newfd);
+
+    file_get(f);
+    t->fds[newfd] = f;
+    t->fd_flags[newfd] = (flags & O_CLOEXEC) ? FD_CLOEXEC : 0;
+    return newfd;
 }
 
 static long sc_ioctl(struct syscall_regs *r)
@@ -1460,6 +1507,7 @@ void syscall_init(void)
     syscall_table[SYS_fcntl] = sc_fcntl;
     syscall_table[SYS_getdents] = sc_getdents;
     syscall_table[SYS_dup] = sc_dup;
+    syscall_table[SYS_dup3] = sc_dup3;
     syscall_table[SYS_mmap] = sc_mmap;
     syscall_table[SYS_munmap] = sc_munmap;
     syscall_table[SYS_mprotect] = sc_mprotect;

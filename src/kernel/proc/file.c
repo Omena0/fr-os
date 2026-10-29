@@ -175,6 +175,7 @@ int fd_install(struct task *t, struct file *f)
         if (t->fds[i])
             continue;
         t->fds[i] = f;
+        t->fd_flags[i] = 0;
         return (int)i;
     }
     return -EMFILE;
@@ -197,8 +198,22 @@ int fd_close(struct task *t, int fd)
     struct file *f = t->fds[fd];
 
     t->fds[fd] = NULL;
+    t->fd_flags[fd] = 0;
     file_put(f);
     return 0;
+}
+
+void fd_close_on_exec(struct task *t)
+{
+    if (!t->fds)
+        return;
+    for (u32 i = 0; i < t->fd_count; i++) {
+        if (!t->fds[i] || !(t->fd_flags[i] & FD_CLOEXEC))
+            continue;
+        file_put(t->fds[i]);
+        t->fds[i] = NULL;
+        t->fd_flags[i] = 0;
+    }
 }
 
 void fd_table_close_all(struct task *t)
@@ -210,5 +225,6 @@ void fd_table_close_all(struct task *t)
             continue;
         file_put(t->fds[i]);
         t->fds[i] = NULL;
+        t->fd_flags[i] = 0;
     }
 }

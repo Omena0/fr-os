@@ -241,6 +241,74 @@ static int test_dup_basic(void) {
     return TEST_PASS;
 }
 
+static int test_dup3_same_fd_einval(void) {
+    long ret = syscall3(SYS_dup3, 1, 1, 0);
+    TEST_ASSERT_EQ(ret, -EINVAL, "dup3 with oldfd == newfd should return EINVAL");
+    return TEST_PASS;
+}
+
+static int test_dup3_bad_flags(void) {
+    long ret = syscall3(SYS_dup3, 1, 5, 0x1234);
+    TEST_ASSERT_EQ(ret, -EINVAL, "dup3 with unknown flags should return EINVAL");
+    return TEST_PASS;
+}
+
+static int test_dup3_invalid_old(void) {
+    long ret = syscall3(SYS_dup3, 999, 5, 0);
+    TEST_ASSERT_EQ(ret, -EBADF, "dup3 from invalid fd should return EBADF");
+    return TEST_PASS;
+}
+
+static int test_dup3_cloexec_slot(void) {
+    long ret = syscall3(SYS_dup3, 1, 20, O_CLOEXEC);
+    TEST_ASSERT_EQ(ret, 20, "dup3 should return the requested slot");
+    if (ret == 20) {
+        long flags = syscall2(SYS_fcntl, 20, F_GETFD);
+        TEST_ASSERT_EQ(flags, FD_CLOEXEC, "dup3 with O_CLOEXEC should set FD_CLOEXEC");
+        syscall1(SYS_close, 20);
+    }
+    return TEST_PASS;
+}
+
+static int test_fcntl_getfd_setfd(void) {
+    long before = syscall2(SYS_fcntl, 1, F_GETFD);
+    TEST_ASSERT_EQ(before, 0, "stdout should not start close-on-exec");
+    TEST_ASSERT_EQ(syscall3(SYS_fcntl, 1, F_SETFD, FD_CLOEXEC), 0, "F_SETFD should succeed");
+    long after = syscall2(SYS_fcntl, 1, F_GETFD);
+    TEST_ASSERT_EQ(after, FD_CLOEXEC, "F_GETFD should report FD_CLOEXEC");
+    TEST_ASSERT_EQ(syscall3(SYS_fcntl, 1, F_SETFD, 0), 0, "F_SETFD should clear the flag");
+    return TEST_PASS;
+}
+
+static int test_fcntl_dupfd(void) {
+    long ret = syscall3(SYS_fcntl, 1, F_DUPFD, 30);
+    TEST_ASSERT(ret >= 30, "F_DUPFD should return an fd at or above the minimum");
+    if (ret >= 0)
+        syscall1(SYS_close, ret);
+    return TEST_PASS;
+}
+
+static int test_fcntl_invalid_fd(void) {
+    long ret = syscall2(SYS_fcntl, 999, F_GETFD);
+    TEST_ASSERT_EQ(ret, -EBADF, "fcntl on invalid fd should return EBADF");
+    return TEST_PASS;
+}
+
+static int test_fcntl_unknown_cmd(void) {
+    long ret = syscall3(SYS_fcntl, 1, 999, 0);
+    TEST_ASSERT_EQ(ret, -EINVAL, "fcntl with unknown command should return EINVAL");
+    return TEST_PASS;
+}
+
+static int test_dup2_libc(void) {
+    int ret = dup2(1, 40);
+    TEST_ASSERT_EQ(ret, 40, "dup2 should return exactly newfd");
+    if (ret == 40)
+        close(40);
+    TEST_ASSERT_EQ(dup2(1, 1), 1, "dup2 with equal fds should return newfd");
+    return TEST_PASS;
+}
+
 static int test_dup_invalid_fd(void) {
     long ret = syscall1(SYS_dup, 999);
     TEST_ASSERT_EQ(ret, -EBADF, "dup invalid fd should return EBADF");
@@ -302,9 +370,18 @@ struct test_suite test_file_syscalls = {
         { "fstat_invalid_fd", test_fstat_invalid_fd, false },
         { "dup_basic", test_dup_basic, false },
         { "dup_invalid_fd", test_dup_invalid_fd, false },
+        { "dup3_same_fd_einval", test_dup3_same_fd_einval, false },
+        { "dup3_bad_flags", test_dup3_bad_flags, false },
+        { "dup3_invalid_old", test_dup3_invalid_old, false },
+        { "dup3_cloexec_slot", test_dup3_cloexec_slot, false },
+        { "fcntl_getfd_setfd", test_fcntl_getfd_setfd, false },
+        { "fcntl_dupfd", test_fcntl_dupfd, false },
+        { "fcntl_invalid_fd", test_fcntl_invalid_fd, false },
+        { "fcntl_unknown_cmd", test_fcntl_unknown_cmd, false },
+        { "dup2_libc", test_dup2_libc, false },
         { "ioctl_basic", test_ioctl_basic, false },
         { "ioctl_invalid_fd", test_ioctl_invalid_fd, false },
         { "getdents_invalid_fd", test_getdents_invalid_fd, false },
     },
-    .num_cases = 25,
+    .num_cases = 34,
 };

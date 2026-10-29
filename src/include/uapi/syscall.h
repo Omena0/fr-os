@@ -91,6 +91,7 @@
 #define SYS_getdents     71u
 #define SYS_dup          72u
 #define SYS_fcntl        73u
+#define SYS_dup3         74u
 
 /* IPC. */
 #define SYS_pipe        128u
@@ -261,8 +262,13 @@ struct kdirent {
 #define O_CLOEXEC   0x80000
 
 /* fcntl commands (the subset this kernel implements). */
-#define F_GETFL 3
-#define F_SETFL 4
+#define F_DUPFD          0
+#define F_GETFD          1
+#define F_SETFD          2
+#define F_GETFL          3
+#define F_SETFL          4
+#define F_DUPFD_CLOEXEC  1030
+#define FD_CLOEXEC       1
 
 /* ioctl request encoding: direction, size, type, number. */
 #define IOC_NRBITS   8

@@ -52,6 +52,7 @@ extern void sys_exit_group(int status);
 extern int sys_fstat(int fd, void *st);  /* for isatty */
 extern int sys_dup(int oldfd);
 extern int sys_dup2(int oldfd, int newfd);
+extern int sys_dup3(int oldfd, int newfd, int flags);
 extern int sys_execve(const char *path, char *const argv[], char *const envp[]);
 extern pid_t sys_fork(void);
 extern pid_t sys_wait4(pid_t pid, int *wstatus, int options, void *rusage);
@@ -156,6 +157,11 @@ int dup(int oldfd)
 int dup2(int oldfd, int newfd)
 {
     return sys_dup2(oldfd, newfd);
+}
+
+int dup3(int oldfd, int newfd, int flags)
+{
+    return sys_dup3(oldfd, newfd, flags);
 }
 
 int pipe(int pipefd[2])
