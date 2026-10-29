@@ -241,6 +241,41 @@ static int test_dup_basic(void) {
     return TEST_PASS;
 }
 
+static int test_termios_get_default(void) {
+    struct termios t;
+    TEST_ASSERT_EQ(syscall3(SYS_ioctl, 1, TCGETS, (long)&t), 0, "TCGETS on the console should succeed");
+    TEST_ASSERT((t.c_oflag & ONLCR) != 0, "the console reports newline translation");
+    TEST_ASSERT((t.c_lflag & ICANON) == 0, "the console is raw by default");
+    TEST_ASSERT(t.c_cc[VMIN] == 1, "VMIN defaults to 1");
+    return TEST_PASS;
+}
+
+static int test_termios_set_roundtrip(void) {
+    struct termios before, now, changed;
+    TEST_ASSERT_EQ(syscall3(SYS_ioctl, 1, TCGETS, (long)&before), 0, "TCGETS should succeed");
+    changed = before;
+    changed.c_lflag |= ECHO;
+    TEST_ASSERT_EQ(syscall3(SYS_ioctl, 1, TCSETS, (long)&changed), 0, "TCSETS should succeed");
+    TEST_ASSERT_EQ(syscall3(SYS_ioctl, 1, TCGETS, (long)&now), 0, "TCGETS should succeed");
+    TEST_ASSERT((now.c_lflag & ECHO) != 0, "the stored echo flag should read back");
+    TEST_ASSERT_EQ(syscall3(SYS_ioctl, 1, TCSETS, (long)&before), 0, "restoring the attributes should succeed");
+    return TEST_PASS;
+}
+
+static int test_termios_set_flush(void) {
+    struct termios t;
+    TEST_ASSERT_EQ(syscall3(SYS_ioctl, 1, TCGETS, (long)&t), 0, "TCGETS should succeed");
+    TEST_ASSERT_EQ(syscall3(SYS_ioctl, 1, TCSETSF, (long)&t), 0, "TCSETSF should succeed");
+    TEST_ASSERT_EQ(syscall3(SYS_ioctl, 1, TCSETSW, (long)&t), 0, "TCSETSW should succeed");
+    return TEST_PASS;
+}
+
+static int test_termios_bad_pointer(void) {
+    TEST_ASSERT_EQ(syscall3(SYS_ioctl, 1, TCSETS, 0), -EFAULT, "TCSETS from NULL should return EFAULT");
+    TEST_ASSERT_EQ(syscall3(SYS_ioctl, 1, TCGETS, 0), -EFAULT, "TCGETS into NULL should return EFAULT");
+    return TEST_PASS;
+}
+
 static int test_dup3_same_fd_einval(void) {
     long ret = syscall3(SYS_dup3, 1, 1, 0);
     TEST_ASSERT_EQ(ret, -EINVAL, "dup3 with oldfd == newfd should return EINVAL");
@@ -370,6 +405,10 @@ struct test_suite test_file_syscalls = {
         { "fstat_invalid_fd", test_fstat_invalid_fd, false },
         { "dup_basic", test_dup_basic, false },
         { "dup_invalid_fd", test_dup_invalid_fd, false },
+        { "termios_get_default", test_termios_get_default, false },
+        { "termios_set_roundtrip", test_termios_set_roundtrip, false },
+        { "termios_set_flush", test_termios_set_flush, false },
+        { "termios_bad_pointer", test_termios_bad_pointer, false },
         { "dup3_same_fd_einval", test_dup3_same_fd_einval, false },
         { "dup3_bad_flags", test_dup3_bad_flags, false },
         { "dup3_invalid_old", test_dup3_invalid_old, false },
@@ -383,5 +422,5 @@ struct test_suite test_file_syscalls = {
         { "ioctl_invalid_fd", test_ioctl_invalid_fd, false },
         { "getdents_invalid_fd", test_getdents_invalid_fd, false },
     },
-    .num_cases = 34,
+    .num_cases = 38,
 };

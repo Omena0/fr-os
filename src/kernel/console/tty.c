@@ -20,6 +20,7 @@
 #include <interrupt.h>
 #include <io.h>
 #include <klog.h>
+#include <kstring.h>
 #include <sched.h>
 #include <spinlock.h>
 #include <tty.h>
@@ -655,9 +656,53 @@ static void keyboard_callback(char c)
     tty_in_push(c);
 }
 
+/*
+ * The console reads raw bytes and echoes nothing, so its defaults say so. Output
+ * processing is what the console always does for '\n', so OPOST and ONLCR are
+ * reported as set. The control characters are the usual terminal ones.
+ */
+static struct termios tty_term;
+
+static void tty_termios_defaults(struct termios *t)
+{
+    memset(t, 0, sizeof(*t));
+    t->c_oflag = OPOST | ONLCR;
+    t->c_cflag = CS8 | CREAD | CLOCAL;
+    t->c_cc[VINTR] = 0x03;
+    t->c_cc[VQUIT] = 0x1c;
+    t->c_cc[VERASE] = 0x7f;
+    t->c_cc[VKILL] = 0x15;
+    t->c_cc[VEOF] = 0x04;
+    t->c_cc[VMIN] = 1;
+    t->c_cc[VTIME] = 0;
+}
+
+void tty_termios_get(struct termios *t)
+{
+    u64 flags = spinlock_irqsave(&in_lock);
+
+    *t = tty_term;
+    spinlock_unlock_irqrestore(&in_lock, flags);
+}
+
+void tty_termios_set(const struct termios *t, bool flush_input)
+{
+    u64 flags = spinlock_irqsave(&in_lock);
+
+    tty_term = *t;
+    if (flush_input) {
+        in_ring.head = 0;
+        in_ring.tail = 0;
+        in_ring.count = 0;
+    }
+    spinlock_unlock_irqrestore(&in_lock, flags);
+}
+
 void tty_init(void)
 {
     u64 flags = irq_save();
+
+    tty_termios_defaults(&tty_term);
     uint8_t config = 0;
 
     pic_remap();

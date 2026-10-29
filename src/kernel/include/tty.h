@@ -19,6 +19,7 @@
 #define TTY_H
 
 #include <types.h>
+#include <uapi/syscall.h>
 
 /*
  * Screen ownership APIs. Call tty_screen_claim() when a process wants exclusive
@@ -60,6 +61,14 @@ void tty_init(void);
 
 /* Block until at least one byte is available, unless `block` is false. */
 size_t tty_read(char *buf, size_t count, bool block);
+
+/*
+ * The console's termios. The flags are stored and reported; the console does
+ * not yet act on ICANON, ECHO or ISIG, so reads are raw and nothing is echoed.
+ * tty_termios_set() with flush_input discards unread input (TCSETSF).
+ */
+void tty_termios_get(struct termios *t);
+void tty_termios_set(const struct termios *t, bool flush_input);
 
 /* Never blocks. Returns via tty_write_dropped() how much did not fit. */
 void tty_write(const char *buf, size_t count);

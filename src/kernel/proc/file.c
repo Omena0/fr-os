@@ -127,18 +127,25 @@ static long cons_file_ioctl(struct file *f, unsigned long request, void *arg)
         return rc < 0 ? rc : 0;
     }
     case TCGETS: {
-        /* A termios with everything at its default. libc checks c_cflag
-         * for the line discipline and would treat a zeroed struct as a
-         * terminal with no modes, which is close enough to be honest
-         * for a console with no modes to set. */
         struct termios t;
         long rc;
 
-        memset(&t, 0, sizeof(t));
-        t.c_cflag = 0xbf;
-        t.c_lflag = 0x8a3f;
+        tty_termios_get(&t);
         rc = copy_to_user((u64)arg, &t, sizeof(t));
         return rc < 0 ? rc : 0;
+    }
+    case TCSETS:
+    case TCSETSW:
+    case TCSETSF: {
+        /* TCSETSW waits for output to drain. The console writes
+         * synchronously, so there is nothing queued to wait for. TCSETSF
+         * also discards unread input. */
+        struct termios t;
+
+        if (copy_from_user(&t, (u64)arg, sizeof(t)) < 0)
+            return -EFAULT;
+        tty_termios_set(&t, request == TCSETSF);
+        return 0;
     }
     default:
         break;

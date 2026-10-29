@@ -305,6 +305,36 @@ struct kdirent {
 #define TIOCGWINSZ   _IOR('t', 104, struct winsize)
 #define TIOCSWINSZ   _IOW('t', 103, struct winsize)
 #define TCGETS       _IOR('t', 16, struct termios)
+#define TCSETS       _IOW('t', 17, struct termios)
+#define TCSETSW      _IOW('t', 18, struct termios)
+#define TCSETSF      _IOW('t', 19, struct termios)
+
+/* c_cc indices, Linux numbering. */
+#define VINTR   0
+#define VQUIT   1
+#define VERASE  2
+#define VKILL   3
+#define VEOF    4
+#define VTIME   5
+#define VMIN    6
+#define NCCS    32
+
+/* c_iflag. */
+#define ICRNL   0x0100u
+/* c_oflag. */
+#define OPOST   0x0001u
+#define ONLCR   0x0004u
+/* c_cflag. */
+#define CS8     0x0030u
+#define CREAD   0x0080u
+#define CLOCAL  0x0800u
+/* c_lflag. */
+#define ISIG    0x0001u
+#define ICANON  0x0002u
+#define ECHO    0x0008u
+#define ECHOE   0x0010u
+#define ECHOK   0x0020u
+#define IEXTEN  0x8000u
 
 struct winsize {
     uint16_t ws_row, ws_col;
@@ -314,7 +344,7 @@ struct winsize {
 struct termios {
     uint32_t c_iflag, c_oflag, c_cflag, c_lflag;
     uint8_t  c_line;
-    uint8_t  c_cc[32];
+    uint8_t  c_cc[NCCS];
 };
 
 /* futex operations. */
