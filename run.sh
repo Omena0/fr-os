@@ -102,12 +102,6 @@ RUN_TIMEOUT="${RUN_TIMEOUT:-}"
 # machine's default ACPI tables would only produce interrupt storms the kernel
 # cannot yet handle. QEMU has no standalone -no-acpi option; it is a property
 # of the machine type, which is why it appears on -machine rather than here.
-# Kernel command line. Passed to the guest as -append.
-#
-# Defaults to empty: the kernel parses loglevel=NNN and postloglevel=NNN from
-# it, so the boot sequence stays verbose and the post-init system stays quiet
-# unless the user asks otherwise.
-CMDLINE="${CMDLINE:-}"
 
 QEMU_ARGS=(
     -drive "file=${IMAGE},format=raw,if=ide,index=0,media=disk"
@@ -116,9 +110,6 @@ QEMU_ARGS=(
     -machine "${MACHINE:-pc,acpi=off}"
     -no-reboot
 )
-if [ -n "$CMDLINE" ]; then
-    QEMU_ARGS+=(-append "$CMDLINE")
-fi
 
 # Accelerator.
 #
@@ -146,13 +137,6 @@ else
     QEMU_ARGS+=(-cpu max)
     note "/dev/kvm not usable, falling back to TCG emulation"
 fi
-
-# Kernel command line. Passed to the guest as -append.
-#
-# Defaults to empty: the kernel parses loglevel=NNN and postloglevel=NNN from
-# it, so the boot sequence stays verbose and the post-init system stays quiet
-# unless the user asks otherwise.
-CMDLINE="${CMDLINE:-}"
 #
 # Both sinks come from ONE COM1, via the chardev backend's own logfile= option,
 # which writes a copy of everything passing through to a file. The two
