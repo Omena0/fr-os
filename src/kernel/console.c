@@ -151,7 +151,7 @@ enum esc_state {
 };
 
 static enum esc_state esc_state;
-static char esc_params[16];
+static char esc_params[64];
 static uint8_t esc_param_count;
 
 static void console_fb_init(struct framebuffer_info *info);
