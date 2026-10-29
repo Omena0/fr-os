@@ -210,6 +210,50 @@ STATIC_ASSERT(offsetof(struct context, rip) == 48,
  * allocator call. */
 #define TASK_FPU_STATE_SIZE    4160u
 
+/*
+ * The user register state a forked child resumes with.
+ *
+ * RIP/RSP/RFLAGS are the syscall return site. The six callee-saved registers
+ * are part of the resume contract too: the child re-enters the parent's C
+ * code immediately after the `fork()` call, and that code is entitled to keep
+ * its loop indices, frame pointer and other locals in rbx/rbp/r12-r15 across
+ * the call. The syscall entry path saves them on the kernel stack (see
+ * syscall_entry.S); a child that started with kernel residue in them indexed
+ * arrays with garbage and faulted before it could exec.
+ */
+struct fork_regs {
+    u64 rip;
+    u64 rsp;
+    u64 rflags;
+    /* Callee-saved: the compiled code that resumes relies on these. */
+    u64 r15;
+    u64 r14;
+    u64 r13;
+    u64 r12;
+    u64 rbx;
+    u64 rbp;
+    /* The syscall ABI preserves these too (only rcx/r11 are clobbered by the
+     * instruction), so a child must observe the parent's values, not zeros. */
+    u64 rdi;
+    u64 rsi;
+    u64 rdx;
+    u64 r10;
+    u64 r8;
+    u64 r9;
+    u64 rcx;
+    u64 r11;
+};
+
+/* ret_to_user_regs (interrupt_entry.S) loads these by fixed offset; the
+ * asserts keep the two definitions from drifting apart. */
+STATIC_ASSERT(offsetof(struct fork_regs, rip) == 0, "fork_regs.rip offset");
+STATIC_ASSERT(offsetof(struct fork_regs, rsp) == 8, "fork_regs.rsp offset");
+STATIC_ASSERT(offsetof(struct fork_regs, rflags) == 16, "fork_regs.rflags offset");
+STATIC_ASSERT(offsetof(struct fork_regs, r15) == 24, "fork_regs.r15 offset");
+STATIC_ASSERT(offsetof(struct fork_regs, rbp) == 64, "fork_regs.rbp offset");
+STATIC_ASSERT(offsetof(struct fork_regs, rdi) == 72, "fork_regs.rdi offset");
+STATIC_ASSERT(offsetof(struct fork_regs, r11) == 128, "fork_regs.r11 offset");
+
 struct task {
     /* --- identity ------------------------------------------------------- */
     u32 pid;
@@ -322,6 +366,9 @@ struct task {
     u64 user_rip;
     u64 user_rsp;
     u64 user_rflags;
+    /* Callee-saved user registers to restore on a resumed (forked) child.
+     * A fresh process ignores these; only fork_child_start consumes them. */
+    struct fork_regs user_fork_regs;
 
     /* --- sleeping and waiting --------------------------------------------- */
     struct list_head sleep_node;  /* on a per-CPU sleep list */

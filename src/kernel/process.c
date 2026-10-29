@@ -928,19 +928,6 @@ static int clone_vmas(struct address_space *dst, struct address_space *src)
     return r;
 }
 
-/* Where the parent was suspended, for the child to resume at. */
-u64 fork_ctx[MAX_CPUS][3];
-
-void process_set_fork_context(u64 rip, u64 rsp, u64 rflags)
-{
-    u32 cpu = this_cpu_id();
-    fork_ctx[cpu][0] = rip;
-    fork_ctx[cpu][1] = rsp;
-    fork_ctx[cpu][2] = rflags;
-    klog_emit(KLOG_DEBUG, "process", "fork_ctx: cpu=%u rip=%p rsp=%p rflags=%p",
-          cpu, (void *)(intptr_t)rip, (void *)(intptr_t)rsp, (void *)(intptr_t)rflags);
-}
-
 /*
  * The child's entry point. It does not run the parent's code path from the top;
  * it iretq's straight back to the user's syscall return site with RAX = 0.
@@ -959,11 +946,17 @@ static __noreturn void fork_child_start(void *arg)
      */
     t->thread_fn = NULL;
     t->thread_arg = NULL;
-    ret_to_user(t->user_rip, t->user_rsp, t->user_rflags, 0, 0);
+    /*
+     * Restore the parent's callee-saved registers as well as the resume
+     * point. ret_to_user() deliberately zeroes only the caller-saved set, so
+     * rbx/rbp/r12-r15 would otherwise carry whatever the kernel call chain
+     * left in them -- values the parent's compiled code still owns.
+     */
+    ret_to_user_regs(&t->user_fork_regs);
     __builtin_unreachable();
 }
 
-long sys_fork(void)
+long sys_fork(const struct fork_regs *fr)
 {
     struct task *me = current_task();
     struct address_space *child_mm;
@@ -1038,9 +1031,10 @@ long sys_fork(void)
     child->parent = me;
 
     /* Resume where the parent was suspended. */
-    child->user_rip = fork_ctx[this_cpu_id()][0];
-    child->user_rsp = fork_ctx[this_cpu_id()][1];
-    child->user_rflags = fork_ctx[this_cpu_id()][2];
+    child->user_fork_regs = *fr;
+    child->user_rip = child->user_fork_regs.rip;
+    child->user_rsp = child->user_fork_regs.rsp;
+    child->user_rflags = child->user_fork_regs.rflags;
     /*
      * The user RFLAGS the parent's SYSCALL frame carries has IF clear:
      * SFMASK clears it on entry, and nothing re-sets it. A forked child
@@ -1075,7 +1069,8 @@ long sys_fork(void)
 /* ----------------------------------------------------------------- clone ----- */
 
 long sys_clone(u64 flags, u64 child_stack, u64 parent_tid, u64 child_tid, u64 tls,
-               u64 caller_rip, u64 caller_rsp, u64 caller_rflags)
+               u64 caller_rip, u64 caller_rsp, u64 caller_rflags,
+               const struct fork_regs *fr)
 {
     struct task *me = current_task();
     struct address_space *new_mm;
@@ -1156,9 +1151,13 @@ long sys_clone(u64 flags, u64 child_stack, u64 parent_tid, u64 child_tid, u64 tl
     if (tls && (flags & CLONE_SETTLS))
         child->fs_base = tls;
 
+    child->user_fork_regs = *fr;
     child->user_rip = caller_rip;
     child->user_rsp = child_stack ? child_stack : caller_rsp;
     child->user_rflags = caller_rflags | (1ULL << 9);
+    child->user_fork_regs.rip = child->user_rip;
+    child->user_fork_regs.rsp = child->user_rsp;
+    child->user_fork_regs.rflags = child->user_rflags;
 
     child->thread_fn = fork_child_start;
     child->thread_arg = child;

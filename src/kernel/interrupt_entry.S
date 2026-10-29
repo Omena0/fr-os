@@ -403,6 +403,69 @@ ret_to_user:
     iretq
     .size    ret_to_user, . - ret_to_user
 
+/*
+ * ret_to_user_regs — resume a forked child at the parent's syscall return
+ * site with the parent's callee-saved registers.
+ *
+ * ret_to_user() restores RIP/RSP/RFLAGS and zeroes the caller-saved set, but
+ * it leaves rbx/rbp/r12-r15 alone on the theory that nothing depends on them.
+ * That theory holds for a process's very first entry (they are unspecified
+ * anyway) but not for fork: the child re-enters the parent's compiled C code
+ * immediately after the fork() call, and that code is entitled to keep values
+ * -- a loop index, the frame pointer -- in those registers across the call.
+ * Observed live: init's auto-run loop kept its test index in rbx, the child
+ * indexed a pointer array with kernel residue, the address went non-canonical
+ * and the child died with #GP before it could exec.
+ *
+ * Takes a pointer to struct fork_regs (see task.h) in RDI:
+ *   +0 rip  +8 rsp  +16 rflags
+ *   +24 r15 +32 r14 +40 r13 +48 r12 +56 rbx +64 rbp
+ *
+ * Same frame-building rules as ret_to_user(): SS, RSP, RFLAGS, CS, RIP.
+ */
+    .globl    ret_to_user_regs
+    .type    ret_to_user_regs, @function
+ret_to_user_regs:
+    cld
+
+    /* Keep the struct pointer across the C call. RSP is 16-byte aligned for
+     * the call after this push, as the ABI requires. */
+    pushq    %rdi
+    call    task_load_fs_current
+    popq    %rdi
+
+    /* Use RAX as the base while the general registers are reloaded; RDI is
+     * one of the registers being restored, so it cannot stay the base. */
+    movq    %rdi, %rax
+
+    pushq    $USER_DATA_SELECTOR        /* SS */
+    pushq    8(%rax)                /* RSP */
+    pushq    16(%rax)                /* RFLAGS */
+    pushq    $USER_CODE64_SELECTOR        /* CS */
+    pushq    0(%rax)                /* RIP */
+
+    movq    24(%rax), %r15
+    movq    32(%rax), %r14
+    movq    40(%rax), %r13
+    movq    48(%rax), %r12
+    movq    56(%rax), %rbx
+    movq    64(%rax), %rbp
+    movq    80(%rax), %rsi
+    movq    88(%rax), %rdx
+    movq    96(%rax), %r10
+    movq    104(%rax), %r8
+    movq    112(%rax), %r9
+    movq    120(%rax), %rcx
+    movq    128(%rax), %r11
+    movq    72(%rax), %rdi
+
+    /* RAX = 0 is fork's return value in the child; every other register is
+     * already the parent's, matching what the normal syscall return would
+     * have restored. */
+    xorl    %eax, %eax
+    iretq
+    .size    ret_to_user_regs, . - ret_to_user_regs
+
 /* ------------------------------------------------- frame layout asserts --- */
 
 /*

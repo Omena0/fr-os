@@ -136,16 +136,57 @@ static long sc_gettid(struct syscall_regs *r)
     return t ? (long)t->tid : 0;
 }
 
+/*
+ * Byte offsets of the callee-saved user registers from &struct syscall_regs
+ * in the frame built by syscall_entry.S. That file documents the layout:
+ * after the struct's 88-byte register area, 8 bytes of padding, then the six
+ * callee-saved registers were pushed in reverse, so r15 is nearest the struct.
+ * Keep these in step with the push sequence there; the return path pops them
+ * in the order r15,r14,r13,r12,rbx,rbp.
+ */
+#define SC_FRAME_R15_OFF 104
+#define SC_FRAME_R14_OFF 112
+#define SC_FRAME_R13_OFF 120
+#define SC_FRAME_R12_OFF 128
+#define SC_FRAME_RBX_OFF 136
+#define SC_FRAME_RBP_OFF 144
+
+static void fork_regs_from_frame(struct fork_regs *fr,
+                                 const struct syscall_regs *r)
+{
+    fr->rip = r->rip;
+    fr->rsp = r->rsp;
+    fr->rflags = r->rflags;
+    /* Callee-saved six, saved above struct syscall_regs by the entry path. */
+    fr->r15 = ((const u64 *)((const u8 *)r + SC_FRAME_R15_OFF))[0];
+    fr->r14 = ((const u64 *)((const u8 *)r + SC_FRAME_R14_OFF))[0];
+    fr->r13 = ((const u64 *)((const u8 *)r + SC_FRAME_R13_OFF))[0];
+    fr->r12 = ((const u64 *)((const u8 *)r + SC_FRAME_R12_OFF))[0];
+    fr->rbx = ((const u64 *)((const u8 *)r + SC_FRAME_RBX_OFF))[0];
+    fr->rbp = ((const u64 *)((const u8 *)r + SC_FRAME_RBP_OFF))[0];
+    /* The syscall ABI preserves the rest too (only rcx/r11 are clobbered). */
+    fr->rdi = r->rdi;
+    fr->rsi = r->rsi;
+    fr->rdx = r->rdx;
+    fr->r10 = r->r10;
+    fr->r8 = r->r8;
+    fr->r9 = r->r9;
+    fr->rcx = r->rcx;
+    fr->r11 = r->r11;
+}
+
 static long sc_fork(struct syscall_regs *r)
 {
     /*
-     * The child has to resume at the instruction after the syscall, which
-     * is only knowable from the register frame the entry path built. It is
-     * published before the fork so sys_fork() can copy it into the new
-     * task, which has no frame of its own to inherit.
+     * The child resumes at the instruction after the syscall, which is only
+     * knowable from the register frame the entry path built. A fresh child has
+     * no frame of its own, so the whole register state travels to sys_fork();
+     * it must re-enter the parent's compiled code with the parent's
+     * callee-saved registers intact.
      */
-    process_set_fork_context(r->rip, r->rsp, r->rflags);
-    return sys_fork();
+    struct fork_regs fr;
+    fork_regs_from_frame(&fr, r);
+    return sys_fork(&fr);
 }
 
 static long sc_execve(struct syscall_regs *r)
@@ -1157,8 +1198,10 @@ static long sc_mlock(struct syscall_regs *r)
 
 static long sc_clone(struct syscall_regs *r)
 {
-    process_set_fork_context(r->rip, r->rsp, r->rflags);
-    return sys_clone(arg0(r), arg1(r), arg2(r), arg3(r), arg4(r), r->rip, r->rsp, r->rflags);
+    struct fork_regs fr;
+    fork_regs_from_frame(&fr, r);
+    return sys_clone(arg0(r), arg1(r), arg2(r), arg3(r), arg4(r),
+                     r->rip, r->rsp, r->rflags, &fr);
 }
 
 /* ------------------------------------------------------------------- getpgid --- */

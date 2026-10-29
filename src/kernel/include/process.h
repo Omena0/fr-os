@@ -128,18 +128,16 @@ long sys_wait4(s64 pid, u64 wstatus, u64 options, u64 rusage);
 #define WNOHANG 1
 
 /*
- * Record where the calling task was suspended so a forked child can resume at
- * the same user instruction. The syscall layer calls this with the values from
- * the saved register frame before invoking sys_fork(), because a fresh child
- * has no saved frame of its own and must borrow the parent's.
+ * fork(2): a full page-table copy (see the trade-off note in process.c).
+ *
+ * `fr` is the parent's saved user register state, borrowed from the syscall
+ * frame: the fresh child has no frame of its own and must resume at the
+ * parent's syscall return site with the parent's registers.
  */
-void process_set_fork_context(u64 rip, u64 rsp, u64 rflags);
-
-/* fork(2): a full page-table copy (see the trade-off note in process.c). */
-long sys_fork(void);
+long sys_fork(const struct fork_regs *fr);
 
 /* clone(2): create a child task. flags use the Linux CLONE_* bitmask. */
-long sys_clone(u64 flags, u64 child_stack, u64 parent_tid, u64 child_tid, u64 tls, u64 caller_rip, u64 caller_rsp, u64 caller_rflags);
+long sys_clone(u64 flags, u64 child_stack, u64 parent_tid, u64 child_tid, u64 tls, u64 caller_rip, u64 caller_rsp, u64 caller_rflags, const struct fork_regs *fr);
 
 /* execve(2) over the embedded init image. */
 long sys_execve(u64 path, u64 argv, u64 envp);
@@ -244,5 +242,8 @@ extern void gdt_reload(uint32_t cpu);
 extern void tss_set_kernel_stack(void *stack_top);
 extern void ret_to_user(uint64_t rip, uint64_t rsp, uint64_t rflags,
             uint64_t rcx, uint64_t r11);
+/* Resume a forked child: like ret_to_user(), but also restores the parent's
+ * callee-saved registers from the struct fork_regs it points at (task.h). */
+extern void ret_to_user_regs(const struct fork_regs *regs);
 
 #endif /* PROCESS_H */
