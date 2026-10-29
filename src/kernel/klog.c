@@ -29,6 +29,95 @@ static uint64_t tsc_khz;
 
 static const char level_names[] = { 'D', 'I', 'W', 'E', 'F' };
 
+#define LOG_SGR_RESET             "\033[0m"
+#define LOG_SGR_GRAY              "\033[90m"
+
+#define LOG_SGR_TIME_SECONDS      "\033[94m"
+#define LOG_SGR_TIME_MILLISECONDS "\033[96m"
+#define LOG_SGR_CPU               "\033[95m"
+#define LOG_SGR_SUBSYSTEM          "\033[92m"
+
+#define LOG_SGR_LEVEL_DEBUG        "\033[34m"
+#define LOG_SGR_LEVEL_INFO         "\033[32m"
+#define LOG_SGR_LEVEL_WARN         "\033[33m"
+#define LOG_SGR_LEVEL_ERROR        "\033[31m"
+#define LOG_SGR_LEVEL_FATAL        "\033[97;41m"
+#define LOG_SGR_LEVEL_UNKNOWN      "\033[37m"
+
+#define LOG_SGR_MSG_DEBUG          "\033[38;5;250m"
+#define LOG_SGR_MSG_INFO         "\033[37m"
+#define LOG_SGR_MSG_WARN           "\033[33m"
+#define LOG_SGR_MSG_ERROR          "\033[31m"
+#define LOG_SGR_MSG_FATAL          "\033[97;41m"
+
+static const char *log_level_color(klog_level_t level)
+{
+    switch (level) {
+    case KLOG_DEBUG: return LOG_SGR_LEVEL_DEBUG;
+    case KLOG_INFO:  return LOG_SGR_LEVEL_INFO;
+    case KLOG_WARN:  return LOG_SGR_LEVEL_WARN;
+    case KLOG_ERROR: return LOG_SGR_LEVEL_ERROR;
+    case KLOG_FATAL: return LOG_SGR_LEVEL_FATAL;
+    default:         return LOG_SGR_LEVEL_UNKNOWN;
+    }
+}
+
+static const char *log_message_color(klog_level_t level)
+{
+    switch (level) {
+    case KLOG_DEBUG:  return LOG_SGR_MSG_DEBUG;
+    case KLOG_INFO:  return LOG_SGR_MSG_INFO;
+    case KLOG_WARN:  return LOG_SGR_MSG_WARN;
+    case KLOG_ERROR: return LOG_SGR_MSG_ERROR;
+    case KLOG_FATAL: return LOG_SGR_MSG_FATAL;
+    default:         return LOG_SGR_RESET;
+    }
+}
+
+/* Per-subsystem log level overrides. */
+#define KLOG_MAX_SUBSYSTEMS 32
+static struct {
+    const char *name;
+    klog_level_t level;
+    bool set;
+} klog_overrides[KLOG_MAX_SUBSYSTEMS];
+
+/* Get the effective log level for a subsystem (override or global). */
+klog_level_t klog_effective_level(const char *subsystem)
+{
+    for (int i = 0; i < KLOG_MAX_SUBSYSTEMS; i++) {
+        if (klog_overrides[i].set &&
+            klog_overrides[i].name && subsystem &&
+            !strcmp(klog_overrides[i].name, subsystem))
+            return klog_overrides[i].level;
+    }
+    return klog_runtime_level;
+}
+
+void klog_set_subsystem_level(const char *name, klog_level_t level)
+{
+    if (!name || (int)level < 0 || (int)level > KLOG_FATAL)
+        return;
+
+    /* Find existing or free slot. */
+    int free = -1;
+    for (int i = 0; i < KLOG_MAX_SUBSYSTEMS; i++) {
+        if (klog_overrides[i].set) {
+            if (!strcmp(klog_overrides[i].name, name)) {
+                klog_overrides[i].level = level;
+                return;
+            }
+        } else if (free < 0) {
+            free = i;
+        }
+    }
+    if (free >= 0) {
+        klog_overrides[free].name = name;
+        klog_overrides[free].level = level;
+        klog_overrides[free].set = true;
+    }
+}
+
 /*
  * Emit one formatted record.
  *
@@ -98,14 +187,33 @@ void klog_emit(klog_level_t level, const char *subsystem,
     while (len > 0 && (msg[len - 1] == '\n' || msg[len - 1] == '\r'))
         msg[--len] = '\0';
 
+    const char level_char =
+        (unsigned)level < sizeof(level_names)
+            ? level_names[(unsigned)level]
+            : '?';
+
     ksize_t n = ksnprintf(line, sizeof(line) - 2,
-                  "[%5llu.%03llu cpu%u %s/%c] %s\n",
-                  (unsigned long long)(now / 1000),
-                  (unsigned long long)(now % 1000),
-                  cpu,
-                  subsystem ? subsystem : "?",
-                  level_names[level],
-                  msg);
+        LOG_SGR_GRAY "["
+        LOG_SGR_TIME_SECONDS "%5llu"
+        LOG_SGR_GRAY "."
+        LOG_SGR_TIME_MILLISECONDS "%03llu"
+        LOG_SGR_GRAY " cpu"
+        LOG_SGR_CPU "%-2u"
+        LOG_SGR_GRAY " "
+        LOG_SGR_SUBSYSTEM "%-10.10s"
+        LOG_SGR_GRAY " /"
+        "%s%c"
+        LOG_SGR_RESET LOG_SGR_GRAY "] "
+        "%s%s" LOG_SGR_RESET "\n",
+        (unsigned long long)(now / 1000),
+        (unsigned long long)(now % 1000),
+        cpu,
+        subsystem ? subsystem : "?",
+        log_level_color(level),
+        level_char,
+        log_message_color(level),
+        msg
+    );
 
     (void)n;
     console_write(line);
