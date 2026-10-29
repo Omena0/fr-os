@@ -503,16 +503,18 @@ __noreturn void sys_exit_group(int code)
 
 /* ---------------------------------------------------------------- wait ------ */
 
-static bool child_matches(struct task *child, s64 pid, u64 options)
+/*
+ * wait4's pid argument: > 0 names one child, 0 any child in the caller's
+ * process group, -1 any child, and < -1 any child in the group -pid.
+ */
+static bool child_matches(struct task *me, struct task *child, s64 pid)
 {
-    if (pid > 0 && (s64)child->pid != pid)
-        return false;
-    if (pid < -1) {
-        /* A negative pid addresses a process group. */
-        if ((s64)child->pgid != -pid)
-            return false;
-    }
-    UNUSED(options);
+    if (pid > 0)
+        return (s64)child->pid == pid;
+    if (pid == 0)
+        return child->pgid == me->pgid;
+    if (pid < -1)
+        return (s64)child->pgid == -pid;
     return true;
 }
 
@@ -541,7 +543,7 @@ static bool has_matching_child(struct task *me, s64 pid)
     list_for_each(pos, &me->children) {
         struct task *c = list_entry(pos, struct task, sibling);
 
-        if (child_matches(c, pid, 0))
+        if (child_matches(me, c, pid))
             return true;
     }
     return false;
@@ -553,6 +555,12 @@ long sys_wait4(s64 pid, u64 wstatus, u64 options, u64 rusage)
 
     if (!me)
         return -ESRCH;
+    /*
+     * WUNTRACED and WCONTINUED are accepted but report nothing: there are no
+     * stopped or continued children, because job control does not exist yet.
+     */
+    if (options & ~(u64)WAIT_KNOWN_OPTS)
+        return -EINVAL;
     klog_emit(KLOG_DEBUG, "process", "sys_wait4: called, pid=%ld me->pid=%ld", pid, (long)me->pid);
     if (rusage != 0)
         /* No accounting subsystem yet; claiming success would make a
@@ -590,7 +598,7 @@ long sys_wait4(s64 pid, u64 wstatus, u64 options, u64 rusage)
 
             if (c->state != TASK_ZOMBIE)
                 continue;
-            if (!child_matches(c, pid, options))
+            if (!child_matches(me, c, pid))
                 continue;
             list_del(&c->sibling);
             list_init(&c->sibling);

@@ -127,6 +127,9 @@ long sys_wait4(s64 pid, u64 wstatus, u64 options, u64 rusage);
 
 /* wait4 options. */
 #define WNOHANG 1
+#define WUNTRACED 2
+#define WCONTINUED 8
+#define WAIT_KNOWN_OPTS (WNOHANG | WUNTRACED | WCONTINUED)
 
 /*
  * fork(2): a full page-table copy (see the trade-off note in process.c).

@@ -290,6 +290,19 @@ static int test_signal_blocked_until_unblocked(void) {
     return TEST_PASS;
 }
 
+static int test_wait4_unknown_option(void) {
+    int wstatus = 0;
+    TEST_ASSERT_EQ(syscall4(SYS_wait4, -1, (long)&wstatus, 0x100, 0), -EINVAL, "an unknown wait option should return EINVAL");
+    return TEST_PASS;
+}
+
+static int test_wait4_stop_options_accepted(void) {
+    int wstatus = 0;
+    long ret = syscall4(SYS_wait4, -1, (long)&wstatus, WUNTRACED | WCONTINUED | WNOHANG, 0);
+    TEST_ASSERT(ret != -EINVAL, "WUNTRACED and WCONTINUED are valid options");
+    return TEST_PASS;
+}
+
 static int test_signal_default_terminates(void) {
     pid_t pid = (pid_t)syscall1(SYS_fork, 0);
     int wstatus = 0;
@@ -668,6 +681,8 @@ struct test_suite test_process_syscalls = {
         { "rt_sigpending_empty", test_rt_sigpending_empty, false },
         { "signal_handler_runs_on_return", test_signal_handler_runs_on_return, false },
         { "signal_blocked_until_unblocked", test_signal_blocked_until_unblocked, false },
+        { "wait4_unknown_option", test_wait4_unknown_option, false },
+        { "wait4_stop_options_accepted", test_wait4_stop_options_accepted, false },
         { "signal_default_terminates", test_signal_default_terminates, false },
         { "kill_other_process_handler", test_kill_other_process_handler, false },
         { "kill_sigkill_other", test_kill_sigkill_other, false },
@@ -686,5 +701,5 @@ struct test_suite test_process_syscalls = {
         { "arch_prctl_get_fs", test_arch_prctl_get_fs, false },
         { "arch_prctl_get_gs", test_arch_prctl_get_gs, false },
     },
-    .num_cases = 52,
+    .num_cases = 54,
 };

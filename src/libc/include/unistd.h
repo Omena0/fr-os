@@ -65,6 +65,9 @@ extern pid_t  fork(void);
 extern int    execve(const char *path, char *const argv[], char *const envp[]);
 extern pid_t  waitpid(pid_t pid, int *wstatus, int options);
 extern pid_t  wait4(pid_t pid, int *wstatus, int options, void *rusage);
+#define WNOHANG     1
+#define WUNTRACED   2
+#define WCONTINUED  8
 #define WIFEXITED(wstatus)   (((wstatus) & 0xFF) == 0)
 #define WEXITSTATUS(wstatus)  (((wstatus) & 0xFF00) >> 8)
 #define WIFSIGNALED(wstatus)  (((wstatus) & 0xFF) > 0 && ((wstatus) & 0xFF) <= 0x7F)
