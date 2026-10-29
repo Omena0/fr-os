@@ -116,6 +116,27 @@ them is how time is lost.
   segment). Deleting the instruction "fixes" the symptom and breaks the kernel.
 - **A zero-byte serial log means a bad command, a full filesystem, or a wrong
   path — not a healthy guest.** Check `df`, check the colon, check the path.
+- **`ret_to_user` is not a `fork` resume path.** It restores RIP/RSP/RFLAGS
+  and *zeroes* the caller-saved set; it never touches rbx/rbp/r12-r15, so a
+  forked child that re-enters the parent's compiled code there sees kernel
+  residue. The SysV ABI promises the callee-saved six survive a `fork()` call
+  because the caller is an ordinary C function, so the child must get the
+  parent's values. `ret_to_user_regs(&struct fork_regs)` does that; the entry
+  path already saves all six above `struct syscall_regs` (offsets 104..144 from
+  `&regs`), so no new asm saving is needed.
+- **The kernel image budget is a hard link-time assert, not a guideline.**
+  `KERNEL_MAX_BYTES = 0x1D0000` (`src/kernel/link.ld`, mirroring the stage2
+  landing zone). A `struct fork_regs fork_ctx[MAX_CPUS]` scratch array (256
+  entries x 136 bytes) pushed the image over it. Pass per-syscall state on the
+  stack / by pointer instead of installing a per-CPU array for something only
+  one syscall needs, and expect roughly 16 KiB of headroom as normal.
+- **An absolute cursor move in a terminal program leaves the terminal's cursor
+  there.** `ansi2`'s `ESC[1;1H` is honoured by the serial terminal (xterm.js in
+  VSCode included) but the *framebuffer* console kept its own cursor, so the
+  two disagreed and the next prompt was drawn over earlier output in a
+  terminal, not on the VGA display. Terminal programs that move the cursor
+  absolutely must restore it (`ESC[s`/`ESC[u]`, or `ESC 7`/`ESC 8`); see
+  `console_restore_cursor()` in `console.c`. This was not an editor bug.
 
 ---
 
@@ -123,6 +144,23 @@ them is how time is lost.
 
 Every one of these happened to me on this tree. Listed as **what I did** and
 **what to do instead**.
+
+### Blaming the argument the code passes instead of the state the kernel sets
+
+The init auto-run loop forked and exec'd `ansi`, and the child died with `#GP`
+inside libc's `arena_create`. Three wrong hypotheses in a row: `environ` was
+invalid (it was fine — the REPL's `run` used the same pointer and worked), the
+envp had to be `NULL`, then the argv had to duplicate `argv[0]`. The crash
+address even moved between attempts, which read as progress and was actually
+just a different expired register.
+
+The real difference between the two paths was never the arguments: the child
+resumed the *parent's* C loop, and the kernel had restored only RIP/RSP/RFLAGS,
+so the loop index in rbx was kernel residue (`tests[rbx*8]` went non-canonical).
+The falsifying measurement was cheap and was skipped: dump the user register
+state at the fault (`rdi=0x200000025030` and `rbx=0` proved it immediately).
+When a child crashes at the same source line its parent just executed, suspect
+the context the kernel built, not the values the parent passed.
 
 ### Chasing a debugger's opinion of control flow instead of the machine's
 
