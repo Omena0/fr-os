@@ -89,33 +89,6 @@ static int split(char *s, char **argv, int max)
     return n;
 }
 
-/*
- * Civil date from a day count, since 1970-01-01. This is the days-to-civil
- * inverse of the classic Julian-date arithmetic: no libc here exposes gmtime
- * or strftime, and clock_gettime hands back raw seconds, so the calendar
- * conversion has to happen in userspace. The era-based form avoids the
- * negative-year bugs a naive leap-year loop hits before 1970.
- */
-/*
- * Times are int64_t, which is `long` on x86-64, so every print of one uses
- * %ld. The values are held in `long` rather than `long long` throughout this
- * file purely so the format specifiers and the arguments cannot drift apart.
- */
-static void civil_from_days(long z, long *y, int *m, int *d)
-{
-    long era, doe, yoe, doy, mp;
-
-    z += 719468;
-    era = (z >= 0 ? z : z - 146096) / 146097;
-    doe = z - era * 146097;
-    yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    mp = (5 * doy + 2) / 153;
-    *d = (int)(doy - (153 * mp + 2) / 5 + 1);
-    *m = (int)(mp < 10 ? mp + 3 : mp - 9);
-    *y = yoe + era * 400 + (*m <= 2);
-}
-
 /* Whole seconds plus nanoseconds into milliseconds, for readable durations. */
 static long ms_between(struct timespec a, struct timespec b)
 {
@@ -126,8 +99,10 @@ static long ms_between(struct timespec a, struct timespec b)
 static void show_time(void)
 {
     struct timespec rt, mt;
-    long secs, days, rem, up, y;
-    int m, d;
+    struct tm tm;
+    time_t secs;
+    char date[64];
+    long up;
 
     if (clock_gettime(CLOCK_REALTIME, &rt) != 0) {
         say("time: clock_gettime(CLOCK_REALTIME) failed");
@@ -138,20 +113,31 @@ static void show_time(void)
         return;
     }
 
-    secs = rt.tv_sec;
-    days = secs / 86400L;
-    rem = secs % 86400L;
-    civil_from_days(days, &y, &m, &d);
+    secs = (time_t)rt.tv_sec;
+    gmtime_r(&secs, &tm);
+    strftime(date, sizeof(date), "%Y-%m-%d %H:%M:%S", &tm);
 
-    say("realtime   %04ld-%02d-%02d %02d:%02d:%02d.%03ld UTC", y, m, d,
-        (int)(rem / 3600L), (int)((rem / 60L) % 60L), (int)(rem % 60L),
-        rt.tv_nsec / 1000000L);
+    say("realtime   %s.%03ld UTC", date, rt.tv_nsec / 1000000L);
 
     up = mt.tv_sec * 1000L + mt.tv_nsec / 1000000L;
     say("monotonic  %ldd %02ldh %02ldm %02ld.%03lds since boot",
         up / 86400000L, (up / 3600000L) % 24L, (up / 60000L) % 60L,
         (up / 1000L) % 60L, up % 1000L);
     say("boot time  %ld.%09ld CLOCK_MONOTONIC", mt.tv_sec, mt.tv_nsec);
+}
+
+static void cmd_date(void)
+{
+    time_t now = time(NULL);
+    struct tm tm;
+    char buf[64];
+
+    if (now == (time_t)-1 || !gmtime_r(&now, &tm)) {
+        say("date: could not read the clock");
+        return;
+    }
+    strftime(buf, sizeof(buf), "%a %b %e %H:%M:%S %Y UTC", &tm);
+    say("%s (%ld)", buf, (long)now);
 }
 
 struct slot {
@@ -298,6 +284,7 @@ static void cmd_help(void)
         FR_INIT_NAME, FR_PROJECT_NAME, FR_CORE_NAME);
     say("  mem                  %lu-round allocator benchmark", MEM_ROUNDS);
     say("  time                 wall clock, monotonic clock and boot time");
+    say("  date                 current UTC date and Unix time");
     say("  uptime               time since this process started");
     say("  clear                clear the screen and home the cursor");
     say("  lscpu                page size, cpu count, getauxval() entries");
@@ -396,6 +383,8 @@ static int dispatch(int argc, char **argv)
         bench_mem();
     } else if (strcmp(argv[0], "time") == 0) {
         show_time();
+    } else if (strcmp(argv[0], "date") == 0) {
+        cmd_date();
     } else if (strcmp(argv[0], "uptime") == 0) {
         cmd_uptime();
     } else if (strcmp(argv[0], "clear") == 0) {
