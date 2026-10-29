@@ -143,7 +143,7 @@ static int clearing_timer;
 static bool clearing_rows[BOARD_H];
 static int clearing_count;
 
-static int shake_timer, shake_mag;
+static int shake_timer, shake_mag, shake_pulses;
 static char popup_text[24];
 static int popup_timer;
 static uint32_t popup_colour;
@@ -310,13 +310,17 @@ static int line_value(int n)
     return value[n > 4 ? 4 : n];
 }
 
-static int spin_value(int n, bool mini, bool is_t)
+/*
+ * A spin multiplies the line value instead of having its own score table.
+ * A T-spin double is 4 x 300 = 1200 and a T-spin single 4 x 100 = 400, so a
+ * double is always worth more than a single without a second table to keep in
+ * sync. A spin that clears no lines is worth nothing.
+ */
+static int spin_multiplier(bool mini, bool is_t)
 {
     if (!is_t)
-        return n == 0 ? 400 : (n == 1 ? 800 : (n == 2 ? 1200 : 1600));
-    if (mini)
-        return n == 0 ? 100 : (n == 1 ? 200 : 400);
-    return n == 0 ? 400 : (n == 1 ? 800 : (n == 2 ? 1200 : 1600));
+        return 2;           /* all-spin */
+    return mini ? 2 : 4;    /* T-spin mini / full T-spin */
 }
 
 /* --------------------------------------------------------------- input ----- */
@@ -346,12 +350,44 @@ static int read_key(void)
 
 /* --------------------------------------------------------------- render ---- */
 
+static int clamp255(int v)
+{
+    return v < 0 ? 0 : (v > 255 ? 255 : v);
+}
+
+/* Lighten/darken a packed display colour by `delta` per channel. */
+static uint32_t shade(uint32_t colour, int delta)
+{
+    int rs = canvas.display.red_shift;
+    int gs = canvas.display.green_shift;
+    int bs = canvas.display.blue_shift;
+    int r = clamp255((int)((colour >> rs) & 0xff) + delta);
+    int g = clamp255((int)((colour >> gs) & 0xff) + delta);
+    int b = clamp255((int)((colour >> bs) & 0xff) + delta);
+
+    return ((uint32_t)r << rs) | ((uint32_t)g << gs) | ((uint32_t)b << bs);
+}
+
+/* A beveled block: base colour with a lit top/left edge, shaded bottom/right
+ * and a small glint. Cheap (five rectangles) and reads as depth at 28 px. */
+static void draw_block_px(int x, int y, int size, uint32_t colour)
+{
+    if (size < 4) {
+        gfx_fill_rect(&canvas, x, y, size, size, colour);
+        return;
+    }
+    gfx_fill_rect(&canvas, x, y, size, size, colour);
+    gfx_fill_rect(&canvas, x, y, size, 3, shade(colour, 70));
+    gfx_fill_rect(&canvas, x, y, 3, size, shade(colour, 45));
+    gfx_fill_rect(&canvas, x, y + size - 3, size, 3, shade(colour, -75));
+    gfx_fill_rect(&canvas, x + size - 3, y, 3, size, shade(colour, -55));
+    gfx_fill_rect(&canvas, x + 3, y + 3, 3, 3, shade(colour, 100));
+}
+
 static void draw_cell(int bx, int by, uint32_t colour)
 {
-    gfx_fill_rect(&canvas, board_x + bx * CELL_PX, board_y + by * CELL_PX,
-                  CELL_PX - 1, CELL_PX - 1, colour);
-    gfx_fill_rect(&canvas, board_x + bx * CELL_PX, board_y + by * CELL_PX,
-                  CELL_PX - 1, 2, cell_edge);
+    draw_block_px(board_x + bx * CELL_PX, board_y + by * CELL_PX,
+                  CELL_PX - 1, colour);
 }
 
 static void draw_piece_preview(int type, int x, int y, int cell)
@@ -361,8 +397,8 @@ static void draw_piece_preview(int type, int x, int y, int cell)
     for (int row = 0; row < 4; row++)
         for (int col = 0; col < 4; col++)
             if (mask & (1u << (15 - (row * 4 + col))))
-                gfx_fill_rect(&canvas, x + col * cell, y + row * cell,
-                              cell - 1, cell - 1, piece_colours[type]);
+                draw_block_px(x + col * cell, y + row * cell, cell - 1,
+                              piece_colours[type]);
 }
 
 static void render(void)
@@ -383,32 +419,40 @@ static void render(void)
     board_x += sx;
     board_y += sy;
 
-    gfx_clear(&canvas, background);
+    /* Soft vertical gradient instead of a flat background. */
+    int bands = 24;
 
-    /* Playfield */
-    gfx_fill_rect(&canvas, board_x - 4, board_y - 4,
-                  BOARD_W * CELL_PX + 8, BOARD_H * CELL_PX + 8, cell_edge);
+    for (int i = 0; i < bands; i++) {
+        int y = i * (int)canvas.height / bands;
+        int h = (int)canvas.height / bands + 1;
+
+        gfx_fill_rect(&canvas, 0, y, (int)canvas.width, h,
+                      shade(background, -14 + i * 2));
+    }
+
+    /* Playfield interior and grid. */
+    gfx_fill_rect(&canvas, board_x, board_y, BOARD_W * CELL_PX,
+                  BOARD_H * CELL_PX, shade(background, -6));
+    for (int x = 1; x < BOARD_W; x++)
+        gfx_fill_rect(&canvas, board_x + x * CELL_PX, board_y, 1,
+                      BOARD_H * CELL_PX, shade(background, 8));
+    for (int y = 1; y < BOARD_H; y++)
+        gfx_fill_rect(&canvas, board_x, board_y + y * CELL_PX,
+                      BOARD_W * CELL_PX, 1, shade(background, 8));
 
     bool flash = clearing_timer > 0 && ((clearing_timer / 35) & 1) != 0;
 
     for (int y = 0; y < BOARD_H; y++) {
         for (int x = 0; x < BOARD_W; x++) {
-            if (clearing_rows[y] && flash) {
-                gfx_fill_rect(&canvas, board_x + x * CELL_PX,
-                              board_y + y * CELL_PX, CELL_PX - 1,
+            if (clearing_rows[y] && flash)
+                draw_block_px(board_x + x * CELL_PX, board_y + y * CELL_PX,
                               CELL_PX - 1, 0xFFFFFF);
-                continue;
-            }
-            if (board[y][x])
+            else if (board[y][x])
                 draw_cell(x, y, piece_colours[board[y][x]]);
-            else
-                gfx_fill_rect(&canvas, board_x + x * CELL_PX,
-                              board_y + y * CELL_PX, CELL_PX - 1, CELL_PX - 1,
-                              background);
         }
     }
 
-    /* Ghost and active piece */
+    /* Ghost outline and active piece. */
     if (!game_over && clearing_timer <= 0) {
         int gy = py;
 
@@ -419,9 +463,9 @@ static void render(void)
         piece_cells(piece, rot, px, gy, cx, cy);
         for (int i = 0; i < 4; i++)
             if (cy[i] >= 0)
-                gfx_fill_rect(&canvas, board_x + cx[i] * CELL_PX,
-                              board_y + cy[i] * CELL_PX, CELL_PX - 1,
-                              CELL_PX - 1, ghost_colour);
+                gfx_rect_outline(&canvas, board_x + cx[i] * CELL_PX,
+                                 board_y + cy[i] * CELL_PX, CELL_PX - 1,
+                                 CELL_PX - 1, 2, ghost_colour);
 
         piece_cells(piece, rot, px, py, cx, cy);
         for (int i = 0; i < 4; i++)
@@ -432,14 +476,40 @@ static void render(void)
     board_x = ox;
     board_y = oy;
 
+    /* Frame: heavy outer edge, light inner rule. */
+    gfx_rect_outline(&canvas, board_x - 5, board_y - 5,
+                     BOARD_W * CELL_PX + 10, BOARD_H * CELL_PX + 10, 4,
+                     shade(cell_edge, -15));
+    gfx_rect_outline(&canvas, board_x - 1, board_y - 1,
+                     BOARD_W * CELL_PX + 2, BOARD_H * CELL_PX + 2, 1,
+                     shade(cell_edge, 45));
+
+    /* Chain state above the playfield, clear of the score readouts. */
+    if (combo > 1) {
+        char buf[16];
+
+        snprintf(buf, sizeof(buf), "COMBO %d", combo);
+        draw_text(board_x + (BOARD_W * CELL_PX - text_width(buf, 2)) / 2,
+                  board_y - 38, buf, 2, gfx_rgb(&canvas, 120, 220, 255));
+    }
+    if (back_to_back) {
+        const char *b2b = "B2B";
+
+        draw_text(board_x + (BOARD_W * CELL_PX - text_width(b2b, 2)) / 2,
+                  board_y - 22, b2b, 2, gfx_rgb(&canvas, 255, 150, 60));
+    }
+
     /* Panel */
     int cell = 18;
     int y = board_y;
 
+    draw_text(panel_x, y - 34, "TETRIS", 2, gfx_rgb(&canvas, 220, 225, 240));
     draw_text(panel_x, y, "HOLD", 2, 0xFFFFFF);
     y += 26;
     gfx_fill_rect(&canvas, panel_x - 4, y - 4, 4 * cell + 8, 3 * cell + 8,
-                  cell_edge);
+                  shade(background, -4));
+    gfx_rect_outline(&canvas, panel_x - 4, y - 4, 4 * cell + 8, 3 * cell + 8,
+                     1, cell_edge);
     if (hold_piece)
         draw_piece_preview(hold_piece, panel_x + cell / 2, y, cell);
     y += 3 * cell + 24;
@@ -448,7 +518,9 @@ static void render(void)
     y += 26;
     for (int i = 0; i < NEXT_COUNT; i++) {
         gfx_fill_rect(&canvas, panel_x - 4, y - 4, 4 * cell + 8,
-                      3 * cell + 8, cell_edge);
+                      3 * cell + 8, shade(background, -4));
+        gfx_rect_outline(&canvas, panel_x - 4, y - 4, 4 * cell + 8,
+                         3 * cell + 8, 1, cell_edge);
         draw_piece_preview(next_queue[i], panel_x + cell / 2, y, cell);
         y += 3 * cell + 18;
     }
@@ -462,19 +534,6 @@ static void render(void)
     y += 50;
     draw_text(panel_x, y, "LINES", 2, 0xAAAAAA);
     draw_number(panel_x, y + 18, lines, 2, 0xFFFFFF);
-
-    /* Chain indicators, as TETR.IO shows them beside the playfield. */
-    if (back_to_back) {
-        y += 40;
-        draw_text(panel_x, y, "B2B", 2, gfx_rgb(&canvas, 255, 150, 60));
-    }
-    if (combo > 1) {
-        y += 22;
-        char buf[16];
-
-        snprintf(buf, sizeof(buf), "COMBO %d", combo);
-        draw_text(panel_x, y, buf, 2, gfx_rgb(&canvas, 120, 220, 255));
-    }
 
     /* Popup over the playfield. */
     if (popup_timer > 0 && popup_text[0]) {
@@ -653,8 +712,9 @@ static void finish_clear(void)
         /* TETR.IO's perfect-clear value, level-scaled like every other bonus. */
         score += PERFECT_CLEAR_BONUS * (level + 1);
         set_popup("ALL CLEAR", gfx_rgb(&canvas, 255, 215, 80), POPUP_MS + 250);
-        shake_timer = SHAKE_MS + 120;
-        shake_mag = 14;
+        shake_timer = SHAKE_MS;
+        shake_pulses = 3;
+        shake_mag = 12;
     }
 
     hold_used = false;
@@ -716,8 +776,12 @@ static void lock_piece(void)
     int cleared = clearing_count;
 
     if (cleared > 0 || is_spin) {
-        int base = is_spin ? spin_value(cleared, mini, is_t)
-                           : line_value(cleared);
+        int base = line_value(cleared);
+
+        if (is_spin)
+            base *= spin_multiplier(mini, is_t);
+        if (cleared == 0)
+            base = 0;       /* a spin with no line clear scores nothing */
         bool b2b_clear = cleared == 4 || (is_spin && cleared > 0);
 
         /* Back-to-back: a tetris or a spin line clear keeps the chain alive
@@ -772,8 +836,11 @@ static void lock_piece(void)
             set_popup(label, colour, POPUP_MS);
         }
 
+        /* Every pulse is the same length; more intensity is more pulses,
+         * never a longer single shake. */
         shake_timer = SHAKE_MS;
-        shake_mag = 3 + cleared * 2 + (is_spin ? 3 : 0);
+        shake_pulses = 1 + (cleared >= 3 ? 1 : 0) + (is_spin ? 1 : 0);
+        shake_mag = 3 + cleared + (is_spin ? 2 : 0);
     }
 
     /* Cleared rows flash for a moment before the board collapses; the next
@@ -869,7 +936,7 @@ int main(void)
 
     background = gfx_rgb(&canvas, 14, 16, 22);
     cell_edge = gfx_rgb(&canvas, 55, 62, 78);
-    ghost_colour = gfx_rgb(&canvas, 40, 46, 60);
+    ghost_colour = gfx_rgb(&canvas, 95, 110, 140);
     piece_colours[P_I] = gfx_rgb(&canvas, 60, 210, 220);
     piece_colours[P_O] = gfx_rgb(&canvas, 240, 210, 60);
     piece_colours[P_T] = gfx_rgb(&canvas, 180, 80, 220);
@@ -909,8 +976,13 @@ int main(void)
 
         if (popup_timer > 0)
             popup_timer -= elapsed;
-        if (shake_timer > 0)
+        if (shake_timer > 0) {
             shake_timer -= elapsed;
+            if (shake_timer <= 0 && shake_pulses > 1) {
+                shake_pulses--;
+                shake_timer = SHAKE_MS;   /* identical next pulse */
+            }
+        }
 
         if (!paused && !game_over) {
             uint64_t keys = 0;
