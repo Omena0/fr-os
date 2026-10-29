@@ -124,6 +124,13 @@ them is how time is lost.
   parent's values. `ret_to_user_regs(&struct fork_regs)` does that; the entry
   path already saves all six above `struct syscall_regs` (offsets 104..144 from
   `&regs`), so no new asm saving is needed.
+- **8042 status bit 2 is the self-test/system flag, not the source of the
+  byte.** It is 1 after POST, so `status & 0x04` is true for *every* keyboard
+  byte on QEMU. Auxiliary (mouse) data is bit 5 (`0x20`). The PS/2 driver
+  checked bit 2 as "aux", read the scancode and discarded it — so IRQ1 fired,
+  the PIC/IDT/handler were all correct, and no key ever arrived. The lesson:
+  when an interrupt fires but the device seems empty, print the status byte
+  the handler reads; do not infer it from the fact that the IRQ fired.
 - **The kernel image budget is a hard link-time assert, not a guideline.**
   `KERNEL_MAX_BYTES = 0x1D0000` (`src/kernel/link.ld`, mirroring the stage2
   landing zone). A `struct fork_regs fork_ctx[MAX_CPUS]` scratch array (256
