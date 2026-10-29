@@ -147,6 +147,9 @@ static struct term_attr cur = {
 
 static uint8_t current_attr = TERM_ATTR_NORMAL;
 
+/* Blink phase, toggled from the timer tick. True = foreground visible. */
+static bool blink_on = true;
+
 /* xterm's 256-colour palette. */
 static void ansi256_to_rgb(uint8_t n, uint8_t *r, uint8_t *g, uint8_t *b)
 {
@@ -245,6 +248,9 @@ static void term_resolve(int16_t fg_idx, const uint8_t *fg_rgb,
         *br = t0; *bg = t1; *bb = t2;
     }
     if (flags & TA_HIDDEN) {
+        *fr = *br; *fg = *bg; *fb = *bb;
+    }
+    if ((flags & TA_BLINK) && !blink_on) {
         *fr = *br; *fg = *bg; *fb = *bb;
     }
 }
@@ -953,6 +959,41 @@ static bool handle_escape(char c)
 }
 
 /* ------------------------------------------------------------- public ------ */
+
+/*
+ * Toggle the blink phase from the timer tick and repaint only the cells that
+ * asked for it. Called in interrupt context, so it takes the console lock
+ * with trylock: if the interrupted code is mid-write the phase change is
+ * simply deferred to the next tick rather than deadlocking against a lock
+ * this CPU already holds.
+ */
+void console_blink_tick(u64 now_ns)
+{
+    bool on = ((now_ns / 500000000ull) & 1ull) == 0;
+
+    if (on == blink_on)
+        return;
+    if (!spinlock_trylock(&console_lock))
+        return;
+
+    blink_on = on;
+    if (fb.cells && fb.cols) {
+        for (uint32_t r = 0; r < fb.rows; r++) {
+            for (uint32_t c = 0; c < fb.cols; c++) {
+                struct fb_cell *cell = &fb.cells[r * fb.cols + c];
+                uint8_t fr, fg, fb_, br, bg, bb;
+
+                if (!(cell->flags & TA_BLINK))
+                    continue;
+                fb_cell_colors(cell, &fr, &fg, &fb_, &br, &bg, &bb);
+                fb_render_glyph(c, r, cell->ch, fr, fg, fb_, br, bg, bb,
+                                cell->flags);
+            }
+        }
+    }
+
+    spinlock_release(&console_lock);
+}
 
 void console_putc_attr(char c, uint8_t attr)
 {

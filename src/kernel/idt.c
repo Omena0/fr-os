@@ -12,6 +12,7 @@
 #include <interrupt.h>
 
 #include <console.h>
+#include <ktime.h>
 #include <drivers/serial.h>
 #include <gdt.h>
 #include <io.h>
@@ -739,6 +740,11 @@ static void pit_irq(struct interrupt_frame *f)
 {
     (void)f;
     pit_ticks++;
+
+    /* The only periodic hook text blink has. It defers internally if the
+     * console lock is busy, so it cannot deadlock against a write it
+     * interrupted. */
+    console_blink_tick(ktime_mono_ns());
 
     /*
      * The documented contract: "The timer driver calls this; the dispatch

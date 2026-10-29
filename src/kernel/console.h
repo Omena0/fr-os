@@ -65,6 +65,9 @@ void kprintf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 void kvprintf_to_console(const char *fmt, __builtin_va_list ap);
 
 void console_set_attr(uint8_t attr);
+
+/* Advance the text blink phase from timer context. */
+void console_blink_tick(u64 now_ns);
 uint8_t console_get_attr(void);
 
 /* Apply an SGR parameter string (e.g. "0;31") to set colors. */
