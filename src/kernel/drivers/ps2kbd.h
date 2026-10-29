@@ -26,6 +26,9 @@ u8 ps2kbd_set_typematic(u8 value);
 /* The last value this driver applied or was asked to apply. */
 u8 ps2kbd_get_typematic(void);
 
+/* Bitmap of scancodes currently held, bit sc for sc < 64. */
+u64 ps2kbd_key_mask(void);
+
 /* IRQ handler for keyboard interrupt (IRQ1 / VECTOR_IRQ_KEYBOARD). */
 void ps2kbd_irq(struct interrupt_frame *frame);
 

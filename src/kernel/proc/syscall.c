@@ -261,6 +261,20 @@ static long sc_gfx_info(struct syscall_regs *r)
  * struct can be negotiated by `size` without breaking old callers.
  */
 /*
+ * kbd_state(mask) — copy the held-scancode bitmap out. A program uses it to
+ * implement its own auto-repeat: the keyboard's typematic delay cannot go
+ * below 250 ms, which is too long for held movement in a game.
+ */
+static long sc_kbd_state(struct syscall_regs *r)
+{
+    u64 mask = ps2kbd_key_mask();
+
+    if (!arg0(r))
+        return -EFAULT;
+    return copy_to_user(arg0(r), &mask, sizeof(mask)) < 0 ? -EFAULT : 0;
+}
+
+/*
  * kbd_typematic(value) — set, or query with a negative value, the keyboard's
  * typematic delay/rate byte. Returns the previous value (or the current one
  * for a query), so a program can restore it when it exits.
@@ -1465,6 +1479,7 @@ void syscall_init(void)
     syscall_table[SYS_shutdown] = sc_shutdown;
     syscall_table[SYS_mouse_info] = sc_mouse_info;
     syscall_table[SYS_kbd_typematic] = sc_kbd_typematic;
+    syscall_table[SYS_kbd_state] = sc_kbd_state;
 
     /*
      * STAR carries both selector bases. SYSCALL loads CS from bits 47:32

@@ -234,6 +234,19 @@ static ps2kbd_callback_t keyboard_callback;
  * restore it. */
 static u8 typematic_value = KBD_TYPEMATIC_VALUE;
 
+/*
+ * Which scancodes are physically down, bit sc for sc < 64. The keyboard sends
+ * make and break codes; the break half was previously discarded, which made
+ * "is this key held" unanswerable and forced games to rely on the keyboard's
+ * typematic repeat. A program that wants its own delay and rate needs the key
+ * state, not repeated characters.
+ *
+ * Scancodes for the keys games use (letters, space, comma, period, digits) are
+ * all below 0x40, so one word is enough. Updated from IRQ1 and read by a
+ * syscall; a 64-bit aligned load/store is atomic on x86-64.
+ */
+static u64 key_mask;
+
 /* One scancode from port 0x60. Called from IRQ1 with interrupts off. */
 static void keyboard_scancode(uint8_t sc)
 {
@@ -258,6 +271,15 @@ static void keyboard_scancode(uint8_t sc)
         e0_prefix = true;
         return;
     }
+    /* Track press/release for the scancodes we can hold. E0-prefixed keys have
+     * their own path below and are not needed for text input. */
+    if (code < 64) {
+        if (make)
+            key_mask |= 1ULL << code;
+        else
+            key_mask &= ~(1ULL << code);
+    }
+
     if (e0_prefix) {
         /* Extended keys. Emit the same escape sequences a serial terminal
          * sends, so the tty/game input path does not need a second protocol.
@@ -437,6 +459,11 @@ u8 ps2kbd_set_typematic(u8 value)
 
     irq_restore(flags);
     return previous;
+}
+
+u64 ps2kbd_key_mask(void)
+{
+    return key_mask;
 }
 
 u8 ps2kbd_get_typematic(void)

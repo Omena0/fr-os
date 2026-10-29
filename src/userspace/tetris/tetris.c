@@ -37,6 +37,12 @@
 #define CELL_PX            28
 #define FRAME_MS           16      /* render/poll period */
 #define LOCK_DELAY_MS      500
+/* Held movement timing (DAS = time before repeat begins, ARR = repeat rate).
+ * These are the game's own values, not the keyboard's typematic setting,
+ * because the hardware delay cannot go below 250 ms. */
+#define DAS_DELAY_MS       167
+#define DAS_REPEAT_MS      35
+#define SOFT_REPEAT_MS     35
 #define LOCK_RESET_LIMIT   15
 #define SOFT_DROP_MS       40
 #define DAS_MS             140     /* delayed auto shift */
@@ -118,6 +124,13 @@ static int score, lines, level, combo;
 static bool back_to_back;
 static bool game_over, paused, quit_game;
 static bool dirty = true;
+
+/* Held-key state for DAS. ps2_mode latches once the keyboard reports a held
+ * key: from then on actions come from the bitmap, and character events are
+ * drained, so hardware typematic repeats cannot look like fresh presses. */
+static uint64_t keys_prev;
+static bool ps2_mode;
+static int das_dir, das_timer, arr_timer, soft_timer;
 
 static int gravity_timer, lock_timer, lock_resets;
 static bool grounded;
@@ -690,8 +703,6 @@ int main(void)
 
     rng_state ^= (uint32_t)now_ms();
 
-    int saved_repeat = kbd_typematic(KBD_TYPEMATIC_FAST);
-
     old_flags = fcntl(0, F_GETFL, 0);
     if (old_flags >= 0)
         fcntl(0, F_SETFL, old_flags | O_NONBLOCK);
@@ -716,47 +727,147 @@ int main(void)
         last = now;
 
         if (!paused && !game_over) {
-            /* Input. */
-            int c;
+            uint64_t keys = 0;
 
-            while ((c = read_key()) >= 0) {
-                switch (c) {
-                case 'a': case 'A':
+            if (kbd_state(&keys) < 0)
+                keys = 0;
+
+            bool just_entered = false;
+
+            if (keys && !ps2_mode) {
+                /* First PS/2 press: this frame still goes through the
+                 * character path, which already carries the press. Consume
+                 * the mask edge so it is not acted on twice. */
+                ps2_mode = true;
+                keys_prev = keys;
+                just_entered = true;
+            }
+
+            if (ps2_mode && !just_entered) {
+                uint64_t edges;
+
+                /* Actions come from the bitmap; discard the character events
+                 * the make codes also produced. */
+                while (read_key() >= 0)
+                    ;
+
+                edges = keys & ~keys_prev;
+
+                if (edges & (1ULL << KBD_SC_A)) {
                     move_piece(-1, 0);
-                    break;
-                case 'd': case 'D':
+                    das_dir = -1;
+                    das_timer = arr_timer = 0;
+                }
+                if (edges & (1ULL << KBD_SC_D)) {
                     move_piece(1, 0);
-                    break;
-                case 's': case 'S':
+                    das_dir = 1;
+                    das_timer = arr_timer = 0;
+                }
+                if (edges & (1ULL << KBD_SC_S)) {
                     if (move_piece(0, 1))
                         score += 1;
-                    gravity_timer = 0;
-                    break;
-                case ' ':
-                    hard_drop();
-                    break;
-                case 'c': case 'C':
-                    hold_piece_action();
-                    break;
-                case ',':
-                    rotate_piece(-1);
-                    break;
-                case '.':
-                    rotate_piece(1);
-                    break;
-                case 'f': case 'F':
-                    rotate_piece(2);
-                    break;
-                case 'p': case 'P':
-                    paused = !paused;
-                    break;
-                case 'q': case 'Q': case 0x03:
-                    quit_game = true;
-                    break;
-                default:
-                    break;
+                    soft_timer = 0;
                 }
-                dirty = true;
+                if (edges & (1ULL << KBD_SC_SPACE))
+                    hard_drop();
+                if (edges & (1ULL << KBD_SC_C))
+                    hold_piece_action();
+                if (edges & (1ULL << KBD_SC_COMMA))
+                    rotate_piece(-1);
+                if (edges & (1ULL << KBD_SC_DOT))
+                    rotate_piece(1);
+                if (edges & (1ULL << 0x21))          /* f */
+                    rotate_piece(2);
+                if (edges & (1ULL << 0x19))          /* p */
+                    paused = !paused;
+                if (edges & (1ULL << 0x10))          /* q */
+                    quit_game = true;
+
+                if (keys & (1ULL << KBD_SC_A)) {
+                    if (das_dir == -1) {
+                        das_timer += elapsed;
+                        if (das_timer >= DAS_DELAY_MS) {
+                            arr_timer += elapsed;
+                            while (arr_timer >= DAS_REPEAT_MS) {
+                                move_piece(-1, 0);
+                                arr_timer -= DAS_REPEAT_MS;
+                                dirty = true;
+                            }
+                        }
+                    }
+                } else if (das_dir == -1) {
+                    das_dir = 0;
+                }
+                if (keys & (1ULL << KBD_SC_D)) {
+                    if (das_dir == 1) {
+                        das_timer += elapsed;
+                        if (das_timer >= DAS_DELAY_MS) {
+                            arr_timer += elapsed;
+                            while (arr_timer >= DAS_REPEAT_MS) {
+                                move_piece(1, 0);
+                                arr_timer -= DAS_REPEAT_MS;
+                                dirty = true;
+                            }
+                        }
+                    }
+                } else if (das_dir == 1) {
+                    das_dir = 0;
+                }
+                if (keys & (1ULL << KBD_SC_S)) {
+                    soft_timer += elapsed;
+                    if (soft_timer >= SOFT_REPEAT_MS) {
+                        soft_timer = 0;
+                        if (move_piece(0, 1))
+                            score += 1;
+                        dirty = true;
+                    }
+                }
+
+                if (edges)
+                    dirty = true;
+                keys_prev = keys;
+            } else {
+                /* Serial fallback: no key-up information, so each character
+                 * is one action and the terminal's own repeat drives holds. */
+                int c;
+
+                while ((c = read_key()) >= 0) {
+                    switch (c) {
+                    case 'a': case 'A': move_piece(-1, 0); break;
+                    case 'd': case 'D': move_piece(1, 0); break;
+                    case 's': case 'S':
+                        if (move_piece(0, 1))
+                            score += 1;
+                        gravity_timer = 0;
+                        break;
+                    case ' ': hard_drop(); break;
+                    case 'c': case 'C': hold_piece_action(); break;
+                    case ',': rotate_piece(-1); break;
+                    case '.': rotate_piece(1); break;
+                    case 'f': case 'F': rotate_piece(2); break;
+                    case 'p': case 'P': paused = !paused; break;
+                    case 'q': case 'Q': case 0x03: quit_game = true; break;
+                    default: break;
+                    }
+                    dirty = true;
+                }
+            }
+
+            /*
+             * The transition frame took the character path, which moved once
+             * but does not own DAS state. Seed the repeat state from the same
+             * press so the hold actually repeats from here on.
+             */
+            if (just_entered) {
+                if (keys & (1ULL << KBD_SC_A)) {
+                    das_dir = -1;
+                    das_timer = arr_timer = 0;
+                } else if (keys & (1ULL << KBD_SC_D)) {
+                    das_dir = 1;
+                    das_timer = arr_timer = 0;
+                }
+                if (keys & (1ULL << KBD_SC_S))
+                    soft_timer = 0;
             }
 
             /* Gravity and lock. */
@@ -802,9 +913,6 @@ int main(void)
         struct timespec ts = { 0, FRAME_MS * 1000000L };
         nanosleep(&ts, NULL);
     }
-
-    if (saved_repeat >= 0)
-        kbd_typematic(saved_repeat);
 
     gfx_claim_screen_release();
     gfx_close(&canvas);

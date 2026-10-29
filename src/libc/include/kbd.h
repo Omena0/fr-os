@@ -19,6 +19,8 @@
 #ifndef KBD_H
 #define KBD_H
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -33,6 +35,25 @@ extern "C" {
  * to query without changing anything. Returns -1 with errno on failure.
  */
 int kbd_typematic(int value);
+
+/*
+ * Copy the held-scancode bitmap out: bit n is set while make code n is down.
+ * A game uses this to build its own repeat timing instead of relying on the
+ * keyboard's typematic delay, which cannot go below 250 ms.
+ *
+ * Returns 0, or -1 with errno. Scancodes for letters, digits, space, comma and
+ * period are all below 64.
+ */
+int kbd_state(uint64_t *mask);
+
+/* Scancodes of the keys games tend to hold. Set 1, US/Finnish physical keys. */
+#define KBD_SC_A     0x1E
+#define KBD_SC_S     0x1F
+#define KBD_SC_D     0x20
+#define KBD_SC_C     0x2E
+#define KBD_SC_COMMA 0x33
+#define KBD_SC_DOT   0x34
+#define KBD_SC_SPACE 0x39
 
 #ifdef __cplusplus
 }

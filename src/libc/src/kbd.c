@@ -7,6 +7,17 @@
 
 extern long __syscall1(long number, long a1);
 
+int kbd_state(uint64_t *mask)
+{
+    long ret = __syscall1(SYS_kbd_state, (long)mask);
+
+    if (ret < 0) {
+        __errno = (int)-ret;
+        return -1;
+    }
+    return 0;
+}
+
 int kbd_typematic(int value)
 {
     long ret = __syscall1(SYS_kbd_typematic, (long)value);
