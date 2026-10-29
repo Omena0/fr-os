@@ -112,6 +112,8 @@ Step 5 must happen even if the handler does not return: every exception that can
 
 **Exit**: `iretq` restores the registers and returns to the interrupted code, user or kernel. Nothing is popped in C; the whole frame is consumed by the instruction that ends the stub, which is why the stub restores the stack pointer it saved before switching rather than relying on anything the C code left behind.
 
+Between `interrupt_dispatch` and the restore, the stub calls `signal_apply_resume(frame)`. That is the only place a redirect recorded during dispatch (a signal handler being entered, for example) is written into the CPU-saved frame. It copies the record from `struct task` and does nothing when no record is pending, so ordinary interrupts pay one comparison.
+
 ## Kernel Interfaces
 
 ```c
@@ -171,14 +173,14 @@ The #PF case delegates to `vmm_handle_page_fault(addr, error_code)`, which is wh
 The exception layer classifies and reports; it does not decide what is
 recoverable, because that decision needs the page tables.
 
-A ring-3 exception that cannot be resumed kills the faulting process through
+A ring-3 exception that cannot be resumed is raised as a signal through
 `process_terminate_from_fault()`, which the exception layer calls through a weak
-hook. Until a signal subsystem exists that hook is the implementation:
-`process.c` provides it, maps the vector to a signal number (#DE/#XF -> SIGFPE,
-#UD -> SIGILL, #BP -> SIGTRAP, everything else -> SIGSEGV), and calls
-`task_exit_current(-signo)`. **No ring-3 fault may panic the kernel** — a bad
-userspace instruction is the process's problem, and the process dies with a
-nonzero exit status its parent can observe.
+hook. `process.c` provides it and maps the vector to a signal number (#DE/#XF ->
+SIGFPE, #UD -> SIGILL, #BP -> SIGTRAP, everything else -> SIGSEGV). The signal is
+marked pending; the exit path delivers it, so the default action terminates the
+process with that signal recorded for `wait4`, and a handler the process installed
+runs instead. **No ring-3 fault may panic the kernel** — a bad userspace
+instruction is the process's problem.
 
 The hook being weak matters: if nothing defines it, the pointer is NULL and the
 exception layer falls back to a kernel panic. That is the correct fallback for a
@@ -187,9 +189,8 @@ wild pointer in a test program takes the machine down. Check the symbol is
 defined (`nm build/kernel.elf | grep process_terminate_from_fault` should say
 `T`, not `W`) when adding a new build configuration.
 
-The "deliver a signal" behaviour for #DE, #UD and #BP described above is the
-eventual design, specified in [ipc/signals.md](../ipc/signals.md); today the
-process is terminated instead of a handler being invoked.
+Signal delivery for these faults follows [ipc/signals.md](../ipc/signals.md). The
+implementation status of that spec is recorded there.
 
 ## Inter-Processor Interrupts (IPIs)
 

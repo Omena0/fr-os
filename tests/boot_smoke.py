@@ -208,11 +208,17 @@ SIGNATURES = (
     ("kernel panic", "KERNEL PANIC", "src/kernel/core/panic.c:170"),
     ("exception report", "#EXC", "src/kernel/arch/idt.c:410"),
     ("unrecoverable page fault", "unrecoverable page fault",
-     "src/kernel/arch/idt.c:453"),
+     "src/kernel/arch/idt.c:484"),
     ("init process creation failed", "could not create the init process",
      "src/kernel/core/main.c:368"),
     ("bootloader fatal", "[boot2] FATAL:", "src/boot/stage2.c:218"),
 )
+
+
+# Exception reports from ring 3 are a process's own faults, which the kernel
+# survives by design (a test does this on purpose). Only ring-0 reports count
+# as a boot failure, so these two signatures skip any line that says rpl=3.
+RING3_IS_NOT_A_FAILURE = ("exception report", "unrecoverable page fault")
 
 
 def load_text(data):
@@ -274,7 +280,21 @@ def scan(text):
         # The klog prefix is "<timestamp> cpuN <file>/<L>] " and every log
         # line carries a number that changes every boot, so the line number
         # is the only stable way to point a human at the offending line.
-        at = text.find(needle)
+        at = -1
+        pos = 0
+        while True:
+            hit = text.find(needle, pos)
+            if hit < 0:
+                break
+            line_start = text.rfind("\n", 0, hit) + 1
+            line_end = text.find("\n", hit)
+            if line_end < 0:
+                line_end = len(text)
+            line = text[line_start:line_end]
+            if name not in RING3_IS_NOT_A_FAILURE or "rpl=3" not in line:
+                at = hit
+                break
+            pos = hit + len(needle)
         if at < 0:
             continue
         line_no = text.count("\n", 0, at) + 1

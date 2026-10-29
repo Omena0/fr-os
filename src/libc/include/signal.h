@@ -9,6 +9,7 @@
 #define SIGNAL_H
 
 #include <uapi/signal.h>
+#include <sys/types.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,6 +37,8 @@ int sigaddset(sigset_t *set, int sig);
 int sigdelset(sigset_t *set, int sig);
 int sigismember(const sigset_t *set, int sig);
 sighandler_t signal(int sig, sighandler_t handler);
+int kill(pid_t pid, int sig);
+int raise(int sig);
 
 #ifdef __cplusplus
 }

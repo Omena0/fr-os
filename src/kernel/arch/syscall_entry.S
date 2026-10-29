@@ -112,6 +112,8 @@
 #define REG_R10_OFF       32
 #define REG_R8_OFF        40
 #define REG_R9_OFF        48
+#define REG_RIP_OFF       72
+#define REG_RFLAGS_OFF    80
 
 /* After REG_FRAME_BYTES and the eight pops, RSP sits one padding slot below
  * the top of the frame, so the user RSP is this far below it. */
@@ -298,6 +300,8 @@ syscall_entry:
     movq    REG_R10_OFF(%rsp), %r10
     movq    REG_R8_OFF(%rsp), %r8
     movq    REG_R9_OFF(%rsp), %r9
+    movq    REG_RIP_OFF(%rsp), %rcx
+    movq    REG_RFLAGS_OFF(%rsp), %r11
 
     addq    $REG_FRAME_BYTES, %rsp
 
@@ -307,8 +311,12 @@ syscall_entry:
     popq    %r12
     popq    %rbx
     popq    %rbp
-    popq    %rcx            /* user RIP, which SYSRETQ takes from RCX */
-    popq    %r11            /* user RFLAGS, which SYSRETQ takes from R11 */
+    /*
+     * The stack copies of the user RIP and RFLAGS are skipped, not popped:
+     * SYSRETQ takes its RIP from RCX and RFLAGS from R11, and those come from
+     * the register struct, which a signal delivery may have redirected.
+     */
+    addq    $16, %rsp
 
     /*
      * SYSRETQ in 64-bit mode does not load RSP: the ring-3 stack pointer

@@ -1410,9 +1410,6 @@ static long sc_mlock(struct syscall_regs *r)
 
 /* ---------------------------------------------------------------- clone -- */
 
-#define SIGKILL 9
-#define SIGCHLD 17
-
 static long sc_clone(struct syscall_regs *r)
 {
     struct fork_regs fr;
@@ -1477,20 +1474,12 @@ static long sc_setsid(struct syscall_regs *r)
 
 static long sc_kill(struct syscall_regs *r)
 {
-    s64 pid = (s64)arg0(r);
-    s64 sig = (s64)arg1(r);
-    struct task *target;
+    return sys_kill((s64)arg0(r), (s64)arg1(r));
+}
 
-    UNUSED(r);
-    if (sig < 1 || sig > 64)
-        return -EINVAL;
-    target = task_find_by_pid((u32)pid);
-    if (!target)
-        return -ESRCH;
-    /* Signal delivery is not implemented yet; accept valid signals. */
-    if (sig == SIGKILL)
-        task_exit_current(-sig);
-    return 0;
+static long sc_rt_sigreturn(struct syscall_regs *r)
+{
+    return sys_rt_sigreturn(r);
 }
 
 static long sc_getuid(struct syscall_regs *r)
@@ -1575,7 +1564,19 @@ long syscall_dispatch(struct syscall_regs *regs)
          */
         t->fpu_dirty = (read_cr0() & CR0_TS) == 0;
     }
-    return fn(regs);
+    /*
+     * The return value goes into the register frame first, so that a signal
+     * frame built from it saves the value the caller is going to see.
+     * rt_sigreturn is the one handler whose return value is not its own: it
+     * returns the rax the interrupted code had, and that is what gets stored.
+     */
+    {
+        long ret = fn(regs);
+
+        regs->rax = (u64)ret;
+        signal_deliver_syscall(regs);
+        return ret;
+    }
 }
 
 void syscall_init(void)
@@ -1639,6 +1640,7 @@ void syscall_init(void)
     syscall_table[SYS_rt_sigaction] = sc_rt_sigaction;
     syscall_table[SYS_rt_sigprocmask] = sc_rt_sigprocmask;
     syscall_table[SYS_rt_sigpending] = sc_rt_sigpending;
+    syscall_table[SYS_rt_sigreturn] = sc_rt_sigreturn;
 
     /*
      * STAR carries both selector bases. SYSCALL loads CS from bits 47:32

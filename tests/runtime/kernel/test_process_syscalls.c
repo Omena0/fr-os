@@ -15,6 +15,7 @@
 /* include libc headers that come with the kernel's uapi headers */
 #include <uapi/sysinfo.h>
 #include <uapi/signal.h>
+#include <signal.h>
 #include <stdint.h>
 #include "time.h"  /* defines CLOCK_REALTIME, CLOCK_MONOTONIC from <uapi/syscall.h> */
 
@@ -212,10 +213,16 @@ static int test_clone_basic(void) {
 /* ===== kill ===== */
 
 static int test_kill_self(void) {
-    pid_t pid = (pid_t)syscall1(SYS_getpid, 0);
-    long ret = syscall2(SYS_kill, pid, SIGUSR1);
-    /* Should fail - signal not handled */
-    TEST_ASSERT(ret == 0 || ret == -EINVAL, "kill self with SIGUSR1 should work or return error");
+    struct sigaction ign;
+    struct sigaction dfl;
+
+    memset(&ign, 0, sizeof(ign));
+    memset(&dfl, 0, sizeof(dfl));
+    ign.sa_handler = SIG_IGN;
+    dfl.sa_handler = SIG_DFL;
+    TEST_ASSERT_EQ(sigaction(SIGUSR1, &ign, 0), 0, "ignoring SIGUSR1 should succeed");
+    TEST_ASSERT_EQ(kill(getpid(), SIGUSR1), 0, "kill self with an ignored signal should succeed");
+    TEST_ASSERT_EQ(sigaction(SIGUSR1, &dfl, 0), 0, "restoring SIGUSR1 should succeed");
     return TEST_PASS;
 }
 
@@ -229,6 +236,143 @@ static int test_kill_invalid_signal(void) {
     pid_t pid = (pid_t)syscall1(SYS_getpid, 0);
     long ret = syscall2(SYS_kill, pid, 999);
     TEST_ASSERT_EQ(ret, -EINVAL, "kill invalid signal should return -EINVAL");
+    return TEST_PASS;
+}
+
+static volatile int sig_hits;
+
+static void sig_count_handler(int sig) {
+    (void)sig;
+    sig_hits++;
+}
+
+static int install_count_handler(int sig) {
+    struct sigaction act;
+
+    memset(&act, 0, sizeof(act));
+    act.sa_handler = sig_count_handler;
+    sigemptyset(&act.sa_mask);
+    sig_hits = 0;
+    return sigaction(sig, &act, 0);
+}
+
+static void restore_default(int sig) {
+    struct sigaction dfl;
+
+    memset(&dfl, 0, sizeof(dfl));
+    dfl.sa_handler = SIG_DFL;
+    sigaction(sig, &dfl, 0);
+}
+
+static int test_signal_handler_runs_on_return(void) {
+    TEST_ASSERT_EQ(install_count_handler(SIGUSR1), 0, "installing a handler should succeed");
+    TEST_ASSERT_EQ(kill(getpid(), SIGUSR1), 0, "kill self should succeed");
+    TEST_ASSERT_EQ(sig_hits, 1, "the handler should have run before kill returned");
+    restore_default(SIGUSR1);
+    return TEST_PASS;
+}
+
+static int test_signal_blocked_until_unblocked(void) {
+    sigset_t set, old, pending;
+
+    TEST_ASSERT_EQ(install_count_handler(SIGUSR2), 0, "installing a handler should succeed");
+    sigemptyset(&set);
+    sigaddset(&set, SIGUSR2);
+    TEST_ASSERT_EQ(sigprocmask(SIG_BLOCK, &set, &old), 0, "blocking SIGUSR2 should succeed");
+    TEST_ASSERT_EQ(kill(getpid(), SIGUSR2), 0, "kill self should succeed");
+    TEST_ASSERT_EQ(sig_hits, 0, "a blocked signal must not run its handler");
+    TEST_ASSERT_EQ(sigpending(&pending), 0, "sigpending should succeed");
+    TEST_ASSERT_EQ(sigismember(&pending, SIGUSR2), 1, "the blocked signal should be pending");
+    TEST_ASSERT_EQ(sigprocmask(SIG_UNBLOCK, &set, 0), 0, "unblocking SIGUSR2 should succeed");
+    TEST_ASSERT_EQ(sig_hits, 1, "the handler should run once the signal is unblocked");
+    TEST_ASSERT_EQ(sigprocmask(SIG_SETMASK, &old, 0), 0, "restoring the mask should succeed");
+    restore_default(SIGUSR2);
+    return TEST_PASS;
+}
+
+static int test_signal_default_terminates(void) {
+    pid_t pid = (pid_t)syscall1(SYS_fork, 0);
+    int wstatus = 0;
+
+    TEST_ASSERT(pid >= 0, "fork should not fail");
+    if (pid == 0) {
+        kill(getpid(), SIGTERM);
+        syscall1(SYS_exit, 3);
+    }
+    TEST_ASSERT_EQ(syscall4(SYS_wait4, pid, (long)&wstatus, 0, 0), pid, "wait4 should return the child");
+    TEST_ASSERT(WIFSIGNALED(wstatus), "a child killed by SIGTERM should report a signal death");
+    TEST_ASSERT_EQ(WTERMSIG(wstatus), SIGTERM, "the terminating signal should be SIGTERM");
+    return TEST_PASS;
+}
+
+static int test_kill_other_process_handler(void) {
+    pid_t parent = getpid();
+    pid_t pid;
+    int wstatus = 0;
+
+    TEST_ASSERT_EQ(install_count_handler(SIGUSR2), 0, "installing a handler should succeed");
+    pid = (pid_t)syscall1(SYS_fork, 0);
+    TEST_ASSERT(pid >= 0, "fork should not fail");
+    if (pid == 0) {
+        kill(parent, SIGUSR2);
+        syscall1(SYS_exit, 0);
+    }
+    TEST_ASSERT_EQ(syscall4(SYS_wait4, pid, (long)&wstatus, 0, 0), pid, "wait4 should return the child");
+    TEST_ASSERT_EQ(sig_hits, 1, "a signal sent from another process should run the handler once");
+    restore_default(SIGUSR2);
+    return TEST_PASS;
+}
+
+static int test_signal_interrupts_busy_loop(void) {
+    pid_t pid;
+    int wstatus = 0;
+
+    TEST_ASSERT_EQ(install_count_handler(SIGUSR2), 0, "installing a handler should succeed");
+    pid = (pid_t)syscall1(SYS_fork, 0);
+    TEST_ASSERT(pid >= 0, "fork should not fail");
+    if (pid == 0) {
+        while (sig_hits == 0)
+            ;
+        syscall1(SYS_exit, 7);
+    }
+    TEST_ASSERT_EQ(kill(pid, SIGUSR2), 0, "SIGUSR2 to a busy child should succeed");
+    TEST_ASSERT_EQ(syscall4(SYS_wait4, pid, (long)&wstatus, 0, 0), pid, "wait4 should return the child");
+    TEST_ASSERT(WIFEXITED(wstatus), "a busy child should exit normally once its handler has run");
+    TEST_ASSERT_EQ(WEXITSTATUS(wstatus), 7, "the child should have seen its handler run");
+    restore_default(SIGUSR2);
+    return TEST_PASS;
+}
+
+static int test_kill_sigkill_other(void) {
+    struct timespec req = { .tv_sec = 0, .tv_nsec = 10000000 };
+    pid_t pid = (pid_t)syscall1(SYS_fork, 0);
+    int wstatus = 0;
+
+    TEST_ASSERT(pid >= 0, "fork should not fail");
+    if (pid == 0) {
+        for (;;)
+            syscall2(SYS_nanosleep, (long)&req, 0);
+    }
+    TEST_ASSERT_EQ(kill(pid, SIGKILL), 0, "SIGKILL to a child should succeed");
+    TEST_ASSERT_EQ(syscall4(SYS_wait4, pid, (long)&wstatus, 0, 0), pid, "wait4 should return the child");
+    TEST_ASSERT(WIFSIGNALED(wstatus), "a SIGKILLed child should report a signal death");
+    TEST_ASSERT_EQ(WTERMSIG(wstatus), SIGKILL, "the terminating signal should be SIGKILL");
+    return TEST_PASS;
+}
+
+static int test_fault_raises_sigsegv(void) {
+    pid_t pid = (pid_t)syscall1(SYS_fork, 0);
+    int wstatus = 0;
+
+    TEST_ASSERT(pid >= 0, "fork should not fail");
+    if (pid == 0) {
+        volatile int *wild = (volatile int *)0;
+        *wild = 1;
+        syscall1(SYS_exit, 3);
+    }
+    TEST_ASSERT_EQ(syscall4(SYS_wait4, pid, (long)&wstatus, 0, 0), pid, "wait4 should return the child");
+    TEST_ASSERT(WIFSIGNALED(wstatus), "a faulting child should report a signal death");
+    TEST_ASSERT_EQ(WTERMSIG(wstatus), SIGSEGV, "a null write should raise SIGSEGV");
     return TEST_PASS;
 }
 
@@ -522,6 +666,13 @@ struct test_suite test_process_syscalls = {
         { "rt_sigprocmask_unblockable", test_rt_sigprocmask_unblockable, false },
         { "rt_sigprocmask_bad_how", test_rt_sigprocmask_bad_how, false },
         { "rt_sigpending_empty", test_rt_sigpending_empty, false },
+        { "signal_handler_runs_on_return", test_signal_handler_runs_on_return, false },
+        { "signal_blocked_until_unblocked", test_signal_blocked_until_unblocked, false },
+        { "signal_default_terminates", test_signal_default_terminates, false },
+        { "kill_other_process_handler", test_kill_other_process_handler, false },
+        { "kill_sigkill_other", test_kill_sigkill_other, false },
+        { "fault_raises_sigsegv", test_fault_raises_sigsegv, false },
+        { "signal_interrupts_busy_loop", test_signal_interrupts_busy_loop, false },
         { "getrlimit_nofile", test_getrlimit_nofile, false },
         { "getrlimit_invalid_resource", test_getrlimit_invalid_resource, false },
         { "getrlimit_null", test_getrlimit_null, false },
@@ -535,5 +686,5 @@ struct test_suite test_process_syscalls = {
         { "arch_prctl_get_fs", test_arch_prctl_get_fs, false },
         { "arch_prctl_get_gs", test_arch_prctl_get_gs, false },
     },
-    .num_cases = 45,
+    .num_cases = 52,
 };

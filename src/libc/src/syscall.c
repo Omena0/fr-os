@@ -124,6 +124,11 @@ int sys_rt_sigprocmask(int how, const sigset_t *set, sigset_t *oset)
     return (int)check0(__syscall4(SYS_rt_sigprocmask, how, (long)set, (long)oset, sizeof(sigset_t)));
 }
 
+int sys_kill(pid_t pid, int sig)
+{
+    return (int)check0(__syscall2(SYS_kill, pid, sig));
+}
+
 int sys_rt_sigpending(sigset_t *set)
 {
     return (int)check0(__syscall2(SYS_rt_sigpending, (long)set, sizeof(sigset_t)));

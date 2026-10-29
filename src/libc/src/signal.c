@@ -9,6 +9,9 @@
 extern int sys_rt_sigaction(int sig, const struct kernel_sigaction *act, struct kernel_sigaction *oact);
 extern int sys_rt_sigprocmask(int how, const sigset_t *set, sigset_t *oset);
 extern int sys_rt_sigpending(sigset_t *set);
+extern int sys_kill(pid_t pid, int sig);
+extern void __restore_rt(void);
+extern pid_t getpid(void);
 
 static int sig_valid(int sig)
 {
@@ -29,9 +32,11 @@ int sigaction(int sig, const struct sigaction *act, struct sigaction *oact)
     if (!sig_valid(sig))
         return sig_bad();
     if (act) {
+        void (*restorer)(void) = act->sa_restorer ? act->sa_restorer : __restore_rt;
+
         ka.sa_handler = (uint64_t)(uintptr_t)act->sa_handler;
-        ka.sa_flags = act->sa_flags;
-        ka.sa_restorer = (uint64_t)(uintptr_t)act->sa_restorer;
+        ka.sa_flags = act->sa_flags | SA_RESTORER;
+        ka.sa_restorer = (uint64_t)(uintptr_t)restorer;
         ka.sa_mask = act->sa_mask;
     }
     rc = sys_rt_sigaction(sig, act ? &ka : NULL, oact ? &old : NULL);
@@ -102,4 +107,16 @@ sighandler_t signal(int sig, sighandler_t handler)
     if (sigaction(sig, &act, &old) < 0)
         return SIG_ERR;
     return old.sa_handler;
+}
+
+int kill(pid_t pid, int sig)
+{
+    if (sig < 0 || sig >= NSIG)
+        return sig_bad();
+    return sys_kill(pid, sig);
+}
+
+int raise(int sig)
+{
+    return kill(getpid(), sig);
 }

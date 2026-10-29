@@ -211,6 +211,8 @@ interrupt_common:
     save_regs
     movq    %rsp, %rdi            /* struct interrupt_frame * */
     call    interrupt_dispatch
+    movq    %rsp, %rdi            /* exit path: apply a signal redirect */
+    call    signal_apply_resume
     restore_regs
     addq    $16, %rsp            /* vector and the error-code slot */
     iretq

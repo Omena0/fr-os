@@ -606,7 +606,14 @@ long sys_wait4(s64 pid, u64 wstatus, u64 options, u64 rusage)
              * the exit code and the next says "exited normally",
              * which is what every libc's WIFEXITED looks for.
              */
-            int status = (reaped->exit_code & 0xff) << 8;
+            /*
+             * A process killed by a signal reports the signal in the low
+             * seven bits and no exit code, which is what WIFSIGNALED and
+             * WTERMSIG read. Otherwise the exit code goes in the next byte.
+             */
+            int status = reaped->term_signal
+                ? (reaped->term_signal & 0x7f)
+                : ((reaped->exit_code & 0xff) << 8);
             u32 rp = (u32)reaped->pid;
 
             if (wstatus) {
@@ -1920,30 +1927,18 @@ long sys_execve(u64 path, u64 argv, u64 envp)
 
 /* ------------------------------------------------- fatal-fault termination -- */
 
-/* Signal numbers used when a process kills itself with a bad instruction.
- * Only the ones the exception layer can raise are defined here; the full
- * signal ABI belongs to the (not yet implemented) signal subsystem. */
-#define SIGILL   4
-#define SIGTRAP  5
-#define SIGFPE   8
-#define SIGSEGV  11
-
 /*
  * process_terminate_from_fault - the process half of the exception layer.
  *
- * interrupt.h declares this weak so the kernel links without a signal
- * subsystem, and the exception layer falls back to it when a ring-3 process
- * takes an exception that is fatal to that process. Until this function
- * existed the weak symbol was NULL, so the fallback did not exist either and
- * *any* such fault — a bad userspace instruction, a wild pointer dereference —
- * panicked the whole machine. A userspace bug must never be able to stop the
- * kernel; the fault belongs to the process, and killing that process is the
- * documented behaviour (docs/src/kernel/interrupt-handling.md).
+ * A ring-3 exception that is fatal to the process is raised as its signal.
+ * Until signals existed this killed the process here, so *any* such fault — a
+ * bad userspace instruction, a wild pointer dereference — had no way to reach a
+ * handler. The signal is only marked pending: the exception layer returns, and
+ * the interrupt exit delivers it, which runs the default action (terminate, with
+ * the signal recorded for wait4) or a handler the process installed.
  *
  * Called from the exception handler, i.e. from interrupt context, on the
- * faulting task's own kernel stack. task_exit_current() does not return: it
- * drops the task from the run queue, releases its address space, wakes its
- * parent and switches this CPU to the idle task.
+ * faulting task's own kernel stack.
  */
 void process_terminate_from_fault(struct interrupt_frame *frame)
 {
@@ -1977,9 +1972,9 @@ void process_terminate_from_fault(struct interrupt_frame *frame)
     }
 
     klog_emit(KLOG_WARN, "process",
-              "pid %u killed: fatal exception vector %lu (sig %d) at rip 0x%lx",
+              "pid %u fatal exception vector %lu raises sig %d at rip 0x%lx",
               t->pid, (unsigned long)frame->vector, signo,
               (unsigned long)frame->rip);
 
-    task_exit_current(-signo);
+    signal_send(t, signo);
 }

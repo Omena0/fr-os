@@ -256,6 +256,11 @@ STATIC_ASSERT(offsetof(struct fork_regs, rbp) == 64, "fork_regs.rbp offset");
 STATIC_ASSERT(offsetof(struct fork_regs, rdi) == 72, "fork_regs.rdi offset");
 STATIC_ASSERT(offsetof(struct fork_regs, r11) == 128, "fork_regs.r11 offset");
 
+struct sig_resume {
+    bool valid;
+    u64 rax, rdi, rsi, rdx, rcx, r8, r9, r10, r11, rip, rflags, rsp;
+};
+
 struct task {
     /* --- identity ------------------------------------------------------- */
     u32 pid;
@@ -365,8 +370,13 @@ struct task {
     /* Signal state. Dispositions and the blocked set are inherited by fork;
      * the pending set is not. */
     struct kernel_sigaction sig_actions[NSIG];
-    u64 sig_blocked;
+    u64 sig_mask;
     u64 sig_pending;
+    /* Signal that ended the process, or 0. wait4 reports it as a signal death. */
+    int term_signal;
+    /* A redirect recorded by signal delivery on an interrupt exit. The exit
+     * path copies it into the CPU-saved frame; dispatch never writes the frame. */
+    struct sig_resume sig_resume;
 
     /* --- process relationships ------------------------------------------- */
     struct list_head sibling;   /* on the parent's children list */

@@ -21,6 +21,7 @@
 #include <panic.h>
 #include <percpu.h>
 #include <sched.h>
+#include <signals.h>
 #include <types.h>
 #include <vmm.h>
 
@@ -437,9 +438,6 @@ static void terminate_current_user(struct interrupt_frame *f)
     if (per_cpu(preempt_count) > 0)
         per_cpu(preempt_count)--;
     process_terminate_from_fault(f);
-    /* The current implementation is noreturn, so the line below is not
-     * reached. It restores the depth interrupt_dispatch() still expects to
-     * undo on its way out if a returning substitute is ever linked. */
     per_cpu(preempt_count)++;
 }
 
@@ -479,7 +477,7 @@ static void exception_handler(struct interrupt_frame *f){
          * satisfy is a kernel bug worth panicking on.
          */
         if (from_user && process_terminate_from_fault) {
-            report_exception(f, "unrecoverable page fault; killing process");
+            report_exception(f, "unrecoverable page fault; raising its fatal signal");
             terminate_current_user(f);
             return;
         }
@@ -941,6 +939,14 @@ void interrupt_dispatch(struct interrupt_frame *f)
     }
 
     per_cpu(preempt_count)--;
+
+    /*
+     * Signals are delivered only when the interrupted code was ring 3. A kernel
+     * frame has no handler to enter, and a signal raised in kernel context waits
+     * for the next return to user mode.
+     */
+    if ((f->cs & 3) == 3)
+        signal_deliver_interrupt(f);
 
     /*
      * Reschedule only at the outermost level: a timer that fires inside a

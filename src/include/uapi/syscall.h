@@ -76,6 +76,7 @@
 #define SYS_rt_sigaction 22u
 #define SYS_rt_sigprocmask 23u
 #define SYS_rt_sigpending 25u
+#define SYS_rt_sigreturn 24u
 
 /* Memory management. */
 #define SYS_mmap         32u
