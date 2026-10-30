@@ -139,6 +139,91 @@ pid_t sys_setsid(void)
     return (pid_t)check0(__syscall0(SYS_setsid));
 }
 
+long sys_getdents(int fd, void *buf, unsigned long count)
+{
+    return check0(__syscall3(SYS_getdents, fd, (long)buf, (long)count));
+}
+
+int sys_stat(const char *path, struct kstat *st)
+{
+    return (int)check0(__syscall2(SYS_stat, (long)path, (long)st));
+}
+
+int sys_lstat(const char *path, struct kstat *st)
+{
+    return (int)check0(__syscall2(SYS_lstat, (long)path, (long)st));
+}
+
+int sys_access(const char *path, int mode)
+{
+    return (int)check0(__syscall2(SYS_access, (long)path, mode));
+}
+
+int sys_mkdir(const char *path, unsigned int mode)
+{
+    return (int)check0(__syscall2(SYS_mkdir, (long)path, mode));
+}
+
+int sys_rmdir(const char *path)
+{
+    return (int)check0(__syscall1(SYS_rmdir, (long)path));
+}
+
+int sys_unlink(const char *path)
+{
+    return (int)check0(__syscall1(SYS_unlink, (long)path));
+}
+
+int sys_rename(const char *oldpath, const char *newpath)
+{
+    return (int)check0(__syscall2(SYS_rename, (long)oldpath, (long)newpath));
+}
+
+int sys_chdir(const char *path)
+{
+    return (int)check0(__syscall1(SYS_chdir, (long)path));
+}
+
+long sys_getcwd(char *buf, unsigned long size)
+{
+    return check0(__syscall2(SYS_getcwd, (long)buf, (long)size));
+}
+
+int sys_link(const char *oldpath, const char *newpath)
+{
+    return (int)check0(__syscall2(SYS_link, (long)oldpath, (long)newpath));
+}
+
+int sys_symlink(const char *target, const char *linkpath)
+{
+    return (int)check0(__syscall2(SYS_symlink, (long)target, (long)linkpath));
+}
+
+int sys_readlink(const char *path, char *buf, unsigned long bufsiz)
+{
+    return (int)check0(__syscall3(SYS_readlink, (long)path, (long)buf, (long)bufsiz));
+}
+
+int sys_chmod(const char *path, unsigned int mode)
+{
+    return (int)check0(__syscall2(SYS_chmod, (long)path, mode));
+}
+
+int sys_chown(const char *path, int uid, int gid)
+{
+    return (int)check0(__syscall3(SYS_chown, (long)path, uid, gid));
+}
+
+int sys_truncate(const char *path, long length)
+{
+    return (int)check0(__syscall2(SYS_truncate, (long)path, length));
+}
+
+int sys_ftruncate(int fd, long length)
+{
+    return (int)check0(__syscall2(SYS_ftruncate, fd, length));
+}
+
 int sys_poll(struct pollfd *fds, unsigned long nfds, int timeout)
 {
     return (int)check0(__syscall3(SYS_poll, (long)fds, (long)nfds, timeout));

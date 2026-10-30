@@ -67,6 +67,9 @@ extern int    pipe(int pipefd[2]);
 
 extern pid_t  fork(void);
 extern int    execve(const char *path, char *const argv[], char *const envp[]);
+extern int    execv(const char *path, char *const argv[]);
+extern int    execvp(const char *file, char *const argv[]);
+extern int    execvpe(const char *file, char *const argv[], char *const envp[]);
 extern pid_t  waitpid(pid_t pid, int *wstatus, int options);
 extern pid_t  wait4(pid_t pid, int *wstatus, int options, void *rusage);
 #define WNOHANG     1

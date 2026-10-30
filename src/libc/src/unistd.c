@@ -29,6 +29,8 @@
 #include <sys/mman.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
 
 /* Missing POSIX types not in sys/types.h */
 typedef uint32_t uid_t;
@@ -50,6 +52,7 @@ extern int sys_nanosleep(const struct timespec *req, struct timespec *rem);
 extern int sys_pipe(int pipefd[2]);
 extern void sys_exit_group(int status);
 extern int sys_fstat(int fd, void *st);  /* for isatty */
+extern int sys_ftruncate(int fd, long length);
 extern int sys_dup(int oldfd);
 extern int sys_dup2(int oldfd, int newfd);
 extern int sys_dup3(int oldfd, int newfd, int flags);
@@ -139,10 +142,7 @@ int fdatasync(int fd)
 
 int ftruncate(int fd, off_t length)
 {
-    (void)fd;
-    (void)length;
-    __errno = ENOSYS;
-    return -1;
+    return sys_ftruncate(fd, length);
 }
 
 
@@ -237,6 +237,63 @@ pid_t fork(void)
 int execve(const char *path, char *const argv[], char *const envp[])
 {
     return sys_execve(path, argv, envp);
+}
+
+int execv(const char *path, char *const argv[])
+{
+    return execve(path, argv, environ);
+}
+
+/*
+ * execvp searches PATH, as a shell does. A name containing a slash is a path
+ * and is tried as given. When PATH is unset or empty the usual default
+ * applies. If every candidate fails with ENOENT or ENOTDIR the last error is
+ * reported.
+ */
+int execvpe(const char *file, char *const argv[], char *const envp[])
+{
+    const char *path;
+    char dirbuf[512];
+    char candidate[768];
+
+    if (!file || !*file)
+        return execve(file, argv, envp);
+    if (strchr(file, '/'))
+        return execve(file, argv, envp);
+
+    path = getenv("PATH");
+    if (!path || !*path)
+        path = "/bin:/usr/bin";
+
+    while (*path) {
+        const char *colon = strchr(path, ':');
+        size_t len = colon ? (size_t)(colon - path) : strlen(path);
+
+        if (len >= sizeof(dirbuf))
+            len = sizeof(dirbuf) - 1;
+        memcpy(dirbuf, path, len);
+        dirbuf[len] = '\0';
+
+        if (len == 0)
+            snprintf(candidate, sizeof(candidate), "%s", file);
+        else
+            snprintf(candidate, sizeof(candidate), "%s/%s", dirbuf, file);
+
+        execve(candidate, argv, envp);
+        if (errno != ENOENT && errno != ENOTDIR)
+            return -1;
+
+        if (!colon)
+            break;
+        path = colon + 1;
+    }
+    execve(file, argv, envp);
+    return -1;
+}
+
+int execvp(const char *file, char *const argv[])
+{
+    return execvpe(file, argv, environ);
 }
 
 pid_t waitpid(pid_t pid, int *wstatus, int options)
@@ -434,11 +491,17 @@ gid_t getegid(void)
 
 /* ---------------------------- filesystem stubs ----------------------------- */
 
+extern int sys_chdir(const char *path);
+extern long sys_getcwd(char *buf, unsigned long size);
+extern int sys_unlink(const char *path);
+extern int sys_rmdir(const char *path);
+extern int sys_access(const char *path, int mode);
+extern int sys_truncate(const char *path, long length);
+extern int sys_ftruncate(int fd, long length);
+
 int chdir(const char *path)
 {
-    (void)path;
-    __errno = ENOSYS;
-    return -1;
+    return sys_chdir(path);
 }
 
 int fchdir(int fd)
@@ -450,40 +513,29 @@ int fchdir(int fd)
 
 char *getcwd(char *buf, size_t size)
 {
-    (void)buf;
-    (void)size;
-    __errno = ENOSYS;
-    return NULL;
+    if (sys_getcwd(buf, size) < 0)
+        return NULL;
+    return buf;
 }
 
 int unlink(const char *pathname)
 {
-    (void)pathname;
-    __errno = ENOSYS;
-    return -1;
+    return sys_unlink(pathname);
 }
 
 int rmdir(const char *pathname)
 {
-    (void)pathname;
-    __errno = ENOSYS;
-    return -1;
+    return sys_rmdir(pathname);
 }
 
 int access(const char *pathname, int mode)
 {
-    (void)pathname;
-    (void)mode;
-    __errno = ENOSYS;
-    return -1;
+    return sys_access(pathname, mode);
 }
 
 int truncate(const char *path, off_t length)
 {
-    (void)path;
-    (void)length;
-    __errno = ENOSYS;
-    return -1;
+    return sys_truncate(path, length);
 }
 
 int creat(const char *pathname, mode_t mode)

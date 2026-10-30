@@ -101,6 +101,25 @@
 #define SYS_fcntl        73u
 #define SYS_dup3         74u
 #define SYS_poll         75u
+/* Path operations: assigned so libc and the tools can call them before the
+ * kernel implements them. An unregistered number returns -ENOSYS and logs a
+ * NOT IMPLEMENTED warning, which is how the coreutils tests find the gap. */
+#define SYS_stat         76u
+#define SYS_lstat        77u
+#define SYS_access       78u
+#define SYS_mkdir        79u
+#define SYS_rmdir        80u
+#define SYS_unlink       81u
+#define SYS_rename       82u
+#define SYS_chdir        83u
+#define SYS_getcwd       84u
+#define SYS_link         85u
+#define SYS_symlink      86u
+#define SYS_readlink     87u
+#define SYS_chmod        88u
+#define SYS_chown        89u
+#define SYS_truncate     90u
+#define SYS_ftruncate    91u
 
 /* poll(2). */
 struct pollfd {
