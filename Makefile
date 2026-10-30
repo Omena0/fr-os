@@ -486,9 +486,10 @@ build/test-runner: $(RUNTIME_TESTS) $(INIT_ELF) $(HELLO_ELF) $(BUILD)/libc.a
 		$(RUNTIME_TESTS) $(BUILD)/libc.a
 	strip --strip-all --strip-debug $@
 
-$(BUILD)/initrd-runtime.img: $(INIT_ELF) build/test-runner tools/initrd.py
+$(BUILD)/initrd-runtime.img: $(INIT_ELF) build/test-runner $(HELLO_ELF) tools/initrd.py
 	@mkdir -p $(dir $@)
-	python3 tools/initrd.py --out $@ --program init=$(INIT_ELF) --program runtime-tests=build/test-runner
+	python3 tools/initrd.py --out $@ --program init=$(INIT_ELF) \
+		--program runtime-tests=build/test-runner --program hello=$(HELLO_ELF)
 
 $(BUILD)/os-runtime.img: $(BUILD)/stage1.elf $(BUILD)/stage2.elf $(BUILD)/kernel-runtime.elf $(BUILD)/initrd-runtime.img tools/disk.py
 	@echo "--stage1 build/stage1.bin \\"

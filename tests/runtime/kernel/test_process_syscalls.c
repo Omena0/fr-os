@@ -154,6 +154,25 @@ static int test_execve_nonexistent(void) {
     return TEST_PASS;
 }
 
+static int test_execve_empty_env(void) {
+    /* The child replaces itself, so the test runner has to be the parent.
+     * An empty environment exercises the envp[] = { NULL } path. */
+    char *argv[] = { "hello", NULL };
+    char *envp[] = { NULL };
+    int wstatus = 0;
+    pid_t pid = (pid_t)syscall1(SYS_fork, 0);
+
+    TEST_ASSERT(pid >= 0, "fork should not fail");
+    if (pid == 0) {
+        syscall3(SYS_execve, (long)"hello", (long)argv, (long)envp);
+        syscall1(SYS_exit, 127);
+    }
+    TEST_ASSERT_EQ(syscall4(SYS_wait4, pid, (long)&wstatus, 0, 0), pid, "wait4 should return the child");
+    TEST_ASSERT(WIFEXITED(wstatus), "hello should exit normally");
+    TEST_ASSERT_EQ(WEXITSTATUS(wstatus), 0, "hello should exit 0 with an empty environment");
+    return TEST_PASS;
+}
+
 static int test_execve_not_executable(void) {
     char *argv[] = { "/etc/passwd", NULL };
     char *envp[] = { NULL };
@@ -652,6 +671,7 @@ struct test_suite test_process_syscalls = {
         { "wait4_wrong_pid", test_wait4_wrong_pid, false },
         { "execve_nonexistent", test_execve_nonexistent, false },
         { "execve_not_executable", test_execve_not_executable, false },
+        { "execve_empty_env", test_execve_empty_env, false },
         { "getpid_positive", test_getpid_positive, false },
         { "getppid_positive", test_getppid_positive, false },
         { "gettid_positive", test_gettid_positive, false },
@@ -701,5 +721,5 @@ struct test_suite test_process_syscalls = {
         { "arch_prctl_get_fs", test_arch_prctl_get_fs, false },
         { "arch_prctl_get_gs", test_arch_prctl_get_gs, false },
     },
-    .num_cases = 54,
+    .num_cases = 55,
 };
