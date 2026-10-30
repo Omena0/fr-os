@@ -1409,9 +1409,23 @@ int sched_sleep_ns(u64 ns)
         pos = pos->next;
     }
     __list_add(&t->sleep_node, pos->prev, pos);
+
+    /*
+     * Block and leave the run queue while the sleep lock is still held. A
+     * timer tick between linking the node and sched_block_current() would
+     * otherwise find the task due, remove it from the sleep list, call
+     * sched_wake() on a task that is still runnable-on-rq (a no-op), and then
+     * the task would block with no timer left to wake it. That lost wakeup
+     * hung a child sleeping in a loop while its parent waited for it.
+     *
+     * Lock order is sleep_lock then rq->lock; the wake path takes them in the
+     * same order (sleep_lock, release, rq->lock), so this cannot invert.
+     */
+    t->state = TASK_BLOCKED;
+    sched_remove(t);
     spinlock_unlock_irqrestore(&sleep_lock[this_cpu_id()], flags);
 
-    sched_block_current();
+    schedule();
     return 0;
 }
 

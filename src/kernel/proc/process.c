@@ -607,6 +607,24 @@ long sys_wait4(s64 pid, u64 wstatus, u64 options, u64 rusage)
             reaped = c;
             break;
         }
+        /*
+         * Stay under task_all_lock until the task is off the run queue. A
+         * child that becomes a zombie between the scan above and
+         * sched_block_current() would wake a task that is still runnable
+         * (a no-op), and the parent would then block with nothing left to
+         * wake it. task_exit_current() takes the same lock before walking
+         * the children, so this closes the window.
+         */
+        if (!reaped && !(options & WNOHANG)) {
+            me->state = TASK_BLOCKED;
+            sched_remove(me);
+            spinlock_unlock_irqrestore(&task_all_lock, flags);
+            klog_emit(KLOG_DEBUG, "process", "wait4: blocking, pid=%li child_pid=%ld",
+                      pid, (long)me->pid);
+            schedule();
+            klog_emit(KLOG_DEBUG, "process", "wait4: unblocked");
+            continue;
+        }
         spinlock_unlock_irqrestore(&task_all_lock, flags);
 
         if (reaped) {
@@ -643,16 +661,8 @@ long sys_wait4(s64 pid, u64 wstatus, u64 options, u64 rusage)
         if (options & WNOHANG)
             return 0;
 
-        /*
-         * A matching child exists but none is a zombie yet. Block; the
-         * wakeup comes from task_exit_current() when that child exits,
-         * so the re-check race is impossible — the loop re-locks the
-         * child list before looking again.
-         */
-        klog_emit(KLOG_DEBUG, "process", "wait4: blocking, pid=%li child_pid=%ld",
-              pid, (long)me->pid);
-        sched_block_current();
-        klog_emit(KLOG_DEBUG, "process", "wait4: unblocked");
+        if (options & WNOHANG)
+            return 0;
     }
 }
 

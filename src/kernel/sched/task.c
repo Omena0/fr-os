@@ -479,11 +479,38 @@ __noreturn void task_exit_current(int code)
      * detached here — the parent reaps it. Until then the task holds no
      * run queue position and will not be scheduled.
      */
-    t->state = TASK_ZOMBIE;
-    t->detached = true;
-    t->reaped = false;
+    /*
+     * Publish the zombie state and wake the parent under task_all_lock, the
+     * lock wait4() uses to scan the child list. Without it a parent could
+     * scan (no zombie), decide to block, and the wake below would land while
+     * the parent was still runnable, which sched_wake() treats as a no-op --
+     * the parent then blocked with nothing left to wake it. Lock order is
+     * task_all_lock then the run queue, the same order wait4() uses.
+     */
+    {
+        u64 flags = spinlock_irqsave(&task_all_lock);
+        struct task *parent = t->parent;
+        int parent_state = parent ? (int)parent->state : -1;
 
-    sched_remove(t);
+        t->state = TASK_ZOMBIE;
+        t->detached = true;
+        t->reaped = false;
+
+        sched_remove(t);
+
+        if (parent && (parent->state == TASK_BLOCKED ||
+                       parent->state == TASK_RUNNABLE))
+            sched_wake(parent);
+        spinlock_unlock_irqrestore(&task_all_lock, flags);
+
+        if (parent && parent_state != (int)TASK_BLOCKED &&
+            parent_state != (int)TASK_RUNNABLE)
+            klog_emit(KLOG_DEBUG, "task",
+                      "task %u exited, parent pid=%u state=%d not blocked",
+                      t->pid, parent->pid, parent_state);
+        else if (!parent)
+            klog_emit(KLOG_DEBUG, "task", "task %u exited, no parent", t->pid);
+    }
 
     /*
      * Release the address space and descriptors now rather than at reap
@@ -491,15 +518,6 @@ __noreturn void task_exit_current(int code)
      * pinned for as long as its parent takes to notice.
      */
     task_release_resources(t);
-
-    /* Whoever is in wait4() for this task has to be told. */
-    if (t->parent && (t->parent->state == TASK_BLOCKED || t->parent->state == TASK_RUNNABLE))
-        sched_wake(t->parent);
-    else if (t->parent)
-        klog_emit(KLOG_DEBUG, "task", "task %u exited, parent pid=%u state=%d not blocked",
-                  t->pid, t->parent->pid, (int)t->parent->state);
-    else
-        klog_emit(KLOG_DEBUG, "task", "task %u exited, no parent", t->pid);
 
     klog(KLOG_DEBUG, "task %u exited with %d", t->pid, code);
 
