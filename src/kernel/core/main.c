@@ -21,6 +21,7 @@
 
 #include <console.h>
 #include <drivers/serial.h>
+#include <block.h>
 #include <drivers/ps2kbd.h>
 #include <cpu_features.h>
 #include <cpu_features.h>
@@ -379,6 +380,7 @@ void kmain(uint64_t bootinfo_phys)
      * process_create_init(), for the reason above.
      */
     tty_init();
+    block_init();
 
 
     /*

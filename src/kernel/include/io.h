@@ -51,6 +51,25 @@ static inline uint32_t inl(uint16_t port)
     return val;
 }
 
+/* Bulk transfers. `rep insw` is one instruction sequence for a whole sector,
+ * which is what makes a 4 KB block read a handful of port operations rather
+ * than thousands of C-level inw() calls. */
+static inline void insw(uint16_t port, void *buf, uint32_t count)
+{
+    __asm__ volatile("rep insw"
+                     : "+D"(buf), "+c"(count)
+                     : "d"(port)
+                     : "memory");
+}
+
+static inline void outsw(uint16_t port, const void *buf, uint32_t count)
+{
+    __asm__ volatile("rep outsw"
+                     : "+S"(buf), "+c"(count)
+                     : "d"(port)
+                     : "memory");
+}
+
 /*
  * The ISA "delay" idiom. Writing to port 0x80 costs a full I/O cycle on real
  * legacy hardware, which is what old UART and keyboard controllers need between
