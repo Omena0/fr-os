@@ -41,8 +41,13 @@ The project has six named parts; the names are macros in `src/include/version.h`
   `syscall.h` (numbers and structs), `signal.h`, `sysinfo.h`, `errno.h`, ...
 - `src/kernel/` - `arch/` (asm entry, IDT, GDT), `proc/` (syscalls, process,
   fd, signals), `sched/` (scheduler, tasks), `mm/` (pmm, vmm, kmalloc),
-  `console/` (tty, console, framebuffer), `drivers/`, `core/` (klog, panic,
-  kprintf), `include/` (kernel headers), `link.ld` (image layout and budget).
+  `console/` (tty, console, framebuffer), `fs/` (FrFS), `drivers/` (including
+  `ata.c`), `core/` (klog, panic, kprintf), `include/` (kernel headers),
+  `link.ld` (image layout and budget).
+- `filesystem/` is the root filesystem source tree, packed by `tools/mkfs.py`
+  into `build/fs.img` and attached as the second IDE disk. The build installs
+  its programs into `filesystem/bin/`; files added there by hand are packed and
+  never deleted.
 - `src/libc/src/*.c` is collected automatically; public headers are in
   `src/libc/include/`.
 - `src/userspace/<name>/` - userland programs, packed into the initrd by
@@ -65,7 +70,7 @@ The project has six named parts; the names are macros in `src/include/version.h`
 ## Build, run, test
 
 ```
-make            # build/os.img
+make            # build/os.img and build/fs.img
 make kernel     # kernel ELF only
 make run        # boot interactively under QEMU (or ./run.sh)
 make clean      # remove build/
@@ -225,9 +230,11 @@ offsets, not all of them.
 
 ## Current gaps (verified on this tree)
 
-- `sc_open` checks the path and then always returns `-ENOENT`. There is no VFS
-  or filesystem. `stat`, `mkdir`, `unlink`, `rename`, `chdir` and `getcwd` have
-  no syscall numbers.
+- The root filesystem is FrFS on the second IDE disk, mounted read-only. `open`,
+  `read`, `lseek`, `fstat`, `getdents` and `execve` work; open for write and
+  `write` return `EROFS`. `stat`, `access`, `mkdir`, `unlink`, `rename`, `chdir`
+  and `getcwd` have no syscall numbers. ext4 and virtio-blk (the spec's target)
+  are not implemented; the storage driver is ATA PIO.
 - Sockets: only `SYS_socket` (160) exists. Documented numbers 161-168 are not
   implemented and return `-ENOSYS`.
 - `sc_getdents` always returns `-ENOTDIR`.
@@ -238,6 +245,10 @@ offsets, not all of them.
   **caller**, not the target. Signal delivery is not implemented. The
   `process_deliver_signal` hook is weak and terminates the process.
 - `setrlimit` and `getrlimit` store limits, but nothing enforces them.
+- The guest's serial output occasionally repeats one character (seen as
+  `prrogram`, `exiteed`, `Helllo, World!`). It is intermittent, appears in libc
+  `printf` output, and the boot-smoke command matcher tolerates it by collapsing
+  repeated characters. The cause is not yet diagnosed.
 
 For what is being built right now, see `TODO.md` and `git log`.
 
