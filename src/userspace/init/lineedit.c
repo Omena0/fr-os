@@ -168,7 +168,14 @@ int line_edit(const char *prompt, char *line, size_t max)
         }
         if (c == '\b' || c == 0x7f) {                /* Backspace */
             if (pos > 0) {
-                line_delete(line, &len, &pos, pos - 1, pos);
+                size_t from = pos - 1;
+                /* Back up over continuation bytes (0x80-0xBF) to find
+                 * the start of the UTF-8 character (the lead byte, which
+                 * is anything else). Deleting byte by byte would leave a
+                 * dangling lead byte that renders as U+FFFD. */
+                while (from > 0 && (line[from] & 0xC0) == 0x80)
+                    from--;
+                line_delete(line, &len, &pos, from, pos);
                 line_redraw(prompt, line, len, pos);
             }
             continue;

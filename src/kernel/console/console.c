@@ -21,6 +21,8 @@
 #include <boot.h>
 #include <vmm.h>
 #include <tty.h>
+#include <types.h>
+#include <utf8.h>
 
 /* ------------------------------------------------------------ VGA text ------ */
 
@@ -85,6 +87,13 @@ struct fb_text {
 };
 
 static struct fb_text fb;
+
+/* UTF-8 input decoder state for the screen backends. The serial port
+ * receives raw bytes verbatim; the screen reassembles multi-byte sequences
+ * into code points before rendering. */
+static u8 utf8_seq[4];
+static int utf8_used;
+static int utf8_expected;
 
 /* Where the pixels are right now, which is not always the same address. */
 static inline uint8_t *fb_pixels(void)
@@ -1067,6 +1076,26 @@ void console_blink_tick(u64 now_ns)
     spinlock_release(&console_lock);
 }
 
+static void console_render_cp(u32 cp, uint8_t attr)
+{
+    uint32_t cols;
+    char glyph = cp < 256 ? (char)cp : '?';
+
+    if (!tty_screen_owned()) {
+        if (vga_enabled)
+            vga_putc_at(cursor_x, cursor_y, cp < 0x80 ? (char)cp : '?', attr);
+        if (console_fb_active())
+            console_fb_putc(glyph, attr);
+    }
+
+    cursor_x++;
+    cols = vga_enabled ? VGA_COLS : fb.cols;
+    if (cols && cursor_x >= cols)
+        console_newline();
+}
+
+static void console_putc_utf8(char c, uint8_t attr);
+
 void console_putc_attr(char c, uint8_t attr)
 {
     if (c == '\n') {
@@ -1105,29 +1134,75 @@ void console_putc_attr(char c, uint8_t attr)
         return;
     }
     if (c == '\b') {
-        if (cursor_x > 0)
+        if (cursor_x > 0) {
             cursor_x--;
-        if (!tty_screen_owned() && console_fb_active())
-            console_fb_move(cursor_x, cursor_y);
+            /* Clear the cell we just backed over so the glyph disappears,
+             * not just the cursor. Each column holds exactly one code point,
+             * so this correctly removes a whole multi-byte UTF-8 character. */
+            if (!tty_screen_owned()) {
+                if (vga_enabled)
+                    vga_putc_at(cursor_x, cursor_y, ' ', current_attr);
+                if (console_fb_active()) {
+                    console_fb_move(cursor_x, cursor_y);
+                    console_fb_putc(' ', current_attr);
+                }
+            }
+        }
         if (serial_enabled)
             serial_putc_blocking('\b');
         return;
     }
 
-    if (!tty_screen_owned()) {
-        if (vga_enabled)
-            vga_putc_at(cursor_x, cursor_y, c, attr);
-        if (console_fb_active())
-            console_fb_putc(c, attr);
+    /* UTF-8 decode: reassemble multi-byte sequences into code points
+     * before handing them to the screen backends. Serial receives the raw
+     * bytes verbatim as each byte arrives. */
+    console_putc_utf8(c, attr);
+}
+
+static void console_putc_utf8(char c, uint8_t attr)
+{
+    if (utf8_used > 0) {
+        if ((unsigned char)c >= 0x80 && (unsigned char)c < 0xC0) {
+            utf8_seq[utf8_used++] = (u8)c;
+            if (serial_enabled)
+                serial_putc_blocking(c);
+            if (utf8_used == utf8_expected) {
+                const u8 *p = utf8_seq;
+                size_t n = (size_t)utf8_expected;
+                u32 cp = utf8_decode(&p, &n);
+                if (cp == (u32)-1)
+                    cp = 0xFFFD;
+                console_render_cp(cp, attr);
+                utf8_used = 0;
+            }
+            return;
+        }
+        /* Malformed sequence: emit a replacement character, then let this
+         * byte start (or fail) a new sequence. */
+        console_render_cp(0xFFFD, attr);
+        utf8_used = 0;
     }
 
+    if ((unsigned char)c < 0x80) {
+        console_render_cp((u32)(unsigned char)c, attr);
+        if (serial_enabled)
+            serial_putc_blocking(c);
+        return;
+    }
+
+    int seq = utf8_seqlen((u8)c);
+    if (seq < 0) {
+        console_render_cp(0xFFFD, attr);
+        if (serial_enabled)
+            serial_putc_blocking(c);
+        return;
+    }
+    utf8_seq[0] = (u8)c;
+    utf8_used = 1;
+    utf8_expected = seq;
     if (serial_enabled)
         serial_putc_blocking(c);
-
-    cursor_x++;
-    uint32_t cols = vga_enabled ? VGA_COLS : fb.cols;
-    if (cols && cursor_x >= cols)
-        console_newline();
+    /* The remaining continuation bytes arrive in later calls. */
 }
 
 void console_putc(char c)
@@ -1194,8 +1269,14 @@ void console_write_raw(const char *s, size_t n)
         if (c == '\b') {
             if (cursor_x > 0)
                 cursor_x--;
-            if (!tty_screen_owned() && console_fb_active())
-                console_fb_move(cursor_x, cursor_y);
+            if (!tty_screen_owned()) {
+                if (vga_enabled)
+                    vga_putc_at(cursor_x, cursor_y, ' ', current_attr);
+                if (console_fb_active()) {
+                    console_fb_move(cursor_x, cursor_y);
+                    console_fb_putc(' ', current_attr);
+                }
+            }
             if (serial_enabled)
                 serial_putc_blocking('\b');
             continue;
@@ -1211,21 +1292,7 @@ void console_write_raw(const char *s, size_t n)
         if (handle_escape(c))
             continue;
 
-        if (!tty_screen_owned()) {
-            if (vga_enabled)
-                vga_putc_at(cursor_x, cursor_y, c, current_attr);
-            if (console_fb_active())
-                console_fb_putc(c, current_attr);
-        }
-
-        if (serial_enabled)
-            serial_putc_blocking(c);
-
-        cursor_x++;
-        if (vga_enabled && cursor_x >= VGA_COLS)
-            console_newline();
-        else if (console_fb_active() && cursor_x >= fb.cols)
-            console_newline();
+        console_putc_attr(c, current_attr);
     }
 
     console_release(flags);

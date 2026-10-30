@@ -546,7 +546,15 @@ static void canon_feed(u8 c, const struct termios *t, u8 *echo, size_t *elen)
 
     if (c == t->c_cc[VERASE]) {
         if (canon_len > canon_commit) {
-            canon_len--;
+            /* Erase the whole last UTF-8 character, not just its final
+             * byte, so a dangling lead byte (which renders as U+FFFD)
+             * is never left behind in canon_buf. Each character occupies
+             * exactly one screen column, so a single "\b \b" erases it. */
+            size_t lead = canon_len - 1;
+            while (lead > canon_commit &&
+                   (canon_buf[lead] & 0xC0) == 0x80)
+                lead--;
+            canon_len = lead;
             if (echo_on && (t->c_lflag & ECHOE)) {
                 echo[(*elen)++] = '\b';
                 echo[(*elen)++] = ' ';

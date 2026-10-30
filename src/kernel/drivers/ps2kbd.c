@@ -60,6 +60,7 @@
 #include <cpu_features.h>
 #include <wait.h>
 #include <types.h>
+#include <utf8.h>
 
 KLOG_SUBSYSTEM("ps2kbd");
 
@@ -139,7 +140,7 @@ static void ps2_expect_ack(uint8_t cmd, uint8_t want)
 #if defined(KBD_LAYOUT_FI)
 
 /* Make codes 0x00-0x3F, set 1, unshifted: Finnish (fi). */
-static const char scancode_base[0x60] = {
+static const u16 scancode_base[0x60] = {
     [0x01] = 0x1B,
     [0x02] = '1', [0x03] = '2', [0x04] = '3', [0x05] = '4',
     [0x06] = '5', [0x07] = '6', [0x08] = '7', [0x09] = '8',
@@ -150,12 +151,15 @@ static const char scancode_base[0x60] = {
     [0x10] = 'q', [0x11] = 'w', [0x12] = 'e', [0x13] = 'r',
     [0x14] = 't', [0x15] = 'y', [0x16] = 'u', [0x17] = 'i',
     [0x18] = 'o', [0x19] = 'p',
-    [0x1A] = 0, [0x1B] = 0,              /* å, ¨ (not ASCII) */
+    [0x1A] = 0x00E5,         /* å */
+    [0x1B] = 0x00A8,         /* dead ¨ */
     [0x1C] = '\n',
     [0x1E] = 'a', [0x1F] = 's', [0x20] = 'd', [0x21] = 'f',
     [0x22] = 'g', [0x23] = 'h', [0x24] = 'j', [0x25] = 'k',
     [0x26] = 'l',
-    [0x27] = 0, [0x28] = 0, [0x29] = 0,  /* ö, ä, § (not ASCII) */
+    [0x27] = 0x00F6,         /* ö */
+    [0x28] = 0x00E4,         /* ä */
+    [0x29] = 0x00A7,         /* § */
     [0x2B] = '\'',                       /* the ' * key */
     [0x2C] = 'z', [0x2D] = 'x', [0x2E] = 'c', [0x2F] = 'v',
     [0x30] = 'b', [0x31] = 'n', [0x32] = 'm',
@@ -164,30 +168,37 @@ static const char scancode_base[0x60] = {
     [0x56] = '<',
 };
 
-static const char scancode_shifted[0x60] = {
+static const u16 scancode_shifted[0x60] = {
     [0x02] = '!', [0x03] = '"', [0x04] = '#', [0x05] = '\xa4',   /* ¤ */
     [0x06] = '%', [0x07] = '&', [0x08] = '/', [0x09] = '(',
     [0x0A] = ')', [0x0B] = '=',
     [0x0C] = '?', [0x0D] = '`',          /* grave */
-    [0x1A] = 0, [0x1B] = '^',            /* Å */
-    [0x27] = 0, [0x28] = 0, [0x29] = 0,  /* Ö, Ä, ½ */
+    [0x1A] = 0x00C5,         /* Å */
+    [0x1B] = 0x005E,         /* dead ^ */
+    [0x27] = 0x00D6,         /* Ö */
+    [0x28] = 0x00C4,         /* Ä */
+    [0x29] = 0x00BD,         /* ½ */
     [0x2B] = '*',
     [0x33] = ';', [0x34] = ':', [0x35] = '_',
     [0x56] = '>',
 };
 
-static const char scancode_altgr[0x60] = {
+static const u16 scancode_altgr[0x60] = {
     [0x03] = '@',
+    [0x04] = '$',
+    [0x05] = 0x20AC,             /* € */
     [0x07] = '{', [0x08] = '[', [0x09] = ']', [0x0A] = '}',
-    [0x0C] = '\\', [0x0D] = '|',
+    [0x0C] = '\\',
+    [0x0D] = '|',
     [0x1A] = '~', [0x1B] = '^',
-    [0x2B] = '`',
+    [0x2B] = 0x0060,             /* altgr + ' -> backtick */
 };
+
 
 #elif defined(KBD_LAYOUT_US)
 
 /* Make codes 0x00-0x3F, set 1, unshifted: US. */
-static const char scancode_base[0x60] = {
+static const u16 scancode_base[0x60] = {
     [0x01] = 0x1B,
     [0x02] = '1', [0x03] = '2', [0x04] = '3', [0x05] = '4',
     [0x06] = '5', [0x07] = '6', [0x08] = '7', [0x09] = '8',
@@ -212,7 +223,7 @@ static const char scancode_base[0x60] = {
     [0x56] = '<',
 };
 
-static const char scancode_shifted[0x60] = {
+static const u16 scancode_shifted[0x60] = {
     [0x02] = '!', [0x03] = '@', [0x04] = '#', [0x05] = '$',
     [0x06] = '%', [0x07] = '^', [0x08] = '&', [0x09] = '*',
     [0x0A] = '(', [0x0B] = ')',
@@ -223,7 +234,7 @@ static const char scancode_shifted[0x60] = {
     [0x33] = '<', [0x34] = '>', [0x35] = '?',
 };
 
-static const char scancode_altgr[0x60] = { 0 };
+static const u16 scancode_altgr[0x60] = { 0 };
 
 #else
 #error "KBD_LAYOUT must be US or FI (see src/config.mk)"
@@ -237,6 +248,7 @@ static const char scancode_altgr[0x60] = { 0 };
 bool shift_held;
 bool ctrl_held;
 bool altgr_held;
+static u32 dead_key;   /* combining accent waiting for a base letter */
 
 /* True after an E0 prefix, so the next code is an extended key (arrows,
  * keypad, etc.) rather than a normal scancode. */
@@ -261,12 +273,98 @@ static u8 typematic_value = KBD_TYPEMATIC_VALUE;
  */
 static u64 key_mask;
 
+/* Deliver a Unicode code point to the tty as UTF-8, one byte per callback. */
+static void deliver(u32 cp)
+{
+    u8 buf[4];
+    size_t n = utf8_encode(cp, buf);
+    if (keyboard_callback)
+        for (size_t i = 0; i < n; i++)
+            keyboard_callback((char)buf[i]);
+}
+
+/* Combining mark for a dead-key accent, or 0 if not a dead key. */
+static u32 dead_mark(u32 cp)
+{
+    switch (cp) {
+    case 0x00A8: return 0x0308;   /* ¨ -> combining diaeresis */
+    case 0x00B4: return 0x0301;   /* ´ -> combining acute */
+    case 0x005E: return 0x0302;   /* ^  -> combining circumflex */
+    case 0x0060: return 0x0300;   /* `  -> combining grave */
+    case 0x007E: return 0x0303;   /* ~  -> combining tilde */
+    default: return 0;
+    }
+}
+
+/* Compose a base letter with a combining mark into a precomposed Latin-1
+ * character, or return 0 if no precomposed form exists. */
+static u32 compose(u32 base, u32 mark)
+{
+    switch (mark) {
+    case 0x0300: /* grave */
+        switch (base) {
+        case 'A': return 0x00C0; case 'E': return 0x00C8; case 'I': return 0x00CC;
+        case 'O': return 0x00D2; case 'U': return 0x00D9;
+        case 'a': return 0x00E0; case 'e': return 0x00E8; case 'i': return 0x00EC;
+        case 'o': return 0x00F2; case 'u': return 0x00F9;
+        default: return 0;
+        }
+    case 0x0301: /* acute */
+        switch (base) {
+        case 'A': return 0x00C1; case 'E': return 0x00C9; case 'I': return 0x00CD;
+        case 'O': return 0x00D3; case 'U': return 0x00DA; case 'Y': return 0x00DD;
+        case 'a': return 0x00E1; case 'e': return 0x00E9; case 'i': return 0x00ED;
+        case 'o': return 0x00F3; case 'u': return 0x00FA; case 'y': return 0x00FD;
+        default: return 0;
+        }
+    case 0x0302: /* circumflex */
+        switch (base) {
+        case 'A': return 0x00C2; case 'E': return 0x00CA; case 'I': return 0x00CE;
+        case 'O': return 0x00D4; case 'U': return 0x00DB;
+        case 'a': return 0x00E2; case 'e': return 0x00EA; case 'i': return 0x00EE;
+        case 'o': return 0x00F4; case 'u': return 0x00FB;
+        default: return 0;
+        }
+    case 0x0303: /* tilde */
+        switch (base) {
+        case 'A': return 0x00C3; case 'N': return 0x00D1; case 'O': return 0x00D5;
+        case 'a': return 0x00E3; case 'n': return 0x00F1; case 'o': return 0x00F5;
+        default: return 0;
+        }
+    case 0x0308: /* diaeresis */
+        switch (base) {
+        case 'A': return 0x00C4; case 'E': return 0x00CB; case 'I': return 0x00CF;
+        case 'O': return 0x00D6; case 'U': return 0x00DC; case 'Y': return 0x00FF;
+        case 'a': return 0x00E4; case 'e': return 0x00EB; case 'i': return 0x00EF;
+        case 'o': return 0x00F6; case 'u': return 0x00FC; case 'y': return 0x00FF;
+        default: return 0;
+        }
+    default:
+        return 0;
+    }
+}
+
+/* The spacing (standalone) accent corresponding to a combining mark, so a
+ * dead key pressed without a composable base letter still yields a visible
+ * accent instead of an invalid combining mark. Returns 0 if none. */
+static u32 spacing_accent(u32 mark)
+{
+    switch (mark) {
+    case 0x0300: return 0x0060;   /* grave  ` */
+    case 0x0301: return 0x00B4;   /* acute  ´ */
+    case 0x0302: return 0x005E;   /* circumflex ^ */
+    case 0x0303: return 0x007E;   /* tilde  ~ */
+    case 0x0308: return 0x00A8;   /* diaeresis ¨ */
+    default: return 0;
+    }
+}
+
 /* One scancode from port 0x60. Called from IRQ1 with interrupts off. */
 static void keyboard_scancode(uint8_t sc)
 {
     bool make = (sc & 0x80) == 0;
     uint8_t code = make ? sc : (uint8_t)(sc & 0x7F);
-    char c;
+    u32 cp;
 
     klog(KLOG_DEBUG, "ps2kbd: scancode 0x%02x (%s, code 0x%02x)\n",
           (unsigned)sc, make ? "make" : "break", (unsigned)code);
@@ -359,58 +457,73 @@ static void keyboard_scancode(uint8_t sc)
               (unsigned)code);
         return;
     }
-    c = scancode_base[code];
-    if (c == 0) {
-        klog(KLOG_DEBUG, "ps2kbd: code 0x%02x unmapped\n", (unsigned)code);
+    cp = scancode_base[code];
+    if (cp == 0) {
+        klog(KLOG_DEBUG, "ps2kbd: code 0x%02x unmapped\n",
+              (unsigned)code);
         return;
     }
 
     /* Ctrl+letter: convert to Ctrl code. */
-    if (ctrl_held && c >= 'a' && c <= 'z') {
+    if (ctrl_held && cp >= 'a' && cp <= 'z') {
         if (keyboard_callback) {
-            klog(KLOG_DEBUG, "ps2kbd: ctrl+%c -> 0x%02x\n", c, (unsigned)(c & 0x1F));
-            keyboard_callback((char)(c & 0x1F));
-        } else {
-            klog(KLOG_DEBUG, "ps2kbd: ctrl+%c no callback\n", c);
+            klog(KLOG_DEBUG, "ps2kbd: ctrl+%c -> 0x%02x\n", (char)cp,
+                  (unsigned)(cp & 0x1F));
+            keyboard_callback((char)(cp & 0x1F));
         }
         return;
     }
-    if (ctrl_held && c >= 'A' && c <= 'Z') {
+    if (ctrl_held && cp >= 'A' && cp <= 'Z') {
         if (keyboard_callback) {
-            klog(KLOG_DEBUG, "ps2kbd: ctrl+%c -> 0x%02x\n", c, (unsigned)(c & 0x1F));
-            keyboard_callback((char)(c & 0x1F));
-        } else {
-            klog(KLOG_DEBUG, "ps2kbd: ctrl+%c no callback\n", c);
+            klog(KLOG_DEBUG, "ps2kbd: ctrl+%c -> 0x%02x\n", (char)cp,
+                  (unsigned)(cp & 0x1F));
+            keyboard_callback((char)(cp & 0x1F));
         }
         return;
     }
 
     if (altgr_held) {
-        char a = 0;
+        u32 a = 0;
         if (code < ARRAY_SIZE(scancode_altgr))
             a = scancode_altgr[code];
-        if (a != 0) {
-            c = a;
-            klog(KLOG_DEBUG, "ps2kbd: altgr -> '%c'\n", c);
-        }
+        if (a != 0) cp = a;
     } else if (shift_held) {
-        char s = 0;
+        u32 sv = 0;
         if (code < ARRAY_SIZE(scancode_shifted))
-            s = scancode_shifted[code];
-        if (s != 0) {
-            c = s;
-            klog(KLOG_DEBUG, "ps2kbd: shifted -> '%c'\n", c);
-        } else if (c >= 'a' && c <= 'z') {
-            c = (char)(c - ('a' - 'A'));
-            klog(KLOG_DEBUG, "ps2kbd: shifted upper -> '%c'\n", c);
+            sv = scancode_shifted[code];
+        if (sv != 0) cp = sv;
+        else if (cp >= 'a' && cp <= 'z') cp = (u16)(cp - ('a' - 'A'));
+    }
+
+    /* Dead keys (¨ ´ ^ ` ~) wait for a base letter and compose into a
+     * precomposed Latin-1 character (e.g. ´ + a -> á). */
+    if (dead_key) {
+        u32 composed = 0;
+        if ((cp >= 'a' && cp <= 'z') || (cp >= 'A' && cp <= 'Z') ||
+            cp == 'N' || cp == 'n')
+            composed = compose(cp, dead_key);
+        if (composed) {
+            cp = composed;
+        } else {
+            /* No precomposed form: emit the standalone spacing accent,
+             * then this key normally (e.g. ´ + space -> ´ ). */
+            u32 spacing = spacing_accent(dead_key);
+            if (spacing)
+                deliver(spacing);
         }
+        dead_key = 0;
+    }
+    if (dead_mark(cp)) {
+        dead_key = dead_mark(cp);
+        klog(KLOG_DEBUG, "ps2kbd: dead key pending\n");
+        return;
     }
 
     if (keyboard_callback) {
-        klog(KLOG_DEBUG, "ps2kbd: delivering '%c' (0x%02x) to tty\n", c, (unsigned)c);
-        keyboard_callback(c);
+        klog(KLOG_DEBUG, "ps2kbd: delivering U+%04x to tty\n", cp);
+        deliver(cp);
     } else {
-        klog(KLOG_DEBUG, "ps2kbd: '%c' no callback registered\n", c);
+        klog(KLOG_DEBUG, "ps2kbd: U+%04x no callback registered\n", cp);
     }
 }
 
