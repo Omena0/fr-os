@@ -53,24 +53,24 @@ LIBC_OBJ := $(patsubst src/%.c,$(OBJ)/%.c.o,$(LIBC_SRC)) \
             $(patsubst src/%.S,$(OBJ)/%.S.o,$(LIBC_S_SRC))
 
 # The initrd and the userspace programs. Only src/userspace/init is linked into
-# the PID 1 image; every other program is a separate ELF placed in the initrd
-# for the ramfs to expose once it exists. A wildcard here would link two `main`
+# the PID 1 image; every other program is a separate ELF named after its source
+# file, placed in the initrd and installed in the filesystem. init keeps its own
+# rule because it links several sources; a wildcard for it would link two `main`
 # functions into one image, which the linker would resolve by picking one and
 # discarding the other without saying which.
 INIT_MAIN_SRC := $(sort $(wildcard src/userspace/init/*.c))
 INIT_ELF := build/init.elf
-# hello is Fr Userland's smoke test. It is built with the same flags as init
-# and goes into the same initrd; nothing in the kernel runs it automatically,
-# because there is no shell yet to type its name at.
-HELLO_SRC := $(sort $(wildcard src/userspace/hello/*.c))
-HELLO_ELF := build/hello.elf
-TRIANGLE_ELF := build/triangle.elf
-ANSI_ELF := build/ansi.elf
-ANSI2_ELF := build/ansi2.elf
-SNAKE_ELF := build/snake.elf
-PAINT_ELF := build/paint.elf
-PAINT_GUI_ELF := build/paint_gui.elf
-TETRIS_ELF := build/tetris.elf
+
+# Every other program is one .c file under src/userspace/<dir>/, and the file
+# name is the program name and the installed name: hello.c -> hello,
+# paint/paint_gui.c -> paint_gui. The rule below is generated from this list,
+# so adding a file is all it takes to add a program. init is the exception:
+# it links several sources into one image, so it keeps its own rule.
+USERSPACE_SRC := $(filter-out src/userspace/init/%, \
+                 $(sort $(wildcard src/userspace/*/*.c)))
+USERSPACE_NAMES := $(notdir $(basename $(USERSPACE_SRC)))
+USERSPACE_ELVES := $(addprefix $(BUILD)/,$(addsuffix .elf,$(USERSPACE_NAMES)))
+HELLO_ELF := $(BUILD)/hello.elf
 INITRD := build/initrd.img
 
 DISK := build/os.img
@@ -81,7 +81,7 @@ DISK := build/os.img
 # the build.
 FS_DIR := filesystem
 FS_IMAGE := build/fs.img
-FS_PROGRAM_NAMES := init hello ansi ansi2 snake triangle paint paint_gui tetris
+FS_PROGRAM_NAMES := init $(USERSPACE_NAMES)
 FS_BIN := $(addprefix $(FS_DIR)/bin/,$(FS_PROGRAM_NAMES))
 FS_SOURCES := $(shell find $(FS_DIR) -type f 2>/dev/null | sort)
 
@@ -183,80 +183,26 @@ $(BUILD)/stage2.elf: $(STAGE2_OBJ) src/boot/stage2.ld
 # The generating script is a prerequisite. tools/initrd.py decides the container
 # format, so editing it changes the output bytes; without the dependency the
 # blob would keep the old layout until something unrelated forced a rebuild.
-$(HELLO_ELF): $(HELLO_SRC) $(LIBC_OBJ) $(BUILD)/libc.a src/include/version.h \
-             $(VERIFY_ISA_PY)
-	@mkdir -p $(dir $@)
-	$(HOST_CC_64) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $(HELLO_SRC) \
-		$(BUILD)/libc.a $(KERNEL_VERSION_DEFS)
-	$(HOST_OBJCOPY) $(STRIP_DEBUG) $@
-	@$(MAKE) --no-print-directory verify-isa PROFILE=user FILE=$@
+# One link rule per userspace program, generated from USERSPACE_SRC. The
+# recipe is the same for all of them: link against libc, strip DWARF (the
+# symtab stays), and gate the result on the user ISA profile.
+define USERSPACE_PROGRAM_RULE
+$(BUILD)/$(notdir $(basename $(1))).elf: $(1) $(LIBC_OBJ) $(BUILD)/libc.a \
+        src/include/version.h $(VERIFY_ISA_PY)
+	@mkdir -p $$(dir $$@)
+	$$(HOST_CC_64) $$(USER_CFLAGS) $$(USER_LDFLAGS) -o $$@ $$< \
+		$$(BUILD)/libc.a $$(KERNEL_VERSION_DEFS)
+	$$(HOST_OBJCOPY) $$(STRIP_DEBUG) $$@
+	@$$(MAKE) --no-print-directory verify-isa PROFILE=user FILE=$$@
+endef
+$(foreach src,$(USERSPACE_SRC),$(eval $(call USERSPACE_PROGRAM_RULE,$(src))))
 
-$(TRIANGLE_ELF): src/userspace/triangle/triangle.c $(LIBC_OBJ) $(BUILD)/libc.a \
-		src/include/version.h $(VERIFY_ISA_PY)
-	@mkdir -p $(dir $@)
-	$(HOST_CC_64) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $< \
-		$(BUILD)/libc.a $(KERNEL_VERSION_DEFS)
-	$(HOST_OBJCOPY) $(STRIP_DEBUG) $@
-	@$(MAKE) --no-print-directory verify-isa PROFILE=user FILE=$@
+INITRD_PROGRAMS := init $(USERSPACE_NAMES)
 
-$(ANSI_ELF): src/userspace/ansi/ansi.c $(LIBC_OBJ) $(BUILD)/libc.a \
-		src/include/version.h $(VERIFY_ISA_PY)
+$(INITRD): $(INIT_ELF) $(USERSPACE_ELVES) tools/initrd.py
 	@mkdir -p $(dir $@)
-	$(HOST_CC_64) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ src/userspace/ansi/ansi.c \
-		$(BUILD)/libc.a $(KERNEL_VERSION_DEFS)
-	$(HOST_OBJCOPY) $(STRIP_DEBUG) $@
-	@$(MAKE) --no-print-directory verify-isa PROFILE=user FILE=$@
-
-$(ANSI2_ELF): src/userspace/ansi/ansi2.c $(LIBC_OBJ) $(BUILD)/libc.a \
-		src/include/version.h $(VERIFY_ISA_PY)
-	@mkdir -p $(dir $@)
-	$(HOST_CC_64) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ src/userspace/ansi/ansi2.c \
-		$(BUILD)/libc.a $(KERNEL_VERSION_DEFS)
-	$(HOST_OBJCOPY) $(STRIP_DEBUG) $@
-	@$(MAKE) --no-print-directory verify-isa PROFILE=user FILE=$@
-
-$(SNAKE_ELF): src/userspace/snake/snake.c $(LIBC_OBJ) $(BUILD)/libc.a \
-		src/include/version.h $(VERIFY_ISA_PY)
-	@mkdir -p $(dir $@)
-	$(HOST_CC_64) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ src/userspace/snake/snake.c \
-		$(BUILD)/libc.a $(KERNEL_VERSION_DEFS)
-	$(HOST_OBJCOPY) $(STRIP_DEBUG) $@
-	@$(MAKE) --no-print-directory verify-isa PROFILE=user FILE=$@
-
-$(PAINT_ELF): src/userspace/paint/paint.c $(LIBC_OBJ) $(BUILD)/libc.a \
-		src/include/version.h $(VERIFY_ISA_PY)
-	@mkdir -p $(dir $@)
-	$(HOST_CC_64) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $< \
-		$(BUILD)/libc.a $(KERNEL_VERSION_DEFS)
-	$(HOST_OBJCOPY) $(STRIP_DEBUG) $@
-	@$(MAKE) --no-print-directory verify-isa PROFILE=user FILE=$@
-
-$(PAINT_GUI_ELF): src/userspace/paint/paint_gui.c $(LIBC_OBJ) $(BUILD)/libc.a \
-		src/include/version.h $(VERIFY_ISA_PY)
-	@mkdir -p $(dir $@)
-	$(HOST_CC_64) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $< \
-		$(BUILD)/libc.a $(KERNEL_VERSION_DEFS)
-	$(HOST_OBJCOPY) $(STRIP_DEBUG) $@
-	@$(MAKE) --no-print-directory verify-isa PROFILE=user FILE=$@
-
-$(TETRIS_ELF): src/userspace/tetris/tetris.c $(LIBC_OBJ) $(BUILD)/libc.a \
-		src/include/version.h $(VERIFY_ISA_PY)
-	@mkdir -p $(dir $@)
-	$(HOST_CC_64) $(USER_CFLAGS) $(USER_LDFLAGS) -o $@ $< \
-		$(BUILD)/libc.a $(KERNEL_VERSION_DEFS)
-	$(HOST_OBJCOPY) $(STRIP_DEBUG) $@
-	@$(MAKE) --no-print-directory verify-isa PROFILE=user FILE=$@
-
-$(INITRD): $(INIT_ELF) $(HELLO_ELF) $(ANSI_ELF) $(ANSI2_ELF) $(SNAKE_ELF) $(TRIANGLE_ELF) $(PAINT_ELF) $(PAINT_GUI_ELF) $(TETRIS_ELF) tools/initrd.py
-	@mkdir -p $(dir $@)
-	python3 tools/initrd.py --out $@ --program init=$(INIT_ELF) \
-		--program hello=$(HELLO_ELF) \
-		--program ansi=$(ANSI_ELF) --program ansi2=$(ANSI2_ELF) \
-		--program snake=$(SNAKE_ELF) \
-		--program triangle=$(TRIANGLE_ELF) \
-		--program paint=$(PAINT_ELF) \
-		--program paint_gui=$(PAINT_GUI_ELF) \
-		--program tetris=$(TETRIS_ELF)
+	python3 tools/initrd.py --out $@ \
+		$(foreach p,$(INITRD_PROGRAMS),--program $(p)=$(BUILD)/$(p).elf)
 
 # version.h supplies KERNEL_VERSION/KERNEL_GIT_REV/KERNEL_BUILD_STAMP, which
 # reach the image as -D flags on the link line rather than through a header

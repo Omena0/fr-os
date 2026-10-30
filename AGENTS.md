@@ -51,7 +51,10 @@ The project has six named parts; the names are macros in `src/include/version.h`
 - `src/libc/src/*.c` is collected automatically; public headers are in
   `src/libc/include/`.
 - `src/userspace/<name>/` - userland programs, packed into the initrd by
-  `tools/initrd.py`.
+  `tools/initrd.py` and installed in `filesystem/bin/`. Each `.c` file under a
+  directory (except `src/userspace/init/`) is its own program, named after the
+  file: `paint/paint_gui.c` builds `paint_gui`. Adding a file is enough; the
+  Makefile generates its link rule and both program lists from that wildcard.
 - `tests/runtime/framework/` - in-OS test framework. Suites are in
   `tests/runtime/kernel/*.c` and `tests/runtime/init/`.
 - `tests/*.py`, `tests/*.sh`, `tests/*.c` - host-side harnesses: `boot_smoke.py`
