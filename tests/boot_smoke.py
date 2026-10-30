@@ -611,6 +611,7 @@ def run_boot(root, image, log, errlog, timeout, allow_tcg, extra_args,
         stop_reason = "bound"
         test_summary = None
         command_reached = False
+        marker_start = 0
         try:
             while True:
                 if time.time() - started > timeout:
@@ -624,13 +625,14 @@ def run_boot(root, image, log, errlog, timeout, allow_tcg, extra_args,
                 if missing is None and _found:
                     stop_reason = "milestones"
                     # Once the boot milestones are reached, optionally send a
-                    # command to the guest (e.g. "run runtime-tests") and wait
+                    # command to the guest (e.g. "runtime-tests") and wait
                     # for the test-runner's SUMMARY block to appear in the log.
                     if command is not None:
                         # Give init a moment to process its flushed banner line,
                         # then write the command to the guest's stdin (which QEMU
                         # connects to its serial port).
                         time.sleep(0.2)
+                        marker_start = len(read_log(log))
                         try:
                             if serial_socket is not None:
                                 serial_socket.settimeout(timeout)
@@ -664,7 +666,8 @@ def run_boot(root, image, log, errlog, timeout, allow_tcg, extra_args,
                                     except socket.timeout:
                                         pass
                                     text = load_text(read_log(log))
-                                if wait_for and _collapse_runs(wait_for) in _collapse_runs(text):
+                                if wait_for and _collapse_runs(wait_for) in _collapse_runs(
+                                        load_text(read_log(log)[marker_start:])):
                                     command_reached = True
                                     break
                                 if "==================== SUMMARY ====================" in text:
@@ -1296,18 +1299,18 @@ def main(argv):
 
     accel = "TCG" if (not kvm_ok or os.environ.get("FORCE_TCG")) else "KVM"
     try:
-        command = "run runtime-tests" if run_tests else (
-            f"run {run_command}" if run_command else None
-        )
-        # A command's success marker is the line init prints when its child
-        # exits normally. A program that does not exit (a game that presents
-        # a frame and keeps running) needs its own marker.
+        command = "runtime-tests" if run_tests else run_command
+        # The shell runs the command and prints its prompt again when the
+        # child exits; that is the marker. A program that does not exit (a
+        # game that presents a frame and keeps running) needs its own marker.
+        # The marker is only accepted after the command was sent, so the
+        # prompt that was already on screen cannot count.
         if run_tests or not run_command:
             wait_for = None
-        elif run_command == "triangle":
+        elif os.path.basename(run_command) == "triangle":
             wait_for = "frame presented"
         else:
-            wait_for = "Fr Init: run: program exited with status"
+            wait_for = "Fr Init> "
         info = run_boot(
             ROOT, mine, log, errlog, timeout, allow_tcg, extra, command,
             wait_for,

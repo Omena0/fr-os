@@ -1,56 +1,36 @@
 /*
- * init.c — Fr Init, PID 1, the interactive REPL and the system bring-up.
+ * init.c - Fr Init, PID 1, the system bring-up and a small shell.
  *
- * No login, no shell and no init in this kernel yet, so init has to be all
- * three: it announces itself, then reads commands from stdin forever until
- * EOF. Every byte emitted is tagged "Fr Init: " so a multiplexed console log
- * still says which process said what.
+ * Fr Init is the first process. It announces the system, then reads command
+ * lines from stdin and runs them. There are no builtins beyond "cd" and
+ * "exit": echo, ls, cat and the rest are ordinary programs in /bin, so
+ * installing a file there is all it takes to add a command. The line editor
+ * lives in lineedit.c.
+ *
+ * The parser is deliberately small: whitespace separates words, single and
+ * double quotes group them, and a backslash quotes the next character. That is
+ * enough for the commands this system has; expansion, globbing and pipelines
+ * are not implemented yet.
  */
 #include <errno.h>
 #include <fcntl.h>
 #include <kbd.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <fcntl.h>
 #include <string.h>
-#include <time.h>
 #include <unistd.h>
 #include <version.h>
-#include <sys/auxv.h>
 #include "lineedit.h"
 
 /* Internal libc syscall wrapper */
 extern int sys_shutdown(int fn);
 
-/* Wait status macros */
-#define WIFEXITED(wstatus)   (((wstatus) & 0xFF) == 0)
-#define WEXITSTATUS(wstatus)  (((wstatus) & 0xFF00) >> 8)
-#define WIFSIGNALED(wstatus)  (((wstatus) & 0xFF) > 0 && ((wstatus) & 0xFF) <= 0x7F)
-#define WTERMSIG(wstatus)     ((wstatus) & 0x7F)
-
 extern char **environ;
 
 #define TAG FR_INIT_NAME ": "
+#define PROMPT FR_INIT_NAME "> "
+#define MAX_WORDS 32
 
-#define MEM_SLOTS 512
-#define MEM_ROUNDS 200000UL
-
-/*
- * Captured before main() runs so that `uptime` measures this process's own
- * lifetime rather than "time since some arbitrary point inside the loop".
- * There is no process-start timestamp on the auxv, so the earliest point a
- * userspace constructor can observe is the only sample available.
- */
-static struct timespec start_time;
-
-static void stamp_start(void) __attribute__((constructor));
-static void stamp_start(void)
-{
-    clock_gettime(CLOCK_MONOTONIC, &start_time);
-}
-
-/* All REPL output funnels through here so the prefix is applied exactly once. */
 static void say(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
 static void say(const char *fmt, ...)
@@ -65,467 +45,124 @@ static void say(const char *fmt, ...)
 }
 
 /*
- * Split in place on runs of spaces and tabs into an argv-style vector.
- *
- * A shell needs argv splitting, not strtok's token-at-a-time interface, and it
- * needs a bound on the argument count so a 32-slot vector on the stack cannot
- * be overrun by a long line. strtok(3) does exist in this libc (string.c, over
- * strtok_r) -- it is the shape that does not fit here, not its absence.
+ * Split a line into words in place. Quotes are removed; a backslash quotes the
+ * next character. A quote that is never closed ends the word at the end of the
+ * line rather than being an error, which is what a shell prompt does when the
+ * user is still typing.
  */
-static int split(char *s, char **argv, int max)
+static int split_words(char *line, char **argv, int max)
 {
-    int n = 0;
+    int argc = 0;
+    char *out = line;
+    char *p = line;
 
-    while (*s && n < max) {
-        while (*s == ' ' || *s == '\t')
-            s++;
-        if (!*s)
+    while (*p && argc < max - 1) {
+        char quote = 0;
+        char *word;
+
+        while (*p == ' ' || *p == '\t')
+            p++;
+        if (!*p)
             break;
-        argv[n++] = s;
-        while (*s && *s != ' ' && *s != '\t')
-            s++;
-        if (*s)
-            *s++ = '\0';
-    }
-    return n;
-}
 
-/* Whole seconds plus nanoseconds into milliseconds, for readable durations. */
-static long ms_between(struct timespec a, struct timespec b)
-{
-    return (b.tv_sec - a.tv_sec) * 1000L +
-           (b.tv_nsec - a.tv_nsec) / 1000000L;
-}
-
-static void show_time(void)
-{
-    struct timespec rt, mt;
-    struct tm tm;
-    time_t secs;
-    char date[64];
-    long up;
-
-    if (clock_gettime(CLOCK_REALTIME, &rt) != 0) {
-        say("time: clock_gettime(CLOCK_REALTIME) failed");
-        return;
-    }
-    if (clock_gettime(CLOCK_MONOTONIC, &mt) != 0) {
-        say("time: clock_gettime(CLOCK_MONOTONIC) failed");
-        return;
-    }
-
-    secs = (time_t)rt.tv_sec;
-    gmtime_r(&secs, &tm);
-    strftime(date, sizeof(date), "%Y-%m-%d %H:%M:%S", &tm);
-
-    say("realtime   %s.%03ld UTC", date, rt.tv_nsec / 1000000L);
-
-    up = mt.tv_sec * 1000L + mt.tv_nsec / 1000000L;
-    say("monotonic  %ldd %02ldh %02ldm %02ld.%03lds since boot",
-        up / 86400000L, (up / 3600000L) % 24L, (up / 60000L) % 60L,
-        (up / 1000L) % 60L, up % 1000L);
-    say("boot time  %ld.%09ld CLOCK_MONOTONIC", mt.tv_sec, mt.tv_nsec);
-}
-
-static void cmd_date(void)
-{
-    time_t now = time(NULL);
-    struct tm tm;
-    char buf[64];
-
-    if (now == (time_t)-1 || !gmtime_r(&now, &tm)) {
-        say("date: could not read the clock");
-        return;
-    }
-    strftime(buf, sizeof(buf), "%a %b %e %H:%M:%S %Y UTC", &tm);
-    say("%s (%ld)", buf, (long)now);
-}
-
-struct slot {
-    unsigned char *p;
-    unsigned long size;
-};
-
-static struct slot mem_slots[MEM_SLOTS];
-
-/*
- * xorshift64 rather than rand(): stdlib declares rand/srand but a REPL should
- * not depend on an implementation whose algorithm is unspecified when the
- * whole point is to make a repeatable measurement. Fixed seed keeps two runs
- * of `mem` comparable.
- */
-static unsigned long rng_state = 0x9e3779b97f4a7c15UL;
-
-static unsigned long rng(void)
-{
-    rng_state ^= rng_state << 13;
-    rng_state ^= rng_state >> 7;
-    rng_state ^= rng_state << 17;
-    return rng_state;
-}
-
-/*
- * The workload is deliberately mixed: some slots are freshly allocated, some
- * are resized with realloc, some are freed, and a residue is kept allocated
- * until the end. A benchmark that only ever did malloc/free would measure one
- * arena path and say nothing about the rest.
- *
- * Every block is also written at its first and last byte. A lazy allocator
- * that hands back untouched zero pages would otherwise report an enormous
- * ops/sec while never committing a physical page, which is a measurement of
- * nothing at all.
- */
-static void bench_mem(void)
-{
-    struct timespec t0, t1;
-    unsigned long rounds = MEM_ROUNDS;
-    unsigned long ops = 0;
-    unsigned long live = 0, peak = 0;
-    unsigned long elapsed;
-    unsigned long ops_per_sec;
-    unsigned long i;
-
-    for (i = 0; i < MEM_SLOTS; i++)
-        mem_slots[i].p = NULL;
-
-    clock_gettime(CLOCK_MONOTONIC, &t0);
-
-    for (i = 0; i < rounds; i++) {
-        unsigned long idx = (unsigned long)(rng() % MEM_SLOTS);
-        struct slot *s = &mem_slots[idx];
-        unsigned long want = 8 + (unsigned long)(rng() % 4088);
-
-        if (s->p == NULL) {
-            s->p = (unsigned char *)malloc(want);
-            if (s->p == NULL)
+        word = out;
+        while (*p) {
+            if (!quote && (*p == ' ' || *p == '\t'))
+                break;
+            if (!quote && (*p == '\'' || *p == '"')) {
+                quote = *p++;
                 continue;
-            s->size = want;
-            s->p[0] = (unsigned char)i;
-            s->p[want - 1] = (unsigned char)(i >> 8);
-            live += want;
-            ops++;
-        } else {
-            /*
-             * One RNG call per iteration decides the operation.
-             * Distribution: 25% realloc, 25% free, 50% churn.
-             * Using a single call means the probabilities are
-             * obvious and cannot drift apart.
-             */
-            unsigned long r = rng() & 3u;
-
-            if (r == 0u) {
-                unsigned char *np = (unsigned char *)realloc(s->p, want);
-
-                if (np == NULL)
-                    continue;
-                live -= s->size;
-                live += want;
-                s->p = np;
-                s->size = want;
-                s->p[0] = (unsigned char)i;
-                s->p[want - 1] = (unsigned char)(i >> 8);
-                ops++;
-            } else if (r == 1u) {
-                free(s->p);
-                live -= s->size;
-                s->p = NULL;
-                s->size = 0;
-                ops++;
-            } else {
-                /* churn the existing block without changing its size */
-                s->p[rng() % s->size] = (unsigned char)i;
-                ops++;
             }
+            if (quote && *p == quote) {
+                quote = 0;
+                p++;
+                continue;
+            }
+            if (*p == '\\' && p[1]) {
+                p++;
+                *out++ = *p++;
+                continue;
+            }
+            *out++ = *p++;
         }
+        /* Consume the separator before writing the terminator: p points at
+         * the space, and the terminator is written at out, which is at or
+         * before p. Terminating first would end the line at the first space
+         * and every later word would disappear. */
+        if (*p)
+            p++;
+        *out++ = '\0';
+        argv[argc++] = word;
+    }
+    argv[argc] = NULL;
+    return argc;
+}
 
-        if (live > peak)
-            peak = live;
+/*
+ * Run an external command. The child executes; the parent waits and then
+ * restores the console state a program may have changed (non-blocking stdin,
+ * a faster keyboard repeat rate).
+ */
+static void run_command(int argc, char **argv)
+{
+    pid_t pid;
+    int status;
+
+    (void)argc;
+    pid = fork();
+    if (pid < 0) {
+        say("%s: %s", argv[0], strerror(errno));
+        return;
+    }
+    if (pid == 0) {
+        execvp(argv[0], argv);
+        fprintf(stderr, "%s%s: %s\n", TAG, argv[0], strerror(errno));
+        _exit(127);
     }
 
-    clock_gettime(CLOCK_MONOTONIC, &t1);
+    waitpid(pid, &status, 0);
 
-    elapsed = (unsigned long)ms_between(t0, t1);
-    if (elapsed == 0)
-        elapsed = 1;
-    ops_per_sec = (ops * 1000UL) / elapsed;
+    {
+        int fl = fcntl(0, F_GETFL, 0);
 
-    say("rounds     %lu of mixed malloc/realloc/free", rounds);
-    say("elapsed    %lu ms", elapsed);
-    say("operations %lu", ops);
-    say("derived    %lu ops/sec", ops_per_sec);
-    say("peak       %lu bytes tracked", peak);
-    say("live       %lu bytes before teardown", live);
+        if (fl >= 0)
+            fcntl(0, F_SETFL, fl & ~O_NONBLOCK);
+    }
+    kbd_typematic(KBD_TYPEMATIC_DEFAULT);
+}
 
-    for (i = 0; i < MEM_SLOTS; i++) {
-        if (mem_slots[i].p) {
-            free(mem_slots[i].p);
-            mem_slots[i].p = NULL;
-            mem_slots[i].size = 0;
-        }
+/* Returns nonzero when the shell should exit. */
+static int dispatch(int argc, char **argv)
+{
+    if (argc == 0)
+        return 0;
+
+    if (strcmp(argv[0], "exit") == 0) {
+        say("exit: shutting down.");
+        sys_shutdown(0);
+        return 1;
     }
 
     /*
-     * The pass/fail criterion is an accounting one, not a crash check: a
-     * benchmark that leaves bytes outstanding between rounds measures the
-     * allocator's high-water mark rather than its cost, so a non-zero live
-     * total means the numbers above are not comparable between runs.
+     * cd has to be a builtin: an external process can change only its own
+     * working directory, not the shell's. Everything else is a program.
      */
-    if (live != 0)
-        say("FAIL: %lu bytes still live after freeing every slot", live);
-    else
-        say("OK: live bytes returned to zero");
-}
+    if (strcmp(argv[0], "cd") == 0) {
+        const char *dir = argc > 1 ? argv[1] : "/";
 
-static void cmd_help(void)
-{
-    say("commands:");
-    say("  help                 this list");
-    say("  echo <args...>       print the arguments, joined by single spaces");
-    say("  version              %s, %s, and the %s it runs on",
-        FR_INIT_NAME, FR_PROJECT_NAME, FR_CORE_NAME);
-    say("  mem                  %lu-round allocator benchmark", MEM_ROUNDS);
-    say("  time                 wall clock, monotonic clock and boot time");
-    say("  date                 current UTC date and Unix time");
-    say("  uptime               time since this process started");
-    say("  clear                clear the screen and home the cursor");
-    say("  lscpu                page size, cpu count, getauxval() entries");
-    say("  strlen <string>      print the length of <string>");
-    say("  run <program> [args] run a program, searched on PATH (default\n"
-        "                       /bin:/usr/bin; a name with / is a path)");
-    say("  exit                 explain that reboot is not implemented yet");
-}
-
-/*
- * Run a program named by the user. A name with a slash is a path and is passed
- * to execve as-is. A bare name is searched on PATH, the same way a shell
- * resolves a command; there is no built-in list, so installing a program in
- * /bin is enough to make it runnable.
- */
-static void exec_on_path(const char *name, char *const argv[], char *const envp[])
-{
-    const char *path = getenv("PATH");
-    char pathbuf[256];
-    char candidate[320];
-
-    if (strchr(name, '/')) {
-        execve(name, argv, envp);
-        return;
-    }
-
-    if (!path || !*path)
-        path = "/bin:/usr/bin";
-    strncpy(pathbuf, path, sizeof(pathbuf) - 1);
-    pathbuf[sizeof(pathbuf) - 1] = '\0';
-
-    for (char *dir = pathbuf; dir && *dir; ) {
-        char *colon = strchr(dir, ':');
-        size_t dirlen;
-
-        if (colon)
-            *colon = '\0';
-        dirlen = strlen(dir);
-
-        if (dirlen == 0) {
-            snprintf(candidate, sizeof(candidate), "%s", name);
-        } else {
-            snprintf(candidate, sizeof(candidate), "%s/%s", dir, name);
-        }
-        execve(candidate, argv, envp);
-        if (errno != ENOENT && errno != ENOTDIR)
-            return;
-        dir = colon ? colon + 1 : NULL;
-    }
-
-    /* Last resort: the bare name, which is how the embedded initrd is
-     * addressed when no filesystem is mounted (the runtime test image). */
-    execve(name, argv, envp);
-    errno = ENOENT;
-}
-
-static void cmd_lscpu(void)
-{
-    long abi, pagesz, nprocs;
-    unsigned cpu = 0, node = 0;
-
-    pagesz = getpagesize();
-    say("page size       %ld bytes", pagesz);
-
-    nprocs = sysconf(_SC_NPROCESSORS_ONLN);
-    if (nprocs > 0)
-        say("cpus online     %ld", nprocs);
-    else
-        say("cpus online     unknown (sysconf returned %ld)", nprocs);
-
-    /* getcpu(3) is the one answer that comes from the kernel rather than
-     * from a constant, so it is the one worth reporting here. */
-    if (getcpu(&cpu, &node) == 0)
-        say("running on      cpu %u, node %u", cpu, node);
-    else
-        say("running on      unknown (getcpu failed)");
-
-    abi = getauxval(AT_ABI_VERSION);
-    pagesz = getauxval(AT_PAGESZ);
-    if (abi == 0)
-        say("AT_ABI_VERSION  absent");
-    else
-        say("AT_ABI_VERSION  %ld (major %ld, minor %ld)", abi,
-            abi / 1000, abi % 1000);
-
-    if (pagesz == 0)
-        say("AT_PAGESZ       absent");
-    else
-        say("AT_PAGESZ       %ld bytes", pagesz);
-}
-
-static void cmd_uptime(void)
-{
-    struct timespec now;
-    long up;
-
-    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
-        say("uptime: clock_gettime(CLOCK_MONOTONIC) failed");
-        return;
-    }
-    up = ms_between(start_time, now);
-    say("up %ldd %02ldh %02ldm %02ld.%03lds", up / 86400000L,
-        (up / 3600000L) % 24L, (up / 60000L) % 60L, (up / 1000L) % 60L,
-        up % 1000L);
-}
-
-/*
- * Dispatch on argv[1]. Returns the new main-loop status: 0 to keep looping,
- * 1 to terminate. Unknown input is reported rather than treated as fatal,
- * because init is PID 1 and the only alternative to looping is a kernel
- * panic on the next userspace process.
- */
-static int dispatch(int argc, char **argv)
-{
-    int i;
-
-    if (argc < 1) {
-        say("empty line, try 'help'");
+        if (chdir(dir) < 0)
+            say("cd: %s: %s", dir, strerror(errno));
         return 0;
     }
 
-    if (strcmp(argv[0], "help") == 0) {
-        cmd_help();
-    } else if (strcmp(argv[0], "echo") == 0) {
-        for (i = 1; i < argc; i++)
-            printf("%s%s", (i > 1) ? " " : "", argv[i]);
-        putchar('\n');
-    } else if (strcmp(argv[0], "version") == 0) {
-        /*
-         * Three names, in the order the hierarchy runs: this process, the
-         * project it belongs to, and the kernel underneath both. The
-         * kernel's own string is KERNEL_VERSION_STRING, which expands to
-         * "Fr Core <version>" -- printing it as though it were this
-         * process's identity is how userspace used to announce itself as
-         * the kernel.
-         */
-        say("%s %s (build %s, rev %s)", FR_INIT_NAME, KERNEL_VERSION,
-            KERNEL_BUILD_STAMP, KERNEL_GIT_REV);
-        say("%s %s, running on %s", FR_INIT_NAME, FR_PROJECT_NAME,
-            KERNEL_VERSION_STRING);
-        say("userspace       %s (pid 1), programs run as %s",
-            FR_INIT_NAME, FR_USERLAND_NAME);
-    } else if (strcmp(argv[0], "mem") == 0) {
-        bench_mem();
-    } else if (strcmp(argv[0], "time") == 0) {
-        show_time();
-    } else if (strcmp(argv[0], "date") == 0) {
-        cmd_date();
-    } else if (strcmp(argv[0], "uptime") == 0) {
-        cmd_uptime();
-    } else if (strcmp(argv[0], "clear") == 0) {
-        fputs("\033[2J\033[H", stdout);
-    } else if (strcmp(argv[0], "lscpu") == 0) {
-        cmd_lscpu();
-    } else if (strcmp(argv[0], "strlen") == 0) {
-        if (argc < 2) {
-            say("strlen: expected an argument");
-        } else {
-            say("strlen: %lu", (unsigned long)strlen(argv[1]));
-        }
-    } else if (strcmp(argv[0], "run") == 0) {
-        /*
-         * Fork and exec the program. The parent waits for it, then
-         * continues the REPL loop. The child executes and only returns
-         * on failure. The exit code of the child is displayed by the
-         * parent if the child exited normally.
-         */
-        if (argc < 2) {
-            say("run: expected a program name");
-            say("     try: hello, ansi, snake, triangle, paint, paint_gui");
-            return 0;
-        }
-
-        pid_t pid = fork();
-        if (pid < 0) {
-            say("run: fork failed: %s", strerror(errno));
-            return 0;
-        } else if (pid == 0) {
-            /* Child */
-            char *child_argv[8];
-            int child_argc = 0;
-
-            child_argv[child_argc++] = argv[1];
-            for (int a = 2; a < argc && child_argc < 7; a++)
-                child_argv[child_argc++] = argv[a];
-            child_argv[child_argc] = NULL;
-
-            exec_on_path(argv[1], child_argv, environ);
-
-            /* execve only returns on failure */
-            if (errno == ENOENT)
-                say("run: %s: not found on PATH", argv[1]);
-            else
-                say("run: execve(\"%s\") failed: %s", argv[1], strerror(errno));
-            return EXIT_FAILURE;
-        }
-
-        /* Parent: wait for the child */
-        int status;
-        waitpid(pid, &status, 0);
-
-        /*
-         * A child may have put the shared console description into
-         * non-blocking mode (the game polls input while it animates). The
-         * REPL reads blocking; clear the bit so an idle prompt does not spin
-         * on empty reads or look like EOF after the program leaves.
-         */
-        {
-            int fl = fcntl(0, F_GETFL, 0);
-
-            if (fl >= 0)
-                fcntl(0, F_SETFL, fl & ~O_NONBLOCK);
-        }
-
-        /* A program may have changed the keyboard's repeat rate (a game wants
-         * a faster one). Restore the prompt's rate, including when the program
-         * died without restoring it itself. */
-        kbd_typematic(KBD_TYPEMATIC_DEFAULT);
-
-        if (WIFEXITED(status)) {
-            say("run: program exited with status %d", WEXITSTATUS(status));
-        } else if (WIFSIGNALED(status)) {
-            say("run: program was killed by signal %d", WTERMSIG(status));
-        }
-    } else if (strcmp(argv[0], "exit") == 0) {
-        say("exit: Shutting down.");
-        sys_shutdown(0);  /* CF9 reset - halt QEMU */
-    } else {
-        say("unknown command '%s' - try 'help'", argv[0]);
-    }
+    run_command(argc, argv);
     return 0;
 }
 
-/* The line editor lives in lineedit.c so other interactive programs can reuse
- * it; see lineedit.h. */
-
 int main(void)
 {
-    char line[256];
-    char prompt[32];
+    char line[512];
+    char *argv[MAX_WORDS];
 
     printf("%s%s %s (build %s, rev %s)\n", TAG, FR_INIT_NAME,
            KERNEL_VERSION, KERNEL_BUILD_STAMP, KERNEL_GIT_REV);
@@ -536,19 +173,20 @@ int main(void)
     printf("%stype 'help' for the command list, EOF to stop\n", TAG);
     fflush(stdout);
 
-    snprintf(prompt, sizeof(prompt), "%s> ", FR_INIT_NAME);
+    /*
+     * PATH is what the commands are found on. The kernel passes no
+     * environment, so this is the default the shell installs. A caller that
+     * did provide PATH keeps it.
+     */
+    setenv("PATH", "/bin:/usr/bin", 0);
 
     for (;;) {
         int argc;
-        char *argv[32];
 
-        if (line_edit(prompt, line, sizeof(line)) < 0)
+        if (line_edit(PROMPT, line, sizeof(line)) < 0)
             break;
 
-        if (line[0] == '\0')
-            continue;
-
-        argc = split(line, argv, 32);
+        argc = split_words(line, argv, MAX_WORDS);
         if (dispatch(argc, argv))
             break;
     }
