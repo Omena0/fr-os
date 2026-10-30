@@ -71,6 +71,7 @@ make run        # boot interactively under QEMU (or ./run.sh)
 make clean      # remove build/
 make check      # the full gate; see below
 make help       # every target and the boot-smoke environment variables
+make frscript-smoke  # compile frscript's fr-os hello, boot it, run it
 ```
 
 `make check` runs, in order: `verify-isa-test`, `boot-smoke`, `test-harnesses`
@@ -92,6 +93,12 @@ you claim a kernel change works, run it and read the output.
   `make check` with a SKIPPED line did not exercise the boot path. Set
   `BOOT_SMOKE_ALLOW_TCG=1` to run under emulation.
 - `python3 tests/boot_smoke.py --self-test` tests the boot-log classifier.
+- `make frscript-smoke` builds `examples/fr-os/hello.fr` with the frscript
+  compiler (a separate checkout, `FRSCRIPT_DIR`, default `../frscript`), checks
+  it with the user ISA gate, and boots it with `--run-command frhello`. It is
+  not part of `make check` because frscript is external. `--run-command` works
+  for any program that exits; `triangle` is the exception, which waits for its
+  frame marker.
 - There is no separate lint or typecheck target. Compiler flags include
   `-Wall -Wextra -Werror=implicit-function-declaration -Werror=return-type`,
   so the build is the typecheck. `console.c` already emits an unused-variable
