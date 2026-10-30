@@ -221,6 +221,21 @@ SIGNATURES = (
 RING3_IS_NOT_A_FAILURE = ("exception report", "unrecoverable page fault")
 
 
+def _collapse_runs(s):
+    """Collapse runs of one character to a single one.
+
+    The guest's serial output occasionally repeats a character (observed as
+    "prrogram", "exiteed", "Fr IInit>"). A marker match should survive that,
+    and every marker used for a guest command is chosen without a deliberate
+    double letter, so collapsing both sides cannot hide a real mismatch.
+    """
+    out = []
+    for ch in s:
+        if not out or out[-1] != ch:
+            out.append(ch)
+    return "".join(out)
+
+
 def load_text(data):
     """Decode a serial log for matching.
 
@@ -649,7 +664,7 @@ def run_boot(root, image, log, errlog, timeout, allow_tcg, extra_args,
                                     except socket.timeout:
                                         pass
                                     text = load_text(read_log(log))
-                                if wait_for and wait_for in text:
+                                if wait_for and _collapse_runs(wait_for) in _collapse_runs(text):
                                     command_reached = True
                                     break
                                 if "==================== SUMMARY ====================" in text:
@@ -1284,9 +1299,18 @@ def main(argv):
         command = "run runtime-tests" if run_tests else (
             f"run {run_command}" if run_command else None
         )
+        # A command's success marker is the line init prints when its child
+        # exits normally. A program that does not exit (a game that presents
+        # a frame and keeps running) needs its own marker.
+        if run_tests or not run_command:
+            wait_for = None
+        elif run_command == "triangle":
+            wait_for = "frame presented"
+        else:
+            wait_for = "Fr Init: run: program exited with status"
         info = run_boot(
             ROOT, mine, log, errlog, timeout, allow_tcg, extra, command,
-            "frame presented" if run_command == "triangle" else None,
+            wait_for,
         )
     finally:
         # The copy goes and the log stays: the image is reproducible from the
