@@ -1085,11 +1085,7 @@ if (!next) {
     klog_emit(KLOG_DEBUG, "sched", "schedule: switching from pid=%u to pid=%u",
           prev->pid, next->pid);
 
-    /* A task that kept running with nothing else runnable has state
-     * TASK_RUNNABLE; it must still be requeued here, or a live task falls
-     * off the run queue on the next preemption. */
-    if (prev->state != TASK_BLOCKED && prev->state != TASK_ZOMBIE &&
-        !prev->detached && !task_is_idle(prev)) {
+    if (prev->state == TASK_RUNNING && !prev->detached && !task_is_idle(prev)) {
         prev->state = TASK_RUNNABLE;
         /* The aging pass measures the wait from the moment a task left
          * the CPU, so the timestamp is taken here rather than only in
