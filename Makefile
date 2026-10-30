@@ -499,6 +499,50 @@ $(BUILD)/os-runtime.img: $(BUILD)/stage1.elf $(BUILD)/stage2.elf $(BUILD)/kernel
 		--initrd $(BUILD)/initrd-runtime.img \
 		--out $@
 
+# ------------------------------------------------- frscript integration ---
+#
+# frscript (a separate repository) can emit a static ELF for this target. This
+# is not part of `make check`: the compiler is an external checkout, and CI has
+# no way to require one. Point FRSCRIPT_DIR at it to run the check by hand.
+FRSCRIPT_DIR ?= $(abspath ../frscript)
+FRSCRIPT_PROGRAM ?= $(FRSCRIPT_DIR)/examples/fr-os/hello.fr
+FRSCRIPT_ELF := $(BUILD)/frscript-hello.elf
+
+$(FRSCRIPT_ELF): $(FRSCRIPT_PROGRAM) $(FRSCRIPT_DIR)/src/cli.py
+	@mkdir -p $(dir $@)
+	python3 $(FRSCRIPT_DIR)/src/cli.py compile $(FRSCRIPT_PROGRAM) -o $(BUILD)/frscript-hello.bc
+	python3 $(FRSCRIPT_DIR)/src/cli.py native $(BUILD)/frscript-hello.bc -o $@ --target fr-os
+	@$(MAKE) --no-print-directory verify-isa PROFILE=user FILE=$@
+
+$(BUILD)/initrd-frscript.img: $(INIT_ELF) $(FRSCRIPT_ELF) tools/initrd.py
+	@mkdir -p $(dir $@)
+	python3 tools/initrd.py --out $@ --program init=$(INIT_ELF) --program frhello=$(FRSCRIPT_ELF)
+
+$(OBJ)/kernel/initrd-frscript.c.o: $(BUILD)/initrd-frscript.img tools/bin2c.py
+	@mkdir -p $(dir $@)
+	python3 tools/bin2c.py $< init_image > build/initrd-frscript.c
+	$(HOST_CC_64) $(KERNEL_CFLAGS) -c build/initrd-frscript.c -o $@
+
+$(BUILD)/kernel-frscript.elf: $(BUILD)/libk.a $(OBJ)/kernel/initrd-frscript.c.o \
+                              src/kernel/link.ld $(VERIFY_ISA_PY)
+	@mkdir -p $(dir $@)
+	$(HOST_LD_64) $(KERNEL_LDFLAGS) -o $@ \
+		$(BUILD)/libk.a $(OBJ)/kernel/initrd-frscript.c.o
+	@$(MAKE) --no-print-directory verify-isa PROFILE=kernel FILE=$@
+
+$(BUILD)/os-frscript.img: $(BUILD)/stage1.elf $(BUILD)/stage2.elf $(BUILD)/kernel-frscript.elf $(BUILD)/initrd-frscript.img tools/disk.py
+	python3 tools/disk.py --stage1 build/stage1.bin \
+		--stage2 build/stage2.bin \
+		--kernel build/kernel-frscript.elf \
+		--initrd $(BUILD)/initrd-frscript.img \
+		--out $@
+
+.PHONY: frscript-smoke
+frscript-smoke: $(BUILD)/os-frscript.img
+	@echo "=== Booting the frscript hello for Fr OS ==="
+	@FR_TMPDIR=$(BUILD) BOOT_SMOKE_TIMEOUT=60 BOOT_SMOKE_ALLOW_TCG=1 python3 tests/boot_smoke.py --image $(BUILD)/os-frscript.img --run-command frhello
+	@echo "=== frscript smoke complete ==="
+
 .PHONY: test-runtime
 test-runtime: $(BUILD)/os-runtime.img build/test-runner
 	@echo "=== Booting runtime tests ==="
@@ -632,6 +676,7 @@ help:
 	@echo "make clean      remove build/"
 	@echo "make verify-isa PROFILE=kernel|user FILE=<elf>   run the ISA gate by hand"
 	@echo "make verify-isa-test          test the ISA gate itself"
+	@echo "make frscript-smoke           build frscript's fr-os hello and boot it (needs FRSCRIPT_DIR)"
 	@echo "python3 tests/boot_smoke.py --self-test   test the boot-log classifier"
 	@echo ""
 	@echo "boot smoke test environment:"
