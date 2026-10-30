@@ -61,14 +61,28 @@ LIBC_OBJ := $(patsubst src/%.c,$(OBJ)/%.c.o,$(LIBC_SRC)) \
 INIT_MAIN_SRC := $(sort $(wildcard src/userspace/init/*.c))
 INIT_ELF := build/init.elf
 
-# Every other program is one .c file under src/userspace/<dir>/, and the file
-# name is the program name and the installed name: hello.c -> hello,
-# paint/paint_gui.c -> paint_gui. The rule below is generated from this list,
-# so adding a file is all it takes to add a program. init is the exception:
-# it links several sources into one image, so it keeps its own rule.
-USERSPACE_SRC := $(filter-out src/userspace/init/%, \
-                 $(sort $(wildcard src/userspace/*/*.c)))
-USERSPACE_NAMES := $(notdir $(basename $(USERSPACE_SRC)))
+# A .c file under src/userspace/<dir>/ is a program when it defines main(), and
+# its name is the program name: coreutils/ls.c -> ls, paint/paint_gui.c ->
+# paint_gui. A file without main() is a library for its directory, compiled
+# once and linked into every program there. This is what lets a folder hold a
+# set of tools plus shared helpers without one rule per file. init is the
+# exception: all of its sources are linked into one image, so it keeps its own
+# rule.
+USERSPACE_DIRS := $(sort $(dir $(filter-out src/userspace/init/%, \
+                  $(wildcard src/userspace/*/*.c))))
+USERSPACE_C_ALL := $(sort $(filter-out src/userspace/init/%, \
+                   $(wildcard src/userspace/*/*.c)))
+# Make matches parentheses in a $(shell ...) argument before the shell sees
+# them, so the regex is built from these variables rather than written with
+# literal brackets.
+LPAREN := (
+RPAREN := )
+USERSPACE_MAIN_RE := ^[[:space:]]*$(LPAREN)int|void$(RPAREN)[[:space:]]+main[[:space:]]*[$(LPAREN)]
+USERSPACE_PROGRAM_SRC := $(shell grep -lE '$(USERSPACE_MAIN_RE)' \
+    $(USERSPACE_C_ALL) 2>/dev/null | sort)
+USERSPACE_LIB_SRC := $(filter-out $(USERSPACE_PROGRAM_SRC),$(USERSPACE_C_ALL))
+USERSPACE_LIB_OBJ := $(patsubst src/%.c,$(OBJ)/%.c.o,$(USERSPACE_LIB_SRC))
+USERSPACE_NAMES := $(notdir $(basename $(USERSPACE_PROGRAM_SRC)))
 USERSPACE_ELVES := $(addprefix $(BUILD)/,$(addsuffix .elf,$(USERSPACE_NAMES)))
 HELLO_ELF := $(BUILD)/hello.elf
 INITRD := build/initrd.img
@@ -154,6 +168,10 @@ $(OBJ)/libc/%.S.o: src/libc/%.S $(BUILD_INPUTS_STAMP)
 	@mkdir -p $(dir $@)
 	$(HOST_CC_64) -MMD -MP -MF $@.d -c -x assembler-with-cpp $(USER_CFLAGS) -I src/libc/include $< -o $@
 
+$(OBJ)/userspace/%.c.o: src/userspace/%.c $(BUILD_INPUTS_STAMP)
+	@mkdir -p $(dir $@)
+	$(HOST_CC_64) $(USER_CFLAGS) -MMD -MP -MF $@.d $< -c -o $@
+
 $(OBJ)/libc/%.c.o: src/libc/%.c $(BUILD_INPUTS_STAMP)
 	@mkdir -p $(dir $@)
 	$(HOST_CC_64) $(USER_CFLAGS) -MMD -MP -MF $@.d $< -c -o $@
@@ -186,18 +204,25 @@ $(BUILD)/stage2.elf: $(STAGE2_OBJ) src/boot/stage2.ld
 # One link rule per userspace program, generated from USERSPACE_SRC. The
 # recipe is the same for all of them: link against libc, strip DWARF (the
 # symtab stays), and gate the result on the user ISA profile.
+# $(1) is the program source, $(2) the library objects from its directory.
 define USERSPACE_PROGRAM_RULE
-$(BUILD)/$(notdir $(basename $(1))).elf: $(1) $(LIBC_OBJ) $(BUILD)/libc.a \
+$(BUILD)/$(notdir $(basename $(1))).elf: $(1) $(2) $(LIBC_OBJ) $(BUILD)/libc.a \
         src/include/version.h $(VERIFY_ISA_PY)
 	@mkdir -p $$(dir $$@)
-	$$(HOST_CC_64) $$(USER_CFLAGS) $$(USER_LDFLAGS) -o $$@ $$< \
+	$$(HOST_CC_64) $$(USER_CFLAGS) $$(USER_LDFLAGS) -o $$@ $$< $(2) \
 		$$(BUILD)/libc.a $$(KERNEL_VERSION_DEFS)
 	$$(HOST_OBJCOPY) $$(STRIP_DEBUG) $$@
 	@$$(MAKE) --no-print-directory verify-isa PROFILE=user FILE=$$@
 endef
-$(foreach src,$(USERSPACE_SRC),$(eval $(call USERSPACE_PROGRAM_RULE,$(src))))
+$(foreach src,$(USERSPACE_PROGRAM_SRC), \
+    $(eval $(call USERSPACE_PROGRAM_RULE,$(src), \
+        $(filter $(OBJ)/userspace/$(notdir $(patsubst %/,%,$(dir $(src))))/%, \
+                 $(USERSPACE_LIB_OBJ)))))
 
-INITRD_PROGRAMS := init $(USERSPACE_NAMES)
+# The initrd is the bootstrap, not the root filesystem: it carries init and
+# hello, which is enough to reach a shell and prove a second program can run.
+# Everything else lives in filesystem/ and is packed into the disk image.
+INITRD_PROGRAMS := init hello
 
 $(INITRD): $(INIT_ELF) $(USERSPACE_ELVES) tools/initrd.py
 	@mkdir -p $(dir $@)
