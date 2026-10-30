@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <uapi/syscall.h>
 
 /* Syscall numbers from uapi/syscall.h - already defined via <unistd.h> */
 
@@ -241,6 +242,78 @@ static int test_dup_basic(void) {
     return TEST_PASS;
 }
 
+static int test_fs_open_and_read(void) {
+    char buf[4];
+    long fd = syscall3(SYS_open, (long)"/bin/hello", O_RDONLY, 0);
+
+    TEST_ASSERT(fd >= 0, "open /bin/hello should succeed");
+    TEST_ASSERT_EQ(syscall3(SYS_read, fd, (long)buf, sizeof(buf)), 4, "read the ELF magic");
+    TEST_ASSERT_EQ((unsigned char)buf[0], 0x7f, "the first byte is the ELF magic");
+    TEST_ASSERT_EQ(buf[1], 'E', "the second byte is E");
+    TEST_ASSERT_EQ(buf[2], 'L', "the third byte is L");
+    TEST_ASSERT_EQ(buf[3], 'F', "the fourth byte is F");
+    syscall1(SYS_close, fd);
+    return TEST_PASS;
+}
+
+static int test_fs_fstat(void) {
+    struct kstat st;
+    long fd = syscall3(SYS_open, (long)"/bin/hello", O_RDONLY, 0);
+
+    TEST_ASSERT(fd >= 0, "open /bin/hello should succeed");
+    TEST_ASSERT_EQ(syscall2(SYS_fstat, fd, (long)&st), 0, "fstat should succeed");
+    TEST_ASSERT(st.size > 4, "the file should have a size");
+    TEST_ASSERT_EQ(st.mode & 0170000, 0100000, "the mode should say regular file");
+    syscall1(SYS_close, fd);
+    return TEST_PASS;
+}
+
+static int test_fs_write_is_erofs(void) {
+    char byte = 0;
+    long fd = syscall3(SYS_open, (long)"/bin/hello", O_RDONLY, 0);
+    long wfd = syscall3(SYS_open, (long)"/bin/hello", O_WRONLY, 0);
+
+    TEST_ASSERT_EQ(wfd, -EROFS, "opening for write on a read-only mount should return EROFS");
+    TEST_ASSERT(fd >= 0, "open /bin/hello for reading should succeed");
+    /* A read-only descriptor also refuses write(2), with EBADF. */
+    TEST_ASSERT_EQ(syscall3(SYS_write, fd, (long)&byte, 1), -EBADF, "a read-only descriptor refuses writes");
+    syscall1(SYS_close, fd);
+    return TEST_PASS;
+}
+
+static int test_fs_open_missing(void) {
+    TEST_ASSERT_EQ(syscall3(SYS_open, (long)"/no/such/file", O_RDONLY, 0), -ENOENT, "a missing path should return ENOENT");
+    return TEST_PASS;
+}
+
+static int test_fs_getdents_root(void) {
+    char buf[1024];
+    long fd = syscall3(SYS_open, (long)"/", O_RDONLY | O_DIRECTORY, 0);
+    long n;
+
+    TEST_ASSERT(fd >= 0, "open / should succeed");
+    n = syscall3(SYS_getdents, fd, (long)buf, sizeof(buf));
+    TEST_ASSERT(n > 0, "getdents on / should return entries");
+    {
+        int found = 0;
+        for (long i = 0; i + 3 <= n; i++)
+            if (memcmp(buf + i, "bin", 3) == 0)
+                found = 1;
+        TEST_ASSERT(found, "the root should contain bin");
+    }
+    syscall1(SYS_close, fd);
+    return TEST_PASS;
+}
+
+static int test_fs_open_dir_as_file(void) {
+    long fd = syscall3(SYS_open, (long)"/bin", O_RDONLY, 0);
+
+    TEST_ASSERT(fd >= 0, "a directory can be opened");
+    if (fd >= 0)
+        syscall1(SYS_close, fd);
+    return TEST_PASS;
+}
+
 static int test_termios_get_default(void) {
     struct termios t;
     TEST_ASSERT_EQ(syscall3(SYS_ioctl, 1, TCGETS, (long)&t), 0, "TCGETS on the console should succeed");
@@ -405,6 +478,12 @@ struct test_suite test_file_syscalls = {
         { "fstat_invalid_fd", test_fstat_invalid_fd, false },
         { "dup_basic", test_dup_basic, false },
         { "dup_invalid_fd", test_dup_invalid_fd, false },
+        { "fs_open_and_read", test_fs_open_and_read, false },
+        { "fs_fstat", test_fs_fstat, false },
+        { "fs_write_is_erofs", test_fs_write_is_erofs, false },
+        { "fs_open_missing", test_fs_open_missing, false },
+        { "fs_getdents_root", test_fs_getdents_root, false },
+        { "fs_open_dir_as_file", test_fs_open_dir_as_file, false },
         { "termios_get_default", test_termios_get_default, false },
         { "termios_set_roundtrip", test_termios_set_roundtrip, false },
         { "termios_set_flush", test_termios_set_flush, false },
@@ -422,5 +501,5 @@ struct test_suite test_file_syscalls = {
         { "ioctl_invalid_fd", test_ioctl_invalid_fd, false },
         { "getdents_invalid_fd", test_getdents_invalid_fd, false },
     },
-    .num_cases = 38,
+    .num_cases = 44,
 };

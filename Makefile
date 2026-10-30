@@ -75,6 +75,16 @@ INITRD := build/initrd.img
 
 DISK := build/os.img
 
+# The root filesystem image. filesystem/ is the source tree that is packed;
+# built userland programs are installed into filesystem/bin, and anything added
+# to filesystem/ by hand is packed too. Nothing in that directory is deleted by
+# the build.
+FS_DIR := filesystem
+FS_IMAGE := build/fs.img
+FS_PROGRAM_NAMES := init hello ansi ansi2 snake triangle paint paint_gui tetris
+FS_BIN := $(addprefix $(FS_DIR)/bin/,$(FS_PROGRAM_NAMES))
+FS_SOURCES := $(shell find $(FS_DIR) -type f 2>/dev/null | sort)
+
 # The content digest of every input that can change what an object compiles to.
 # Defined here, used as a prerequisite of every object rule below, and built
 # further down. See the comment at its recipe for why this exists at all.
@@ -392,6 +402,18 @@ $(DISK): $(BUILD)/stage1.elf $(BUILD)/stage2.elf $(BUILD)/kernel.elf $(INITRD) t
 		--initrd $(INITRD) \
 		--out $@
 
+# Install the programs the build produces into the filesystem tree. Only the
+# listed programs are touched: a program placed in filesystem/bin by hand is
+# left alone and still packed into the image.
+$(FS_DIR)/bin/%: $(BUILD)/%.elf
+	@mkdir -p $(dir $@)
+	cp -f $< $@
+
+# Pack the tree into the raw image QEMU exposes as the second IDE disk.
+$(FS_IMAGE): $(FS_BIN) $(FS_SOURCES) tools/mkfs.py
+	@mkdir -p $(dir $@)
+	python3 tools/mkfs.py $(FS_DIR) --out $@ --size-mb 64
+
 # ----------------------------------------------------------------- top level --
 
 # The version string comes from git when the tree is a checkout, and from the
@@ -421,8 +443,8 @@ KERNEL_VERSION_DEFS := -DKERNEL_VERSION=\"$(KERNEL_VERSION)\" \
 #
 # The gate that *does* gate every build is `verify-isa` itself, applied to the
 # finished kernel.elf, init.elf and hello.elf from the link rules.
-all: $(DISK)
-	@echo "built $(DISK)"
+all: $(DISK) $(FS_IMAGE)
+	@echo "built $(DISK) and $(FS_IMAGE)"
 
 # The boot smoke test: the only check here that boots anything at all, and the
 # one that answers the question the ISA self-test cannot -- does the kernel
@@ -545,7 +567,7 @@ frscript-smoke: $(BUILD)/os-frscript.img
 	@echo "=== frscript smoke complete ==="
 
 .PHONY: test-runtime
-test-runtime: $(BUILD)/os-runtime.img build/test-runner
+test-runtime: $(BUILD)/os-runtime.img build/test-runner $(FS_IMAGE)
 	@echo "=== Booting runtime tests ==="
 	@FR_TMPDIR=$(BUILD) BOOT_SMOKE_TIMEOUT=60 BOOT_SMOKE_ALLOW_TCG=1 python3 tests/boot_smoke.py --image $(BUILD)/os-runtime.img --run-tests
 	@echo "=== Runtime tests complete ==="
@@ -658,11 +680,11 @@ clean:
 	rm -rf $(BUILD)
 
 .PHONY: run
-run: $(DISK)
+run: $(DISK) $(FS_IMAGE)
 	./run.sh
 
 .PHONY: run-gdb
-run-gdb: $(DISK)
+run-gdb: $(DISK) $(FS_IMAGE)
 	./run.sh --gdb
 
 .PHONY: help

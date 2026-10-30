@@ -33,6 +33,7 @@
 #include <interrupt.h>
 #include <process.h>
 #include <signals.h>
+#include <fs.h>
 #include <uapi/syscall.h>
 #include <uapi/errno.h>
 #include "console.h"
@@ -1874,10 +1875,39 @@ static long execve_common(struct task *t, u64 path, u64 argv, u64 envp)
      * 0x7f "ELF" and every execve returned -ENOEXEC -- on every input, not
      * just a bad one. Nothing below this point can succeed without it. */
     unsigned long elf_size = 0;
-    const unsigned char *elf = initrd_find_program(init_image,
-                           init_image_size,
-                           prog, prog_len,
-                           &elf_size);
+    const unsigned char *elf = NULL;
+    void *fs_image = NULL;
+    size_t fs_image_size = 0;
+
+    /*
+     * The root filesystem is authoritative when it is mounted: execve("/bin/hello")
+     * names a file there, and that file is the program. The embedded initrd is
+     * still the bootstrap (it carries init before any filesystem is available)
+     * and remains the fallback for a bare name, which is what the runtime test
+     * image relies on when it boots without a filesystem drive.
+     */
+    if (fs_mounted()) {
+        struct fs_inode inode;
+
+        if (fs_path_lookup(kpath, &inode) == 0 && (inode.mode & FS_IFREG)) {
+            void *buf = NULL;
+            size_t size = 0;
+
+            if (fs_read_all(&inode, &buf, &size) == 0) {
+                elf = buf;
+                elf_size = size;
+                fs_image = buf;
+                fs_image_size = size;
+            }
+        }
+    }
+
+    if (!elf) {
+        elf = initrd_find_program(init_image,
+                                  init_image_size,
+                                  prog, prog_len,
+                                  &elf_size);
+    }
 
     if (!elf)
         return -ENOENT;
@@ -1900,6 +1930,15 @@ static long execve_common(struct task *t, u64 path, u64 argv, u64 envp)
         mm_get(t->mm);
 
     n = exec_load_and_run(t, elf, elf_size, prog, kargv, kenvp);
+
+    /*
+     * exec_load_and_run() copies the segments and the initial stack into the
+     * new address space before it returns, so the image read from the
+     * filesystem is no longer needed on either path.
+     */
+    if (fs_image)
+        kfree(fs_image, fs_image_size ? fs_image_size : 1);
+
     if (n < 0) {
         /* exec_load_and_run() logs the stage that failed; this line adds
          * the two things it has no way to know -- who asked, and for

@@ -103,6 +103,10 @@ RUN_TIMEOUT="${RUN_TIMEOUT:-}"
 # cannot yet handle. QEMU has no standalone -no-acpi option; it is a property
 # of the machine type, which is why it appears on -machine rather than here.
 
+# The root filesystem is a second raw disk. It is optional: an image built
+# without one still boots, and the kernel reports that no volume was found.
+FS_IMAGE="${FS_IMAGE:-build/fs.img}"
+
 QEMU_ARGS=(
     -drive "file=${IMAGE},format=raw,if=ide,index=0,media=disk"
     -m "$MEM"
@@ -110,6 +114,10 @@ QEMU_ARGS=(
     -machine "${MACHINE:-pc,acpi=off}"
     -no-reboot
 )
+
+if [ -f "$FS_IMAGE" ]; then
+    QEMU_ARGS+=(-drive "file=${FS_IMAGE},format=raw,if=ide,index=1,media=disk")
+fi
 
 # Accelerator.
 #

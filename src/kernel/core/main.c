@@ -22,6 +22,7 @@
 #include <console.h>
 #include <drivers/serial.h>
 #include <block.h>
+#include <fs.h>
 #include <drivers/ps2kbd.h>
 #include <cpu_features.h>
 #include <cpu_features.h>
@@ -381,6 +382,7 @@ void kmain(uint64_t bootinfo_phys)
      */
     tty_init();
     block_init();
+    fs_mount_root();
 
 
     /*

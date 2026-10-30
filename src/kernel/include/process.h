@@ -30,6 +30,9 @@ struct file_ops {
     /* Readiness for poll(2): return the requested POLL* bits that are ready
      * now. NULL means the file is always readable and writable. */
     u16 (*poll)(struct file *f, u16 events);
+    int (*stat)(struct file *f, struct kstat *st);
+    /* One directory entry per call; NULL means ENOTDIR. */
+    int (*readdir)(struct file *f, struct kdirent *out, size_t cap);
     int (*release)(struct file *f);
 };
 

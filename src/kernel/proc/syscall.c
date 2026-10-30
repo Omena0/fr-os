@@ -43,6 +43,7 @@
 #include <uapi/mouse.h>
 #include <uapi/sysinfo.h>
 #include <signals.h>
+#include <fs.h>
 #include <version.h>
 #include <drivers/ps2mouse.h>
 #include <drivers/ps2kbd.h>
@@ -503,16 +504,32 @@ static long sc_shutdown(struct syscall_regs *r)
 static long sc_open(struct syscall_regs *r)
 {
     char path[256];
+    u32 flags = (u32)arg1(r);
+    struct fs_inode in;
+    struct file *f;
+    int fd;
 
-    UNUSED(r);
-    /*
-     * Validated even though the answer is always the same. A syscall that
-     * ignores its arguments silently reports "no such file" for a pointer
-     * that does not exist; the validation is what tells the caller its
-     * pointer was wrong.
-     */
     if (copy_string_from_user(path, arg0(r), sizeof(path)) < 0)
         return -EFAULT;
+
+    if (fs_mounted() && fs_path_lookup(path, &in) == 0) {
+        if ((flags & O_DIRECTORY) && !(in.mode & FS_IFDIR))
+            return -ENOTDIR;
+        /* FrFS is mounted read-only, so asking to write is refused here,
+         * where the caller can see why, rather than at the first write. */
+        if ((flags & O_ACCMODE) != O_RDONLY)
+            return -EROFS;
+        f = fs_open_inode(&in, flags);
+        if (!f)
+            return -ENOMEM;
+        fd = fd_install(caller(), f);
+        if (fd < 0) {
+            file_put(f);
+            return fd;
+        }
+        file_get(f);
+        return fd;
+    }
     return -ENOENT;
 }
 
@@ -651,18 +668,22 @@ static long sc_fstat(struct syscall_regs *r)
 {
     struct file *f = fd_lookup(caller(), (int)(s32)arg0(r));
     struct kstat st;
+    int ret;
 
     if (!f)
         return -EBADF;
 
-    memset(&st, 0, sizeof(st));
-    st.mode = 0020000u | 0666u;    /* S_IFCHR | rw-rw-rw- */
-    st.nlink = 1;
-    st.blksize = PAGE_SIZE;
-    st.ino = f->ino;
-    /* A terminal has no length. Reporting 0 is what makes isatty() and
-     * the stdio size checks behave. */
-    st.size = 0;
+    if (f->ops && f->ops->stat) {
+        ret = f->ops->stat(f, &st);
+        if (ret < 0)
+            return ret;
+    } else {
+        memset(&st, 0, sizeof(st));
+        st.mode = 0020000u | 0666u;
+        st.nlink = 1;
+        st.blksize = PAGE_SIZE;
+        st.ino = f->ino;
+    }
     return copy_to_user(arg1(r), &st, sizeof(st)) < 0 ? -EFAULT : 0;
 }
 
@@ -751,17 +772,37 @@ static long sc_ioctl(struct syscall_regs *r)
 static long sc_getdents(struct syscall_regs *r)
 {
     struct file *f = fd_lookup(caller(), (int)(s32)arg0(r));
+    u64 user = arg1(r);
+    size_t count = (size_t)arg2(r);
+    u8 buf[512];
+    long total = 0;
 
-    UNUSED(r);
     if (!f)
         return -EBADF;
-    /*
-     * Not -ENOSYS: the request is well formed, the object it names
-     * exists, and the object simply is not a directory. Returning ENOTDIR
-     * is the truthful answer and is what a caller looping over a directory
-     * needs in order to stop.
-     */
-    return -ENOTDIR;
+    if (!f->ops || !f->ops->readdir)
+        return -ENOTDIR;
+
+    while ((size_t)total < count) {
+        struct kdirent *de = (struct kdirent *)buf;
+        u64 saved = f->f_pos;
+        int ret = f->ops->readdir(f, de, sizeof(buf));
+
+        if (ret < 0)
+            return total ? total : ret;
+        if (ret == 0)
+            break;
+        if (de->d_reclen == 0 || de->d_reclen > sizeof(buf))
+            return total ? total : -EIO;
+        if ((size_t)total + de->d_reclen > count) {
+            /* The entry does not fit: leave it for the next call. */
+            f->f_pos = saved;
+            break;
+        }
+        if (copy_to_user(user + (u64)total, buf, de->d_reclen) < 0)
+            return total ? total : -EFAULT;
+        total += de->d_reclen;
+    }
+    return total;
 }
 
 static long sc_dup(struct syscall_regs *r)

@@ -290,9 +290,56 @@ static void cmd_help(void)
     say("  clear                clear the screen and home the cursor");
     say("  lscpu                page size, cpu count, getauxval() entries");
     say("  strlen <string>      print the length of <string>");
-    say("  run <program> [args] exec an initrd program (hello, ansi, ansi2,\n"
-        "                       snake, triangle, paint, paint_gui, tetris)");
+    say("  run <program> [args] run a program, searched on PATH (default\n"
+        "                       /bin:/usr/bin; a name with / is a path)");
     say("  exit                 explain that reboot is not implemented yet");
+}
+
+/*
+ * Run a program named by the user. A name with a slash is a path and is passed
+ * to execve as-is. A bare name is searched on PATH, the same way a shell
+ * resolves a command; there is no built-in list, so installing a program in
+ * /bin is enough to make it runnable.
+ */
+static void exec_on_path(const char *name, char *const argv[], char *const envp[])
+{
+    const char *path = getenv("PATH");
+    char pathbuf[256];
+    char candidate[320];
+
+    if (strchr(name, '/')) {
+        execve(name, argv, envp);
+        return;
+    }
+
+    if (!path || !*path)
+        path = "/bin:/usr/bin";
+    strncpy(pathbuf, path, sizeof(pathbuf) - 1);
+    pathbuf[sizeof(pathbuf) - 1] = '\0';
+
+    for (char *dir = pathbuf; dir && *dir; ) {
+        char *colon = strchr(dir, ':');
+        size_t dirlen;
+
+        if (colon)
+            *colon = '\0';
+        dirlen = strlen(dir);
+
+        if (dirlen == 0) {
+            snprintf(candidate, sizeof(candidate), "%s", name);
+        } else {
+            snprintf(candidate, sizeof(candidate), "%s/%s", dir, name);
+        }
+        execve(candidate, argv, envp);
+        if (errno != ENOENT && errno != ENOTDIR)
+            return;
+        dir = colon ? colon + 1 : NULL;
+    }
+
+    /* Last resort: the bare name, which is how the embedded initrd is
+     * addressed when no filesystem is mounted (the runtime test image). */
+    execve(name, argv, envp);
+    errno = ENOENT;
 }
 
 static void cmd_lscpu(void)
@@ -408,8 +455,7 @@ static int dispatch(int argc, char **argv)
          */
         if (argc < 2) {
             say("run: expected a program name");
-            say("     the initrd carries: init, hello, ansi, ansi2, snake, "
-                "triangle, paint, paint_gui, tetris");
+            say("     try: hello, ansi, snake, triangle, paint, paint_gui");
             return 0;
         }
 
@@ -427,11 +473,13 @@ static int dispatch(int argc, char **argv)
                 child_argv[child_argc++] = argv[a];
             child_argv[child_argc] = NULL;
 
-            execve(argv[1], child_argv, environ);
+            exec_on_path(argv[1], child_argv, environ);
 
             /* execve only returns on failure */
-            say("run: execve(\"%s\") failed: %s", argv[1], strerror(errno));
-            say("     errno %d", errno);
+            if (errno == ENOENT)
+                say("run: %s: not found on PATH", argv[1]);
+            else
+                say("run: execve(\"%s\") failed: %s", argv[1], strerror(errno));
             return EXIT_FAILURE;
         }
 

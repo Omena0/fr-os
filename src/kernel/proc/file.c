@@ -172,11 +172,25 @@ static u16 console_poll_op(struct file *f, u16 events)
     return revents;
 }
 
+static int console_stat_op(struct file *f, struct kstat *st)
+{
+    (void)f;
+    memset(st, 0, sizeof(*st));
+    st->mode = 0020000u | 0666u;    /* S_IFCHR | rw-rw-rw- */
+    st->nlink = 1;
+    st->blksize = PAGE_SIZE;
+    /* A terminal has no length. Reporting 0 is what makes isatty() and the
+     * stdio size checks behave. */
+    st->size = 0;
+    return 0;
+}
+
 static const struct file_ops console_ops = {
     .read = cons_file_read,
     .write = cons_file_write,
     .ioctl = cons_file_ioctl,
     .poll = console_poll_op,
+    .stat = console_stat_op,
     .release = cons_file_release,
 };
 

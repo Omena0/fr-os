@@ -9,3 +9,7 @@ __pycache__/
 docs/site/
 prompt.txt
 docs.index
+
+# Installed userland copies; the source tree is filesystem/.
+filesystem/bin/*
+!filesystem/bin/.gitkeep

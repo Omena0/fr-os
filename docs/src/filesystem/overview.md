@@ -81,3 +81,25 @@ Fast path (sequential read, page cache hit):
 - [inode-cache.md](inode-cache.md)
 - [dentry-cache.md](dentry-cache.md)
 - [mount-system.md](mount-system.md)
+
+## Implementation Status
+
+The VFS and block interfaces above are the target. What the tree has today:
+
+- **Block layer.** `src/kernel/include/block.h`, with an ATA PIO driver
+  (`src/kernel/drivers/ata.c`) for QEMU's IDE controller. virtio-blk, the primary
+  device described in the storage-driver document, is not implemented yet.
+- **Root filesystem.** FrFS (`src/kernel/fs/frfs.c`, formatted by
+  `tools/mkfs.py`): 4 KiB blocks, 128-byte inodes, 12 direct block pointers plus
+  one single-indirect block, directory entries with `rec_len`. It is mounted
+  read-only from the first block device whose superblock carries the FrFS magic.
+- **VFS surface.** One mount, inodes read on demand (no inode or dentry cache),
+  no page cache. `open`, `read`, `lseek`, `fstat`, `getdents` and `execve` go
+  through it; `write` and open-for-write return EROFS.
+- **Boot image.** `filesystem/` is packed into `build/fs.img`, attached as the
+  second IDE disk. Programs the build produces are installed in
+  `filesystem/bin/`; files added there by hand are packed and left alone.
+  `init`'s `run` searches `PATH` (default `/bin:/usr/bin`).
+
+ext4 (journaling, extents, HTree), multiple mounts, caches and write support are
+design targets, not current behaviour.
