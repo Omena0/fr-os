@@ -53,6 +53,9 @@ extern int sys_fstat(int fd, void *st);  /* for isatty */
 extern int sys_dup(int oldfd);
 extern int sys_dup2(int oldfd, int newfd);
 extern int sys_dup3(int oldfd, int newfd, int flags);
+extern pid_t sys_getpgid(pid_t pid);
+extern int sys_setpgid(pid_t pid, pid_t pgid);
+extern pid_t sys_setsid(void);
 extern int sys_execve(const char *path, char *const argv[], char *const envp[]);
 extern pid_t sys_fork(void);
 extern pid_t sys_wait4(pid_t pid, int *wstatus, int options, void *rusage);
@@ -179,6 +182,26 @@ pid_t getpid(void)
 pid_t gettid(void)
 {
     return sys_gettid();
+}
+
+pid_t getpgid(pid_t pid)
+{
+    return sys_getpgid(pid);
+}
+
+pid_t getpgrp(void)
+{
+    return sys_getpgid(0);
+}
+
+int setpgid(pid_t pid, pid_t pgid)
+{
+    return sys_setpgid(pid, pgid);
+}
+
+pid_t setsid(void)
+{
+    return sys_setsid();
 }
 
 pid_t getppid(void)

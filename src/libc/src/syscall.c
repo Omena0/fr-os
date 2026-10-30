@@ -124,6 +124,21 @@ int sys_rt_sigprocmask(int how, const sigset_t *set, sigset_t *oset)
     return (int)check0(__syscall4(SYS_rt_sigprocmask, how, (long)set, (long)oset, sizeof(sigset_t)));
 }
 
+pid_t sys_getpgid(pid_t pid)
+{
+    return (pid_t)check0(__syscall1(SYS_getpgid, pid));
+}
+
+int sys_setpgid(pid_t pid, pid_t pgid)
+{
+    return (int)check0(__syscall2(SYS_setpgid, pid, pgid));
+}
+
+pid_t sys_setsid(void)
+{
+    return (pid_t)check0(__syscall0(SYS_setsid));
+}
+
 int sys_poll(struct pollfd *fds, unsigned long nfds, int timeout)
 {
     return (int)check0(__syscall3(SYS_poll, (long)fds, (long)nfds, timeout));

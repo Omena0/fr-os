@@ -283,6 +283,33 @@ static void restore_default(int sig) {
     sigaction(sig, &dfl, 0);
 }
 
+static int test_getpgrp_libc(void) {
+    TEST_ASSERT_EQ(getpgrp(), getpgid(0), "getpgrp should equal getpgid(0)");
+    TEST_ASSERT_EQ(getpgid(getpid()), getpgrp(), "getpgid of self should equal getpgrp");
+    return TEST_PASS;
+}
+
+static int test_setpgid_libc(void) {
+    TEST_ASSERT_EQ(setpgid(0, 0), 0, "setpgid(0, 0) should succeed");
+    TEST_ASSERT_EQ(getpgrp(), getpid(), "after setpgid(0, 0) the group should be the process");
+    return TEST_PASS;
+}
+
+static int test_setsid_child(void) {
+    pid_t pid = (pid_t)syscall1(SYS_fork, 0);
+    int wstatus = 0;
+
+    TEST_ASSERT(pid >= 0, "fork should not fail");
+    if (pid == 0) {
+        pid_t sid = setsid();
+        syscall1(SYS_exit, sid == getpid() ? 0 : 1);
+    }
+    TEST_ASSERT_EQ(syscall4(SYS_wait4, pid, (long)&wstatus, 0, 0), pid, "wait4 should return the child");
+    TEST_ASSERT(WIFEXITED(wstatus), "the child should exit normally");
+    TEST_ASSERT_EQ(WEXITSTATUS(wstatus), 0, "setsid in a non-leader child should return its own pid");
+    return TEST_PASS;
+}
+
 static int test_signal_handler_runs_on_return(void) {
     TEST_ASSERT_EQ(install_count_handler(SIGUSR1), 0, "installing a handler should succeed");
     TEST_ASSERT_EQ(kill(getpid(), SIGUSR1), 0, "kill self should succeed");
@@ -672,6 +699,9 @@ struct test_suite test_process_syscalls = {
         { "execve_nonexistent", test_execve_nonexistent, false },
         { "execve_not_executable", test_execve_not_executable, false },
         { "execve_empty_env", test_execve_empty_env, false },
+        { "getpgrp_libc", test_getpgrp_libc, false },
+        { "setpgid_libc", test_setpgid_libc, false },
+        { "setsid_child", test_setsid_child, false },
         { "getpid_positive", test_getpid_positive, false },
         { "getppid_positive", test_getppid_positive, false },
         { "gettid_positive", test_gettid_positive, false },
@@ -721,5 +751,5 @@ struct test_suite test_process_syscalls = {
         { "arch_prctl_get_fs", test_arch_prctl_get_fs, false },
         { "arch_prctl_get_gs", test_arch_prctl_get_gs, false },
     },
-    .num_cases = 55,
+    .num_cases = 58,
 };
