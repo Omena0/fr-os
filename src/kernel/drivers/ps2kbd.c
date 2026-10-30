@@ -139,7 +139,7 @@ static void ps2_expect_ack(uint8_t cmd, uint8_t want)
 #if defined(KBD_LAYOUT_FI)
 
 /* Make codes 0x00-0x3F, set 1, unshifted: Finnish (fi). */
-static const char scancode_base[0x40] = {
+static const char scancode_base[0x60] = {
     [0x01] = 0x1B,
     [0x02] = '1', [0x03] = '2', [0x04] = '3', [0x05] = '4',
     [0x06] = '5', [0x07] = '6', [0x08] = '7', [0x09] = '8',
@@ -161,23 +161,33 @@ static const char scancode_base[0x40] = {
     [0x30] = 'b', [0x31] = 'n', [0x32] = 'm',
     [0x33] = ',', [0x34] = '.', [0x35] = '-',
     [0x39] = ' ',
+    [0x56] = '<',
 };
 
-static const char scancode_shifted[0x40] = {
-    [0x02] = '!', [0x03] = '"', [0x04] = '#', [0x05] = 0,   /* ¤ */
+static const char scancode_shifted[0x60] = {
+    [0x02] = '!', [0x03] = '"', [0x04] = '#', [0x05] = '\xa4',   /* ¤ */
     [0x06] = '%', [0x07] = '&', [0x08] = '/', [0x09] = '(',
     [0x0A] = ')', [0x0B] = '=',
-    [0x0C] = '?', [0x0D] = '~',          /* the grave dead key */
+    [0x0C] = '?', [0x0D] = '`',          /* grave */
     [0x1A] = 0, [0x1B] = '^',            /* Å */
     [0x27] = 0, [0x28] = 0, [0x29] = 0,  /* Ö, Ä, ½ */
     [0x2B] = '*',
     [0x33] = ';', [0x34] = ':', [0x35] = '_',
+    [0x56] = '>',
+};
+
+static const char scancode_altgr[0x60] = {
+    [0x03] = '@',
+    [0x07] = '{', [0x08] = '[', [0x09] = ']', [0x0A] = '}',
+    [0x0C] = '\\', [0x0D] = '|',
+    [0x1A] = '~', [0x1B] = '^',
+    [0x2B] = '`',
 };
 
 #elif defined(KBD_LAYOUT_US)
 
 /* Make codes 0x00-0x3F, set 1, unshifted: US. */
-static const char scancode_base[0x40] = {
+static const char scancode_base[0x60] = {
     [0x01] = 0x1B,
     [0x02] = '1', [0x03] = '2', [0x04] = '3', [0x05] = '4',
     [0x06] = '5', [0x07] = '6', [0x08] = '7', [0x09] = '8',
@@ -199,9 +209,10 @@ static const char scancode_base[0x40] = {
     [0x30] = 'b', [0x31] = 'n', [0x32] = 'm',
     [0x33] = ',', [0x34] = '.', [0x35] = '/',
     [0x39] = ' ',
+    [0x56] = '<',
 };
 
-static const char scancode_shifted[0x40] = {
+static const char scancode_shifted[0x60] = {
     [0x02] = '!', [0x03] = '@', [0x04] = '#', [0x05] = '$',
     [0x06] = '%', [0x07] = '^', [0x08] = '&', [0x09] = '*',
     [0x0A] = '(', [0x0B] = ')',
@@ -211,6 +222,8 @@ static const char scancode_shifted[0x40] = {
     [0x2B] = '|',
     [0x33] = '<', [0x34] = '>', [0x35] = '?',
 };
+
+static const char scancode_altgr[0x60] = { 0 };
 
 #else
 #error "KBD_LAYOUT must be US or FI (see src/config.mk)"
@@ -223,6 +236,7 @@ static const char scancode_shifted[0x40] = {
 /* Modifier state, shared with tty.c for Ctrl+A-Z handling. */
 bool shift_held;
 bool ctrl_held;
+bool altgr_held;
 
 /* True after an E0 prefix, so the next code is an extended key (arrows,
  * keypad, etc.) rather than a normal scancode. */
@@ -287,6 +301,11 @@ static void keyboard_scancode(uint8_t sc)
         const char *seq = NULL;
 
         e0_prefix = false;
+        if (code == 0x38) {   /* right Alt = AltGr */
+            altgr_held = make;
+            klog(KLOG_DEBUG, "ps2kbd: altgr %s\n", make ? "pressed" : "released");
+            return;
+        }
         if (!make)
             return;
         switch (code) {
@@ -294,7 +313,7 @@ static void keyboard_scancode(uint8_t sc)
         case 0x50: seq = "\033[B"; break;   /* down */
         case 0x4D: seq = "\033[C"; break;   /* right */
         case 0x4B: seq = "\033[D"; break;   /* left */
-        case 0x1C:                           /* keypad Enter */
+        case 0x1C:                          /* keypad Enter */
             if (keyboard_callback)
                 keyboard_callback('\n');
             return;
@@ -366,7 +385,15 @@ static void keyboard_scancode(uint8_t sc)
         return;
     }
 
-    if (shift_held) {
+    if (altgr_held) {
+        char a = 0;
+        if (code < ARRAY_SIZE(scancode_altgr))
+            a = scancode_altgr[code];
+        if (a != 0) {
+            c = a;
+            klog(KLOG_DEBUG, "ps2kbd: altgr -> '%c'\n", c);
+        }
+    } else if (shift_held) {
         char s = 0;
         if (code < ARRAY_SIZE(scancode_shifted))
             s = scancode_shifted[code];
