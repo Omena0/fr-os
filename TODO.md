@@ -21,10 +21,7 @@ These will unblock a lot of real programs once P0 is done.
 | Feature | What exists now | What to add | Why | Notes |
 | :-- | :-- | :-- | :-- | :-- |
 | **I/O multiplexing** | Nothing obvious. | `poll` and/or `select`. `epoll` would be nice but `poll`/`select` is far more common and easier to implement on top of the existing fd/pipe/tty infrastructure. | Needed for shells, network clients (once networking exists), and many interactive tools. | `pipe`/`pipe2` exist which pairs well with this. |
-| **Time functions** | `clock_gettime`, `nanosleep` exist. | `gettimeofday`, `time()`. `setitimer` is less critical but useful. | Tons of programs call `time()`/`gettimeofday()` even if they don't need high precision. `clock_gettime` is there but libc portability will expect these. | Should be trivial wrappers if `clock_gettime` is solid. |
-| **Resource limits & system info** | `getuid`/`getgid` exist. | `getrlimit`/`setrlimit`, `uname`, `sysinfo`. | Build systems, shells, and many programs check these for compatibility or to configure themselves. | Usually just return sane defaults, doesn't need full Linux semantics. |
-| **FD operations** | `dup`, `fcntl` exist. | `dup2`, `dup3`. Expand `fcntl` to cover `F_DUPFD_CLOEXEC`, `F_GETFD`/`F_SETFD`, `F_GETFL`/`F_SETFL` fully. | Used constantly in shell redirection and by libraries. | Very common and easy to implement on top of existing fd code. |
-| **Environment & exec details** | `execve` exists. | Ensure `environ`/`envp` handling is correct (the STATE.md notes had issues with this), handle `execve` with empty env properly, and consider `prctl` for basic flags. | Portability and fixing edge cases. The crash noted in memory about `environ` shows this matters. | Focus on correctness here based on the lessons learned in the repo. |
+| **Environment & exec details** | `environ`/`__environ` are set by crt1 from the kernel-built stack, and an `execve` with `envp = { NULL }` is covered by a runtime test. | `prctl` is missing. Consider `PR_SET_NAME`/`PR_GET_NAME` and `PR_SET_PDEATHSIG`, which libraries and babysitting processes use. |
 
 ## P2: For more complex programs
 
