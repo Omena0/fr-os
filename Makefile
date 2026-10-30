@@ -286,54 +286,18 @@ $(BUILD)/kernel-runtime.elf: $(BUILD)/libk.a $(OBJ)/kernel/initrd-runtime.c.o \
 		$(BUILD)/libk.a $(OBJ)/kernel/initrd-runtime.c.o
 	@$(MAKE) --no-print-directory verify-isa PROFILE=kernel FILE=$@
 
-# Enforce the ISA policy in config.mk instead of trusting it.
+# ISA policy is checked on the linked artefact, not trusted from the flags:
+# any -m flag appended later wins, and inline asm can slip a vector encoding
+# past the compiler entirely. tools/verify_isa.py reads the machine code.
 #
-# The -mno-sse/-mno-sse2/-mno-avx flags in KERNEL_CFLAGS are a request to the
-# compiler, not a guarantee: any -m flag appended after them wins, which is
-# exactly how -msse4.2 and then -mavx2 each got vector code into a build that
-# read as GPR-only. Checking the linked output rather than the flags is what
-# makes this robust -- it does not care what order the flags are in, what a
-# future edit appends, or whether an inline asm block in a .S file slipped a
-# VEX encoding past the compiler entirely.
+#   kernel  GPR-only: no x87, XMM, YMM, ZMM, opmask or XSAVE. fxsave/fxrstor
+#           are exempt because context.S saves the FPU with them.
+#   user    SSE2 (XMM) is allowed, wider is not: the 512-byte FXSAVE image
+#           covers x87 and XMM but not AVX upper halves, so an AVX task would
+#           silently lose them on the next switch.
 #
-# So the rule is enforced in tools/verify_isa.py, on the linked artefact, and
-# it is run against *both* images with two different profiles.
-#
-#   kernel   build/kernel.elf must be GPR-only: no x87, no XMM, no YMM, no
-#            ZMM, no opmask, no XSAVE. fxsave/fxrstor are the two exemptions,
-#            because context.S defines fpu_save/fpu_restore on them and the
-#            scheduler calls them on every task switch.
-#
-#   user     build/init.elf and build/hello.elf may use XMM and may not use
-#            anything wider. This is a second and deliberately weaker
-#            invocation, not a reuse of the kernel one, and the difference is
-#            the whole reason it is separate. The x86-64 baseline already
-#            provides SSE2, and FXSAVE *does* preserve the 128-bit state that
-#            legacy SSE uses: the image context.S saves is the legacy 512-byte
-#            one, x87 plus XMM0-XMM15 plus MXCSR. A legacy SSE instruction in
-#            userland is therefore carried across a preemption correctly. A
-#            VEX or AVX-512 instruction is not -- its upper halves are not in
-#            that image at all, so a preempted task loses them silently, with
-#            no fault and nothing in the log.
-#
-# That second invocation is not redundant. USER_CFLAGS gained
-# -mno-avx -mno-avx2 -mno-fma -mno-f16c precisely because -march=x86-64-v3
-# would otherwise acquire AVX2 silently, and until now nothing checked the
-# result. `make verify-isa-test` is what keeps this honest; see
-# tests/isa/verify_isa_test.sh.
-#
-# The reason the two profiles exist at all is one sentence, and it is the
-# sentence the old failure message got wrong: fpu_save/fpu_restore in
-# context.S are FXSAVE/FXRSTOR, so any register state above 128 bits is
-# destroyed by the next task switch without announcing it. On a CPU that
-# reports AVX and OSXSAVE the loader sets XCR0 |= 7, so such an instruction
-# executes happily first. The tool's error message says exactly that.
-#
-# The tool is a prerequisite of the three linked images, not of the objects.
-# The gate reads the finished artefact, so a change to the gate has to
-# re-validate the artefacts that exist rather than wait for an unrelated
-# edit; it has nothing to say about how an object is compiled, so it must not
-# invalidate one. That is the same split the .d files make.
+# The gate is a prerequisite of each linked image, not of objects: a change to
+# the checker re-validates artefacts, not compiles.
 # VERIFY_ISA_PY is defined up with BUILD_INPUTS, because immediately-expanded
 # (=) variables are read in order.
 
@@ -398,50 +362,17 @@ KERNEL_VERSION_DEFS := -DKERNEL_VERSION=\"$(KERNEL_VERSION)\" \
                        -DKERNEL_BUILD_STAMP=\"$(KERNEL_BUILD_STAMP)\"
 
 .PHONY: all
-# verify-isa-test is NOT in `all`. It checks the *checker*, not the tree, and it
-# is not free: it runs a dozen compiles through both profiles. When it sat in
-# front of $(DISK), a stale expectation inside it stopped the kernel being built
-# at all -- a failure mode that is strictly worse than a missing check, because
-# the thing being protected went unbuilt. `make check` runs it.
-# verify-isa-test checks the *checker*, not the tree. It runs a dozen small
-# compiles through both profiles to prove the classifier still recognises each
-# instruction family it claims to. That is worth doing before a release and in
-# CI, and it is not worth doing on every incremental build: a stale or wrong
-# expectation inside the check itself would otherwise stop the kernel being
-# built at all, which is the wrong failure mode for a test of a safety net.
-#
-# `make check` runs it. `make verify-isa-test` runs it directly.
-#
-# The gate that *does* gate every build is `verify-isa` itself, applied to the
-# finished kernel.elf, init.elf and hello.elf from the link rules.
+# verify-isa-test checks the *checker*, not the tree: a dozen compiles through
+# both profiles. It is in `make check`, not `all`, so a stale expectation in
+# the test cannot stop the kernel being built. The gate that runs on every
+# build is verify-isa itself, from the link rules.
 all: $(DISK) $(FS_IMAGE)
 	@echo "built $(DISK) and $(FS_IMAGE)"
 
-# The boot smoke test: the only check here that boots anything at all, and the
-# one that answers the question the ISA self-test cannot -- does the kernel
-# still reach userspace. verify-isa-test compiles probes and reads
-# disassembly; it never starts a CPU, so every boot regression in this tree so
-# far has been found by a person reading a serial log by hand.
-#
-# It depends on $(DISK) and that dependency is not decoration. Twice in this
-# project's history a boot log that stopped mid-way turned out to be an image
-# make had not rebuilt, and it was read as a real bug. A check that builds
-# what it is about to boot cannot make that mistake, and tests/boot_smoke.py
-# refuses to run on an image older than its inputs as a second line of defence
-# for the case where the script is run by hand.
-#
-# run.sh is reused for the QEMU invocation (IMAGE, LOG, HEADLESS=1, RUN_TIMEOUT
-# are all set by the script); what the Makefile adds is the exit-code contract:
-#
-#   0   pass
-#   77  skipped -- no QEMU, or no usable /dev/kvm. Deliberately not 0. A smoke
-#       test that did not run has verified nothing, and a skipped test that
-#       looks like a pass is worse than no test.
-#   *   failed
-#
-# A skip is not a failure, so `check` still succeeds -- but it drops a marker
-# and the check target turns that into a loud "not exercised" line instead of
-# "all checks passed".
+# Boot smoke test: the only check that starts a CPU. It builds the image it
+# boots, so a stale image cannot be mistaken for a boot bug, and reuses run.sh
+# for QEMU. Exit codes: 0 pass, 77 skipped (no QEMU or /dev/kvm), else fail.
+# A skip is reported loudly rather than counted as a pass.
 .PHONY: boot-smoke
 boot-smoke: $(DISK)
 	@rm -f $(BUILD)/.boot-smoke-skipped
@@ -602,41 +533,12 @@ deps:
 
 # ------------------------------------------------- dependency self-healing ----
 #
-# make decides whether to rebuild a file by comparing timestamps, and that is
-# the whole of its knowledge. It cannot tell "this object is up to date" from
-# "this object looks up to date". The distinction is not academic here: a
-# header whose mtime moves backwards -- an editor that preserves times, a
-# tarball or cp -a that restores an old timestamp, a patch applied with a
-# pinned clock, an rsync without --checksum -- leaves every dependent object
-# looking current while holding the old value. The build then reports success
-# and links a binary built from a header that no longer exists in that form.
+# mtime alone cannot tell "up to date" from "looks up to date": a restored or
+# rewound header timestamp leaves dependent objects stale while make reports
+# success. A digest of every header plus the build configuration is exact, and
+# is rewritten only when it changes. Makefile and config.mk are in it because
+# they decide the command line, so a rule change invalidates every object.
 #
-# That is the second half of why "make did not rebuild after I edited a header"
-# kept happening here even for the objects that did have a correct .d file: the
-# .d file was right, and the timestamp comparison it feeds was not.
-#
-# The fix is to stop trusting the object's mtime against the header's and start
-# comparing the thing that actually determines the object's contents: the text
-# of the inputs. A single digest over every header plus the build
-# configuration is cheap -- a few hundred files, a few hundred kilobytes -- and
-# it is exact. Timestamps can lie; content cannot.
-#
-# The stamp is rewritten only when the digest changes, so a rebuild that
-# touches no header does not cascade into recompiling the world. When an input
-# does change, every object is rebuilt: wasteful but correct, and a redundant
-# compile costs a second where a stale object has already cost hours.
-#
-# Makefile and src/config.mk are in the digest on purpose. They decide the
-# compile command line, so a change to either invalidates every object by the
-# same argument -- which is also what disposes of objects left behind by an
-# older rule set, such as the three loader objects that used to be built with no
-# dependency tracking at all.
-#
-# The stamp is a real file target with a real recipe, so it participates in the
-# ordinary up-to-date logic. FORCE makes the recipe run on every invocation so
-# the digest is always rechecked; the recipe leaves the file untouched when the
-# digest is unchanged, which is what keeps the stamp from looking newer than
-# every object on every single build.
 $(BUILD_INPUTS_STAMP): FORCE
 	@mkdir -p $(dir $@)
 	@digest=$$( { cat $(BUILD_INPUTS) $(HEADER_FILES) 2>/dev/null; \
