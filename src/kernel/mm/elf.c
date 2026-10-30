@@ -236,49 +236,44 @@ static int elf_load_tls(struct address_space *mm, const u8 *base, u64 offset,
             u64 covered_end)
 {
     static const u8 zeros[TLS_ZERO_CHUNK];
-    u64 start = ALIGN_DOWN(vaddr, PAGE_SIZE);
-    u64 end = ALIGN_UP(vaddr + memsz, PAGE_SIZE);
     uint32_t prot = VM_READ | VM_WRITE | VM_USER;
-    u64 zero_from, tp;
+    u64 start, end, tp;
     int r;
 
-    /*
-     * Only the part no PT_LOAD already covers needs a VMA. The loader adds
-     * VMAs for segment ranges and refuses to overlap one that exists, so
-     * asking for the whole block would fail for every ordinary image: the
-     * block almost always begins inside the last segment's last page.
-     */
-    if (end > covered_end) {
-        u64 vma_start = start > covered_end ? start : covered_end;
+    (void)vaddr;
 
-        r = mm_add_vma(mm, (virt_addr_t)vma_start, (virt_addr_t)end,
-                   prot, VM_ANON);
-        if (r < 0)
-            return r;
-    }
+    /*
+     * The TLS block is copied into a page of its own, above the loaded image,
+     * rather than left at its ELF address. In a static image the linker
+     * overlays .tbss on the following .data (the TLS-NOBITS overlay), so the
+     * template's last bytes share an address with ordinary data. Pointing the
+     * thread pointer at the template therefore makes thread-relative writes
+     * land in .data: __errno at tp-8 was quietly overwriting `stderr`, which
+     * is what made fprintf(stderr, ...) fault with rdi equal to errno.
+     *
+     * The copy is what the ABI expects anyway: the template is read-only
+     * initial data, and each thread needs its own writable block.
+     */
+    start = ALIGN_UP(covered_end, PAGE_SIZE);
+    end = ALIGN_UP(start + memsz, PAGE_SIZE);
+    if (end <= start)
+        return -EINVAL;
+
+    r = mm_add_vma(mm, (virt_addr_t)start, (virt_addr_t)end, prot, VM_ANON);
+    if (r < 0)
+        return r;
 
     /* .tdata: the initialised part, copied from the file. */
     if (filesz) {
-        r = user_memory_write(mm, (virt_addr_t)vaddr, base + offset,
+        r = user_memory_write(mm, (virt_addr_t)start, base + offset,
                       (size_t)filesz, prot);
         if (r < 0)
             return r;
     }
 
-    /*
-     * .tbss, and only the part of it that is genuinely anonymous.
-     *
-     * Previously the whole tail was zeroed, but that destroyed constructor
-     * pointers when .tbss overlapped other data. The documented TLS-NOBITS-
-     * overlay behaviour is that errno starts holding the first bytes of
-     * __init_array_start rather than zero — which is harmless since nothing
-     * reads errno before the first failed call overwrites it.
-     */
-    zero_from = vaddr + filesz;
-    if (zero_from < covered_end)
-        zero_from = covered_end;
-    for (u64 at = zero_from; at < vaddr + memsz;) {
-        size_t chunk = (size_t)MIN((u64)sizeof(zeros), vaddr + memsz - at);
+    /* .tbss: any bytes after the initialised part start as zero. */
+    for (u64 at = start + filesz; at < start + memsz;) {
+        size_t chunk = (size_t)MIN((u64)sizeof(zeros), start + memsz - at);
 
         r = user_memory_write(mm, (virt_addr_t)at, zeros, chunk, prot);
         if (r < 0)
@@ -287,21 +282,20 @@ static int elf_load_tls(struct address_space *mm, const u8 *base, u64 offset,
     }
 
     /*
-     * p_align is the segment's declared alignment, which is the largest
-     * alignment of any symbol in the block. It is 1 for a block of bytes
-     * and chars, so ALIGN_UP below has to tolerate it rather than assume a
-     * page or a word.
+     * Variant II: the thread pointer is at the end of the block, aligned up
+     * as the segment declares, and symbols are addressed at negative offsets
+     * from it.
      */
-    tp = ALIGN_UP(vaddr + memsz, align ? (unsigned long)align : 1UL);
-    if (tp < vaddr + memsz)
-        tp = vaddr + memsz;   /* only reachable on p_align 0, rejected above */
+    tp = ALIGN_UP(start + memsz, align ? (unsigned long)align : 1UL);
+    if (tp < start + memsz)
+        tp = start + memsz;
 
     mm->tls_ptr = tp;
     mm->tls_size = memsz;
 
     ELF_LOG(KLOG_INFO,
         "loaded TLS block [%#lx,%#lx) %lu bytes initialised, tp %#lx (p_align %#lx)",
-        vaddr, vaddr + memsz, (unsigned long)filesz,
+        start, start + memsz, (unsigned long)filesz,
         (unsigned long)mm->tls_ptr, (unsigned long)align);
     return 0;
 }
@@ -555,8 +549,8 @@ int elf_load(struct address_space *mm, const void *image, size_t size,
         out->tls_ptr = mm->tls_ptr;
         out->tls_size = mm->tls_size;
 
-        if (mm->tls_ptr > max_vaddr)
-            max_vaddr = mm->tls_ptr;
+        if (ALIGN_UP(mm->tls_ptr, PAGE_SIZE) > max_vaddr)
+            max_vaddr = ALIGN_UP(mm->tls_ptr, PAGE_SIZE);
     }
 
     out->phdr_vaddr = phdr_vaddr;
