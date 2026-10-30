@@ -20,7 +20,7 @@ These will unblock a lot of real programs once P0 is done.
 
 | Feature | What exists now | What to add | Why | Notes |
 | :-- | :-- | :-- | :-- | :-- |
-| **I/O multiplexing** | Nothing obvious. | `poll` and/or `select`. `epoll` would be nice but `poll`/`select` is far more common and easier to implement on top of the existing fd/pipe/tty infrastructure. | Needed for shells, network clients (once networking exists), and many interactive tools. | `pipe`/`pipe2` exist which pairs well with this. |
+| **I/O multiplexing** | `poll` exists for the console and pipes, with a timeout; the kernel asks each file's `ops->poll`. | `select` (many programs still use it), `ppoll` with a signal mask, and `epoll`. Readiness currently causes a slice-by-slice poll rather than waking the poller on the event. |
 | **Environment & exec details** | `environ`/`__environ` are set by crt1 from the kernel-built stack, and an `execve` with `envp = { NULL }` is covered by a runtime test. | `prctl` is missing. Consider `PR_SET_NAME`/`PR_GET_NAME` and `PR_SET_PDEATHSIG`, which libraries and babysitting processes use. |
 
 ## P2: For more complex programs

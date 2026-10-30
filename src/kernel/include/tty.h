@@ -77,6 +77,10 @@ void tty_write(const char *buf, size_t count);
 u64 tty_write_dropped(void);
 u64 tty_read_dropped(void);
 
+/* Bytes a read() would return right now: buffered input in raw mode, a
+ * committed line (or EOF) in canonical mode. */
+size_t tty_readable(void);
+
 /* Push one byte into the tty input ring. Called from interrupt context. */
 void tty_in_push(char c);
 

@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <uapi/syscall.h>
 
 static inline long syscall1(long n, long a1) {
     long ret;
@@ -102,6 +103,93 @@ static int test_futex_invalid_addr(void) {
     return TEST_PASS;
 }
 
+static int test_poll_pipe_ready(void) {
+    int fds[2];
+    struct pollfd pfd;
+    char byte = 'x';
+
+    TEST_ASSERT_EQ(syscall2(SYS_pipe, (long)fds, 0), 0, "pipe should succeed");
+    TEST_ASSERT_EQ(syscall3(SYS_write, fds[1], (long)&byte, 1), 1, "pipe write should succeed");
+    pfd.fd = fds[0];
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+    TEST_ASSERT_EQ(syscall3(SYS_poll, (long)&pfd, 1, 0), 1, "poll should report the readable end ready");
+    TEST_ASSERT((pfd.revents & POLLIN) != 0, "revents should contain POLLIN");
+    syscall1(SYS_close, fds[0]);
+    syscall1(SYS_close, fds[1]);
+    return TEST_PASS;
+}
+
+static int test_poll_empty_timeout(void) {
+    int fds[2];
+    struct pollfd pfd;
+
+    TEST_ASSERT_EQ(syscall2(SYS_pipe, (long)fds, 0), 0, "pipe should succeed");
+    pfd.fd = fds[0];
+    pfd.events = POLLIN;
+    pfd.revents = 1;
+    TEST_ASSERT_EQ(syscall3(SYS_poll, (long)&pfd, 1, 0), 0, "poll of an empty pipe should time out at once");
+    TEST_ASSERT_EQ(pfd.revents, 0, "revents should be cleared on timeout");
+    syscall1(SYS_close, fds[0]);
+    syscall1(SYS_close, fds[1]);
+    return TEST_PASS;
+}
+
+static int test_poll_write_end_ready(void) {
+    int fds[2];
+    struct pollfd pfd;
+
+    TEST_ASSERT_EQ(syscall2(SYS_pipe, (long)fds, 0), 0, "pipe should succeed");
+    pfd.fd = fds[1];
+    pfd.events = POLLOUT;
+    pfd.revents = 0;
+    TEST_ASSERT_EQ(syscall3(SYS_poll, (long)&pfd, 1, 0), 1, "poll should report the write end ready");
+    TEST_ASSERT((pfd.revents & POLLOUT) != 0, "revents should contain POLLOUT");
+    syscall1(SYS_close, fds[0]);
+    syscall1(SYS_close, fds[1]);
+    return TEST_PASS;
+}
+
+static int test_poll_bad_fd_nval(void) {
+    struct pollfd pfd;
+
+    pfd.fd = 999;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+    TEST_ASSERT_EQ(syscall3(SYS_poll, (long)&pfd, 1, 0), 1, "poll should count an invalid descriptor as ready");
+    TEST_ASSERT((pfd.revents & POLLNVAL) != 0, "revents should contain POLLNVAL");
+    return TEST_PASS;
+}
+
+static int test_poll_pipe_eof(void) {
+    int fds[2];
+    struct pollfd pfd;
+
+    TEST_ASSERT_EQ(syscall2(SYS_pipe, (long)fds, 0), 0, "pipe should succeed");
+    syscall1(SYS_close, fds[1]);
+    pfd.fd = fds[0];
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+    TEST_ASSERT(syscall3(SYS_poll, (long)&pfd, 1, 0) == 1, "a closed write end should make the read end ready");
+    TEST_ASSERT((pfd.revents & POLLHUP) != 0, "revents should contain POLLHUP");
+    syscall1(SYS_close, fds[0]);
+    return TEST_PASS;
+}
+
+static int test_poll_timeout_waits(void) {
+    int fds[2];
+    struct pollfd pfd;
+
+    TEST_ASSERT_EQ(syscall2(SYS_pipe, (long)fds, 0), 0, "pipe should succeed");
+    pfd.fd = fds[0];
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+    TEST_ASSERT_EQ(syscall3(SYS_poll, (long)&pfd, 1, 10), 0, "a 10 ms poll of an empty pipe should return 0");
+    syscall1(SYS_close, fds[0]);
+    syscall1(SYS_close, fds[1]);
+    return TEST_PASS;
+}
+
 /* ===== Test Suite Registration ===== */
 
 struct test_suite test_ipc_syscalls = {
@@ -112,6 +200,12 @@ struct test_suite test_ipc_syscalls = {
         { "pipe_read_write", test_pipe_read_write, false },
         { "futex_basic", test_futex_basic, false },
         { "futex_invalid_addr", test_futex_invalid_addr, false },
+        { "poll_pipe_ready", test_poll_pipe_ready, false },
+        { "poll_empty_timeout", test_poll_empty_timeout, false },
+        { "poll_write_end_ready", test_poll_write_end_ready, false },
+        { "poll_bad_fd_nval", test_poll_bad_fd_nval, false },
+        { "poll_pipe_eof", test_poll_pipe_eof, false },
+        { "poll_timeout_waits", test_poll_timeout_waits, false },
     },
-    .num_cases = 5,
+    .num_cases = 11,
 };

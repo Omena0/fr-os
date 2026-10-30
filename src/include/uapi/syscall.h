@@ -100,6 +100,21 @@
 #define SYS_dup          72u
 #define SYS_fcntl        73u
 #define SYS_dup3         74u
+#define SYS_poll         75u
+
+/* poll(2). */
+struct pollfd {
+    int32_t  fd;
+    uint16_t events;
+    uint16_t revents;
+};
+
+#define POLLIN    0x001
+#define POLLPRI   0x002
+#define POLLOUT   0x004
+#define POLLERR   0x008
+#define POLLHUP   0x010
+#define POLLNVAL  0x020
 
 /* IPC. */
 #define SYS_pipe        128u

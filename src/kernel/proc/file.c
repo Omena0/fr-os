@@ -159,12 +159,27 @@ static int cons_file_release(struct file *f)
     return 0;
 }
 
+static u16 console_poll_op(struct file *f, u16 events)
+{
+    u16 revents = 0;
+
+    (void)f;
+    if ((events & POLLIN) && tty_readable() > 0)
+        revents |= POLLIN;
+    /* Writes never block: tty_write buffers what fits and drains at once. */
+    if (events & POLLOUT)
+        revents |= POLLOUT;
+    return revents;
+}
+
 static const struct file_ops console_ops = {
     .read = cons_file_read,
     .write = cons_file_write,
     .ioctl = cons_file_ioctl,
+    .poll = console_poll_op,
     .release = cons_file_release,
 };
+
 
 struct file *console_file_create(void)
 {

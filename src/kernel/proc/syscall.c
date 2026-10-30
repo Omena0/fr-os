@@ -925,6 +925,27 @@ static ssize_t pipe_write_op(struct file *f, const void *buf, size_t count)
     }
 }
 
+static u16 pipe_poll_op(struct file *f, u16 events)
+{
+    struct pipe *p = f->private;
+    u16 revents = 0;
+
+    spinlock_acquire(&p->lock);
+    if (f->f_flags & O_WRONLY) {
+        if ((events & POLLOUT) && p->count < PIPE_CAPACITY)
+            revents |= POLLOUT;
+        if (p->read_closed)
+            revents |= POLLERR | POLLHUP;
+    } else {
+        if ((events & POLLIN) && p->count > 0)
+            revents |= POLLIN;
+        if (p->write_closed)
+            revents |= POLLHUP;
+    }
+    spinlock_release(&p->lock);
+    return revents;
+}
+
 static int pipe_release(struct file *f)
 {
     struct pipe *p = f->private;
@@ -965,8 +986,111 @@ static const struct file_ops pipe_ops = {
     .read = pipe_read_op,
     .write = pipe_write_op,
     .ioctl = NULL,
+    .poll = pipe_poll_op,
     .release = pipe_release,
 };
+
+/* -------------------------------------------------------------- poll -------- */
+
+#define POLL_MAX_FDS 1024
+
+/*
+ * poll(2). Readiness is asked of each file's ops->poll hook; a file without
+ * one is always ready in both directions, which is the right answer for a
+ * plain file and the only honest one for a descriptor this kernel cannot
+ * inspect.
+ *
+ * With no descriptor ready the caller sleeps in short slices and rechecks.
+ * A wakeup on readiness would need every driver to signal a poll waiter; the
+ * slice costs a little latency and no correctness, and the timeout is honoured
+ * on a monotonic deadline either way.
+ */
+static long sc_poll(struct syscall_regs *r)
+{
+    struct task *t = caller();
+    struct pollfd *fds;
+    u64 ufds = arg0(r);
+    s64 nfds = (s64)arg1(r);
+    s64 timeout = (s64)arg2(r);
+    u64 bytes;
+    u64 deadline = 0;
+
+    if (!t)
+        return -ESRCH;
+    if (nfds < 0 || nfds > POLL_MAX_FDS)
+        return -EINVAL;
+    if (nfds == 0)
+        return 0;
+
+    bytes = (u64)nfds * sizeof(struct pollfd);
+    fds = kmalloc(bytes);
+    if (!fds)
+        return -ENOMEM;
+    if (copy_from_user(fds, ufds, bytes) < 0) {
+        kfree(fds, bytes);
+        return -EFAULT;
+    }
+
+    if (timeout > 0) {
+        u64 ns = (u64)timeout * 1000000ULL;
+
+        deadline = ktime_mono_ns() + ns;
+    }
+
+    for (;;) {
+        long ready = 0;
+
+        for (s64 i = 0; i < nfds; i++) {
+            struct file *f;
+            u16 revents = 0;
+
+            fds[i].revents = 0;
+            if (fds[i].fd < 0)
+                continue;
+            f = fd_lookup(t, fds[i].fd);
+            if (!f) {
+                fds[i].revents = POLLNVAL;
+                ready++;
+                continue;
+            }
+            if (f->ops && f->ops->poll)
+                revents = f->ops->poll(f, fds[i].events);
+            else
+                revents = fds[i].events & (POLLIN | POLLOUT);
+            revents &= fds[i].events | POLLERR | POLLHUP | POLLNVAL;
+            fds[i].revents = revents;
+            if (revents)
+                ready++;
+        }
+
+        if (ready || timeout == 0) {
+            if (copy_to_user(ufds, fds, bytes) < 0) {
+                kfree(fds, bytes);
+                return -EFAULT;
+            }
+            kfree(fds, bytes);
+            return ready;
+        }
+
+        {
+            u64 now = ktime_mono_ns();
+            u64 slice = 5000000ULL;      /* 5 ms */
+
+            if (deadline && now + slice > deadline) {
+                if (now >= deadline) {
+                    if (copy_to_user(ufds, fds, bytes) < 0) {
+                        kfree(fds, bytes);
+                        return -EFAULT;
+                    }
+                    kfree(fds, bytes);
+                    return 0;
+                }
+                slice = deadline - now;
+            }
+            sched_sleep_ns(slice);
+        }
+    }
+}
 
 static long sc_pipe(struct syscall_regs *r)
 {
@@ -1613,6 +1737,7 @@ void syscall_init(void)
     syscall_table[SYS_getdents] = sc_getdents;
     syscall_table[SYS_dup] = sc_dup;
     syscall_table[SYS_dup3] = sc_dup3;
+    syscall_table[SYS_poll] = sc_poll;
     syscall_table[SYS_mmap] = sc_mmap;
     syscall_table[SYS_munmap] = sc_munmap;
     syscall_table[SYS_mprotect] = sc_mprotect;

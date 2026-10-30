@@ -27,6 +27,9 @@ struct file_ops {
     ssize_t (*read)(struct file *f, void *buf, size_t count);
     ssize_t (*write)(struct file *f, const void *buf, size_t count);
     long (*ioctl)(struct file *f, unsigned long request, void *arg);
+    /* Readiness for poll(2): return the requested POLL* bits that are ready
+     * now. NULL means the file is always readable and writable. */
+    u16 (*poll)(struct file *f, u16 events);
     int (*release)(struct file *f);
 };
 

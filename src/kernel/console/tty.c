@@ -809,6 +809,19 @@ size_t tty_read(char *buf, size_t count, bool block)
     }
 }
 
+size_t tty_readable(void)
+{
+    u64 flags = spinlock_irqsave(&in_lock);
+    size_t n;
+
+    if (tty_term.c_lflag & ICANON)
+        n = canon_commit;
+    else
+        n = in_ring.count;
+    spinlock_unlock_irqrestore(&in_lock, flags);
+    return n;
+}
+
 u64 tty_read_dropped(void)
 {
     u64 flags = spinlock_irqsave(&in_lock);
