@@ -70,8 +70,12 @@ def scan(path, name):
     if is_dir:
         entries = sorted(os.listdir(path))
         for entry in entries:
-            child = scan(os.path.join(path, entry), entry)
-            node.children.append(child)
+            if child := scan(os.path.join(path, entry), entry):
+                node.children.append(child)
+
+    elif name == '.gitkeep': # Ignore .gitkeep files
+        return None
+
     return node
 
 
