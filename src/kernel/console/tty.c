@@ -28,6 +28,7 @@
 #include <cpu_features.h>
 #include <drivers/serial.h>
 #include <drivers/ps2kbd.h>
+#include <drivers/sb16.h>
 #include <drivers/ps2mouse.h>
 
 KLOG_SUBSYSTEM("tty");
@@ -913,6 +914,9 @@ void tty_init(void)
      * initialised after the keyboard driver has written the controller
      * configuration byte it owns. */
     ps2mouse_init();
+
+    /* Sound Blaster 16: DSP reset, IRQ5 handler, DMA channel 1. */
+    sb16_init();
 
     spinlock_init(&out_lock);
     spinlock_init(&in_lock);

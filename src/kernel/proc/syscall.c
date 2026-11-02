@@ -43,6 +43,7 @@
 #include <uapi/mouse.h>
 #include <uapi/sysinfo.h>
 #include <signals.h>
+#include <audio.h>
 #include <fs.h>
 #include <version.h>
 #include <drivers/ps2mouse.h>
@@ -1201,6 +1202,34 @@ static long sc_futex(struct syscall_regs *r)
     return 0;
 }
 
+/* --------------------------------------------------------------- audio ----- */
+
+static long sc_audio_write(struct syscall_regs *r)
+{
+    u64 buf = arg0(r);
+    size_t count = (size_t)arg1(r);
+
+    if (!user_range_ok(syscall_user_mm(), buf, count))
+        return -EFAULT;
+    return audio_write((const void *)buf, count);
+}
+
+static long sc_audio_stop(struct syscall_regs *r)
+{
+    audio_stop();
+    return 0;
+}
+
+static long sc_audio_set_format(struct syscall_regs *r)
+{
+    uint32_t rate = (uint32_t)arg0(r);
+
+    if (rate < 4000u || rate > 44100u)
+        return -EINVAL;
+    audio_set_rate(rate);
+    return 0;
+}
+
 /* ------------------------------------------------------------ memory ------- */
 
 static long sc_brk(struct syscall_regs *r)
@@ -1787,6 +1816,9 @@ void syscall_init(void)
     syscall_table[SYS_get_tls_base] = sc_get_tls_base;
     syscall_table[SYS_pipe] = sc_pipe;
     syscall_table[SYS_futex] = sc_futex;
+    syscall_table[SYS_audio_write] = sc_audio_write;
+    syscall_table[SYS_audio_stop] = sc_audio_stop;
+    syscall_table[SYS_audio_set_format] = sc_audio_set_format;
     syscall_table[SYS_sched_yield] = sc_sched_yield;
     syscall_table[SYS_getcpu] = sc_getcpu;
     syscall_table[SYS_screen_claim] = sc_screen_claim;

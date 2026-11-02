@@ -119,6 +119,13 @@ if [ -f "$FS_IMAGE" ]; then
     QEMU_ARGS+=(-drive "file=${FS_IMAGE},format=raw,if=ide,index=1,media=disk")
 fi
 
+# SB16 sound card for audio playback (Tetris music, SFX).
+# AUDIO=1 enables it; without it QEMU has no sound device and the kernel's
+# SB16 driver probes but finds nothing to attach to (harmless).
+if [ "${AUDIO:-0}" = "1" ]; then
+    QEMU_ARGS+=(-audiodev alsa,id=snd0 -device sb16,iobase=0x220,irq=5,dma=1,audiodev=snd0)
+fi
+
 # Accelerator.
 #
 # KVM when /dev/kvm is usable, TCG otherwise. This was the opposite for most of

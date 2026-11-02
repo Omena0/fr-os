@@ -140,6 +140,11 @@ struct pollfd {
 #define SYS_pipe2       129u
 #define SYS_futex       130u
 
+/* Audio. */
+#define SYS_audio_write     131u
+#define SYS_audio_stop      132u
+#define SYS_audio_set_format 133u
+
 /* Sockets. */
 #define SYS_socket      160u
 

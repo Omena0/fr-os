@@ -468,3 +468,20 @@ int sys_shutdown(int fn)
 {
     return (int)check0(__syscall1(SYS_shutdown, fn));
 }
+
+/* --------------------------------------------------------------- audio ----- */
+
+ssize_t sys_audio_write(const void *buf, size_t count)
+{
+    return (ssize_t)check0(__syscall2(SYS_audio_write, (long)buf, (long)count));
+}
+
+int sys_audio_stop(void)
+{
+    return (int)check0(__syscall0(SYS_audio_stop));
+}
+
+int sys_audio_set_format(unsigned int rate)
+{
+    return (int)check0(__syscall1(SYS_audio_set_format, (long)rate));
+}
