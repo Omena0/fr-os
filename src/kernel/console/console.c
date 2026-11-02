@@ -1250,18 +1250,24 @@ void console_write_raw(const char *s, size_t n)
             continue;
         }
         if (c == '\t') {
-            /* Tab stops every 8 columns. */
+            /* Tab stops every 8 columns. Fill each column with a space so
+             * the cursor lands on the next stop; wrap to the next line when
+             * we run out of columns. */
             do {
-                if (!tty_screen_owned() && vga_enabled)
-                    vga_putc_at(cursor_x, cursor_y, ' ', current_attr);
-                if (!tty_screen_owned() && console_fb_active())
-                    console_fb_putc(' ', current_attr);
+                if (!tty_screen_owned()) {
+                    if (vga_enabled)
+                        vga_putc_at(cursor_x, cursor_y, ' ', current_attr);
+                    if (console_fb_active())
+                        console_fb_putc(' ', current_attr);
+                }
                 cursor_x++;
+                if (cursor_x % 8 == 0)
+                    break;
                 if (vga_enabled && cursor_x >= VGA_COLS)
-                    cursor_x = 0;
+                    console_newline();
                 else if (console_fb_active() && cursor_x >= fb.cols)
-                    cursor_x = 0;
-            } while (cursor_x % 8 != 0);
+                    console_newline();
+            } while (1);
             if (serial_enabled)
                 serial_putc_blocking('\t');
             continue;

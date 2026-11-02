@@ -180,10 +180,14 @@ int line_edit(const char *prompt, char *line, size_t max)
             }
             continue;
         }
-        if (c == 0x17) {                             /* Ctrl+W / Ctrl+Backspace */
+        if (c == 0x17) {  /* Ctrl+W / Ctrl+Backspace */
             size_t from = pos;
 
             while (from > 0 && line[from - 1] == ' ')
+                from--;
+            /* Back up over UTF-8 continuation bytes so the deleted word
+             * ends at a character boundary, not mid-code-point. */
+            while (from > 0 && (line[from - 1] & 0xC0) == 0x80)
                 from--;
             while (from > 0 && line[from - 1] != ' ')
                 from--;
