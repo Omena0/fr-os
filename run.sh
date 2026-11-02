@@ -122,8 +122,11 @@ fi
 # SB16 sound card for audio playback (Tetris music, SFX).
 # AUDIO=1 enables it; without it QEMU has no sound device and the kernel's
 # SB16 driver probes but finds nothing to attach to (harmless).
-if [ "${AUDIO:-0}" = "1" ]; then
-    QEMU_ARGS+=(-audiodev alsa,id=snd0 -device sb16,iobase=0x220,irq=5,dma=1,audiodev=snd0)
+# Audio is on by default; set AUDIO=0 to disable.
+# AUDIO_BACKEND selects the QEMU audio backend (pa, alsa, sdl, ...).
+if [ "${AUDIO:-1}" = "1" ]; then
+    BACKEND="${AUDIO_BACKEND:-pa}"
+    QEMU_ARGS+=(-audiodev "$BACKEND",id=snd0 -device sb16,iobase=0x220,irq=5,dma=1,audiodev=snd0)
 fi
 
 # Accelerator.
