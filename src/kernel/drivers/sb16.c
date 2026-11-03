@@ -69,6 +69,13 @@ static uint8_t dsp_status(void)
     return inb(SB16_DSP_RSTAT);
 }
 
+/* Write one byte to an SB16 mixer register. */
+static void mixer_write(uint8_t reg, uint8_t val)
+{
+    outb(SB16_MIXER_INDEX, reg);
+    outb(SB16_MIXER_DATA, val);
+}
+
 /* Reset the DSP per the spec:
  *   1. Write 0x01 to 0x226.
  *   2. Wait at least 3 microseconds.
@@ -207,6 +214,8 @@ static bool dma_alloc(size_t size, phys_addr_t *out_phys)
 
 void sb16_init(void)
 {
+    //klog_set_subsystem_level("sb16", KLOG_DEBUG);
+
     if (!dsp_reset()) {
         klog(KLOG_WARN, "sb16: DSP reset failed — no card at 0x%04x\n",
               SB16_BASE);
@@ -221,6 +230,12 @@ void sb16_init(void)
     /* Speaker on. */
     dsp_write(DSP_SPEAKER_ON);
 
+    /* Set mixer volume to full on master and PCM channels. */
+    mixer_write(MIXER_MASTER_LEFT, MIXER_VOL_FULL);
+    mixer_write(MIXER_MASTER_RIGHT, MIXER_VOL_FULL);
+    mixer_write(MIXER_PCM_LEFT, MIXER_VOL_FULL);
+    mixer_write(MIXER_PCM_RIGHT, MIXER_VOL_FULL);
+
     /* Install IRQ handler before unmasking. */
     idt_set_handler(SB16_IRQ_VECTOR, sb16_irq, IST_NONE, 0);
 
@@ -230,6 +245,8 @@ void sb16_init(void)
         uint8_t mask = inb(0x21u); /* PIC1 data port */
         mask &= (uint8_t)~(1u << SB16_IRQ);
         outb(0x21u, mask);
+        klog(KLOG_DEBUG, "sb16: PIC1 mask before unmask IRQ5: 0x%02x, after: 0x%02x\n",
+              mask | (1u << SB16_IRQ), mask);
         irq_restore(flags);
     }
 
@@ -242,8 +259,14 @@ bool sb16_play_start(phys_addr_t dma_phys, size_t dma_size, uint32_t rate_hz)
 {
     uint8_t time_const;
 
-    if (sb16_state != SB16_STATE_IDLE)
+    klog(KLOG_DEBUG, "sb16_play_start: phys=0x%lx size=%zu rate=%u state=%d\n",
+          (unsigned long)dma_phys, dma_size, rate_hz, (int)sb16_state);
+
+    if (sb16_state != SB16_STATE_IDLE) {
+        klog(KLOG_WARN, "sb16_play_start: not idle (state=%d)\n",
+              (int)sb16_state);
         return false;
+    }
     if (dma_size == 0 || dma_size > 0x10000u)
         return false;
     if (rate_hz < 4000u || rate_hz > SB16_MAX_RATE)
@@ -262,16 +285,21 @@ bool sb16_play_start(phys_addr_t dma_phys, size_t dma_size, uint32_t rate_hz)
         return false;
 
     /* Program DMA channel 1. */
-    if (!dma_program(dma_phys, dma_size))
+    if (!dma_program(dma_phys, dma_size)) {
+        klog(KLOG_WARN, "sb16_play_start: dma_program() failed\n");
         return false;
+    }
 
     /* Enable speaker. */
     dsp_write(DSP_SPEAKER_ON);
 
-    /* Start 8-bit single-cycle DMA output. */
-    if (!dsp_write(DSP_DMA_8BIT_SINGLE))
-        return false;
-    if (!dsp_write(0x00u)) /* mono, unsigned PCM */
+    /* Log DMA address and page for verification. */
+    klog(KLOG_DEBUG, "sb16: DMA programmed: phys=0x%lx size=%zu page=0x%02x mode=0x%02x\n",
+          (unsigned long)dma_phys, dma_size, (uint8_t)(dma_phys >> 16), inb(0x0B));
+
+    /* Start 8-bit auto-init DAC output (loops continuously).
+     * 0x14 is the direct auto-init output command. */
+    if (!dsp_write(0x14u))
         return false;
     if (!dsp_write((uint8_t)((dma_size - 1) & 0xFFu))) /* count low */
         return false;
@@ -281,7 +309,9 @@ bool sb16_play_start(phys_addr_t dma_phys, size_t dma_size, uint32_t rate_hz)
     sb16_sample_rate = rate_hz;
     sb16_dma_size = dma_size;
     sb16_state = SB16_STATE_PLAYING;
-    klog(KLOG_DEBUG, "sb16: playback started %u Hz, %zu byte buffer\n",
+    klog(KLOG_DEBUG, "sb16_play_start: SUCCESS — playback started %u Hz, %zu byte buffer\n",
+          rate_hz, dma_size);
+    klog(KLOG_INFO, "sb16: playback started %u Hz, %zu byte buffer\n",
           rate_hz, dma_size);
     return true;
 }

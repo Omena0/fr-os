@@ -87,8 +87,13 @@ size_t audio_write(const int8_t *samples, size_t count)
     size_t wrap;
     u64 flags;
 
-    if (!audio_init())
+    klog(KLOG_DEBUG, "audio_write: count=%zu audio_buf=%p audio_started=%d\n",
+          count, (void *)audio_buf, audio_started);
+
+    if (!audio_init()) {
+        klog(KLOG_WARN, "audio_write: audio_init() failed\n");
         return 0;
+    }
 
     if (!samples || count == 0)
         return 0;

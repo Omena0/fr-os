@@ -428,7 +428,7 @@ void kmain(uint64_t bootinfo_phys)
      * cmdline asked for debug (postloglevel=0) we keep the system quiet.
      * Enable ps2kbd debug logging so it can be followed during testing. */
     klog_set_level(post_loglevel);
-    klog_set_subsystem_level("ps2kbd", KLOG_DEBUG);
+    //klog_set_subsystem_level("ps2kbd", KLOG_DEBUG);
 
     sched_start();
 
