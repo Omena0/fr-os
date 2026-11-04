@@ -64,16 +64,13 @@ bool audio_init(void)
     audio_buf_size = AUDIO_BUFFER_SIZE;
 
     klog(KLOG_INFO, "audio: %zu byte DMA ring at phys 0x%lx\n",
-          AUDIO_BUFFER_SIZE, (unsigned long)audio_buf_phys);
+            (size_t)AUDIO_BUFFER_SIZE, (unsigned long)audio_buf_phys);
     return true;
 }
 
-/* Number of bytes the DMA has consumed so far, tracked via IRQ count. */
+/* Number of bytes the DMA has consumed so far, tracked by completed-buffer IRQs. */
 static size_t audio_dma_consumed(void)
 {
-    /* Each IRQ = one full buffer wrap. Between IRQs we don't know the
-     * exact position, so we conservatively assume the DMA is at the
-     * start of the current buffer lap. */
     return audio_dma_pos;
 }
 
@@ -86,9 +83,6 @@ size_t audio_write(const int8_t *samples, size_t count)
     size_t space;
     size_t wrap;
     u64 flags;
-
-    klog(KLOG_DEBUG, "audio_write: count=%zu audio_buf=%p audio_started=%d\n",
-          count, (void *)audio_buf, audio_started);
 
     if (!audio_init()) {
         klog(KLOG_WARN, "audio_write: audio_init() failed\n");
@@ -109,11 +103,10 @@ size_t audio_write(const int8_t *samples, size_t count)
         audio_started = true;
     }
 
-    /* Space available = buffer size - (write_pos - dma_pos). Leave a
-     * full buffer lap of headroom so the DMA never reads unwritten data. */
+    /* Space available = buffer size - (write_pos - dma_pos).
+     * When write_pos == dma_pos (empty ring), space == AUDIO_BUFFER_SIZE.
+     * When write_pos - dma_pos == AUDIO_BUFFER_SIZE (full ring), space == 0. */
     space = AUDIO_BUFFER_SIZE - (audio_write_pos - audio_dma_consumed());
-    if (space >= AUDIO_BUFFER_SIZE)
-        space = 0; /* ring completely full or just wrapped */
 
     if (space == 0) {
         irq_restore(flags);

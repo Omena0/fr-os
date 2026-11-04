@@ -1,6 +1,7 @@
 #ifndef SB16_H
 #define SB16_H
 
+#include <interrupt.h>
 #include <types.h>
 
 /*
@@ -43,6 +44,7 @@
 #define DSP_SPEAKER_OFF       0xD3u
 #define DSP_SET_TIME_CONST    0x40u
 #define DSP_DMA_8BIT_SINGLE   0xC0u   /* 8-bit single-cycle DAC output */
+#define DSP_DMA_8BIT_AUTOOUT_SB16 0xC4u /* SB16 8-bit auto-init DAC output */
 #define DSP_DMA_8BIT_AUTOOUT  0x1Cu   /* Auto-init DMA transfer mode (mode cmd) */
 #define DSP_EXIT_DMA          0xDCu   /* exit DMA mode */
 
@@ -55,7 +57,7 @@
 #define DMA1_BASE_ADDR    0x02u
 #define DMA1_BASE_COUNT   0x03u
 #define DMA1_PAGE         0x83u
-#define DMA1_MODE_WRITE   0x51u   /* ch1, write transfer, increment, auto-init */
+#define DMA1_MODE_WRITE   0x55u   /* ch1, write transfer, increment, auto-init */
 #define DMA1_MODE_SINGLE  0x48u   /* ch1, write transfer, increment, single */
 #define DMA1_MASK_CH1_SET   0x05u   /* mask channel 1 (single-channel write) */
 #define DMA1_MASK_CH1_CLR   0x01u   /* unmask channel 1 (single-channel write) */
@@ -81,5 +83,8 @@ bool sb16_is_playing(void);
 
 /* IRQ handler — installed at SB16_IRQ_VECTOR. */
 void sb16_irq(struct interrupt_frame *frame);
+/* Read the DMA channel 1 count register (remaining bytes). Clears the
+ * byte pointer flip-flop first so low/high byte pairs land right. */
+uint16_t sb16_dma_count_remaining(void);
 
 #endif

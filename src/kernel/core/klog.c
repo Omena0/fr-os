@@ -135,7 +135,7 @@ void klog_emit(klog_level_t level, const char *subsystem,
 
     if ((int)level < 0 || (int)level > KLOG_FATAL)
         return;
-    if (level < klog_runtime_level)
+    if (level < klog_effective_level(subsystem))
         return;
 
     __atomic_fetch_add(&klog_counts[level], 1, __ATOMIC_RELAXED);

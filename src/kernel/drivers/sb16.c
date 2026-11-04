@@ -297,21 +297,20 @@ bool sb16_play_start(phys_addr_t dma_phys, size_t dma_size, uint32_t rate_hz)
     klog(KLOG_DEBUG, "sb16: DMA programmed: phys=0x%lx size=%zu page=0x%02x mode=0x%02x\n",
           (unsigned long)dma_phys, dma_size, (uint8_t)(dma_phys >> 16), inb(0x0B));
 
-    /* Start 8-bit auto-init DAC output (loops continuously).
-     * Direct command 0x14 programs count and starts playback. */
-    if (!dsp_write(0x14u))
+    /* SB16 auto-init output carries its mode and block length in the command. */
+    if (!dsp_write(DSP_DMA_8BIT_AUTOOUT_SB16))
         return false;
-    if (!dsp_write((uint8_t)((dma_size - 1) & 0xFFu))) /* count low */
+    if (!dsp_write(0x00u)) /* mono, unsigned PCM */
         return false;
-    if (!dsp_write((uint8_t)(((dma_size - 1) >> 8) & 0xFFu))) /* count high */
+    if (!dsp_write((uint8_t)((dma_size - 1) & 0xFFu)))
+        return false;
+    if (!dsp_write((uint8_t)(((dma_size - 1) >> 8) & 0xFFu)))
         return false;
 
     sb16_sample_rate = rate_hz;
     sb16_dma_size = dma_size;
     sb16_state = SB16_STATE_PLAYING;
-    klog(KLOG_DEBUG, "sb16_play_start: SUCCESS — playback started %u Hz, %zu byte buffer\n",
-          rate_hz, dma_size);
-    klog(KLOG_INFO, "sb16: playback started %u Hz, %zu byte buffer\n",
+    klog(KLOG_INFO, "sb16_play_start: SUCCESS — playback started %u Hz, %zu byte buffer\n",
           rate_hz, dma_size);
     return true;
 }
@@ -339,15 +338,9 @@ void sb16_irq(struct interrupt_frame *frame)
 {
     UNUSED(frame);
 
-    klog(KLOG_DEBUG, "sb16: IRQ 5 fired\n");
-
     /* Acknowledge the SB16 interrupt by reading 0x22E (8-bit DMA IRQ ack). */
     (void)dsp_status();
 
     audio_irq();
 
-    /* Issue EOI for IRQ 5 (master PIC). */
-    pic_eoi(SB16_IRQ_VECTOR);
-
-    klog(KLOG_DEBUG, "sb16: irq — dma buffer done\n");
 }

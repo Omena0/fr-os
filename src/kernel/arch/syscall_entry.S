@@ -303,6 +303,9 @@ syscall_entry:
     movq    REG_RIP_OFF(%rsp), %rcx
     movq    REG_RFLAGS_OFF(%rsp), %r11
 
+    /* Ring 3 cannot disable IF; every user return must remain interruptible. */
+    orq    $0x200, %r11
+
     addq    $REG_FRAME_BYTES, %rsp
 
     popq    %r15
