@@ -77,6 +77,9 @@
 #define SYS_rt_sigprocmask 23u
 #define SYS_rt_sigpending 25u
 #define SYS_rt_sigreturn 24u
+#define SYS_set_tid_address 26u
+#define SYS_thread_create 27u
+#define SYS_get_tls_size 28u
 
 /* Memory management. */
 #define SYS_mmap         32u

@@ -34,6 +34,7 @@
 #include <process.h>
 #include <signals.h>
 #include <fs.h>
+#include <futex.h>
 #include <uapi/syscall.h>
 #include <uapi/errno.h>
 #include "console.h"
@@ -492,6 +493,8 @@ __noreturn void sys_exit_group(int code)
             t->state = TASK_ZOMBIE;
             t->detached = true;
             sched_remove(t);
+            futex_cancel_task(t);
+            futex_clear_child_tid(t);
             task_release_resources(t);
             if (t->parent && t->parent->state == TASK_BLOCKED)
                 sched_wake(t->parent);
@@ -571,22 +574,13 @@ long sys_wait4(s64 pid, u64 wstatus, u64 options, u64 rusage)
     /*
      * Fast path: the caller asked for a specific child that does not exist,
      * or asked for any child but has none. POSIX says return ECHILD
-     * immediately in both cases.
-     *
-     * The kernel returns -1 and stores ECHILD in the caller's thread-local
-     * errno rather than returning -ECHILD. libc's wrapper does that
-     * translation for a libc caller, but the raw-syscall ABI this kernel
-     * documents is "negative errno in the return register", and a caller
-     * that issues the syscall itself sees the raw value. Both spellings
-     * have to be right for the same call: -1 in the return register is
-     * what a POSIX caller checks, and errno is what a caller that wants
-     * the reason checks.
+     * immediately in both cases. The kernel returns -ECHILD (negative errno
+     * in the return register); libc's wait4 wrapper translates via check0
+     * to -1 with __errno set, and raw-syscall callers see the errno value
+     * directly.
      */
-    if (!has_matching_child(me, pid)) {
-        if (me->fs_base)
-            copy_to_user(me->fs_base - 8, (const int[]){ECHILD}, sizeof(int));
-        return -1;
-    }
+    if (!has_matching_child(me, pid))
+        return -ECHILD;
 
     for (;;) {
         struct task *reaped = NULL;
@@ -856,6 +850,7 @@ long sys_fork(const struct fork_regs *fr)
         mm_put(child_mm);
         return -ENOMEM;
     }
+    mm_put(child_mm); /* Transfer mm_create()'s reference to the task. */
 
     /* The descriptor table is shared by reference: both tasks get a pointer
      * to the same array and the refcount on the array's owner decides when
@@ -868,7 +863,7 @@ long sys_fork(const struct fork_regs *fr)
     }
 
     task_inherit(child, me);
-    child->ppid = me->pid;
+    child->ppid = me->tgid;
     child->pgid = me->pgid;
     child->sid = me->sid;
     child->parent = me;
@@ -911,16 +906,36 @@ long sys_fork(const struct fork_regs *fr)
 
 /* ----------------------------------------------------------------- clone ----- */
 
-long sys_clone(u64 flags, u64 child_stack, u64 parent_tid, u64 child_tid, u64 tls,
-               u64 caller_rip, u64 caller_rsp, u64 caller_rflags,
-               const struct fork_regs *fr)
+static long clone_task(u64 flags, u64 child_stack, u64 parent_tid,
+                       u64 child_tid, u64 tls, u64 caller_rip,
+                       u64 caller_rsp, u64 caller_rflags,
+                       const struct fork_regs *fr, u64 start, u64 start_arg)
 {
     struct task *me = current_task();
     struct address_space *new_mm;
     struct task *child;
+    const u64 supported = CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND |
+                          CLONE_THREAD | CLONE_SETTLS | CLONE_PARENT_SETTID |
+                          CLONE_CHILD_CLEARTID | CLONE_CHILD_SETTID;
     int do_copy = !(flags & CLONE_VM);
 
     if (!me || !me->mm)
+        return -EFAULT;
+    if (!fr || (flags & ~supported))
+        return -EINVAL;
+    if ((flags & CLONE_SIGHAND) && !(flags & CLONE_VM))
+        return -EINVAL;
+    if ((flags & CLONE_THREAD) &&
+        (flags & (CLONE_VM | CLONE_SIGHAND)) != (CLONE_VM | CLONE_SIGHAND))
+        return -EINVAL;
+    if ((flags & CLONE_PARENT_SETTID) && !parent_tid)
+        return -EFAULT;
+    if ((flags & (CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID)) && !child_tid)
+        return -EFAULT;
+    if (start && (!child_stack || !user_range_ok(me->mm, start, 1)))
+        return -EFAULT;
+    if ((flags & CLONE_PARENT_SETTID) &&
+        user_write_range_prepare(me->mm, parent_tid, sizeof(u32)) < 0)
         return -EFAULT;
 
     if (do_copy) {
@@ -961,13 +976,35 @@ long sys_clone(u64 flags, u64 child_stack, u64 parent_tid, u64 child_tid, u64 tl
         new_mm->end_data = me->mm->end_data;
     } else {
         new_mm = me->mm;
-        mm_get(new_mm);
     }
 
     child = task_alloc(me->comm, new_mm);
     if (!child) {
-        mm_put(new_mm);
+        if (do_copy)
+            mm_put(new_mm);
         return -ENOMEM;
+    }
+    if (do_copy)
+        mm_put(new_mm); /* Transfer the new address space's creator reference. */
+
+    if (flags & (CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID)) {
+        if (user_write_range_prepare(new_mm, child_tid, sizeof(u32)) < 0) {
+            task_put(child);
+            return -EFAULT;
+        }
+    }
+
+    u64 user_stack = child_stack;
+    u64 return_address = 0;
+    if (start) {
+        user_stack = ALIGN_DOWN(child_stack, 16) - sizeof(u64);
+        if (user_write_range_prepare(new_mm, user_stack, sizeof(return_address)) < 0 ||
+            user_memory_write(new_mm, user_stack, &return_address,
+                              sizeof(return_address),
+                              VM_READ | VM_WRITE | VM_USER) < 0) {
+            task_put(child);
+            return -EFAULT;
+        }
     }
 
     if (flags & CLONE_FILES) {
@@ -988,12 +1025,13 @@ long sys_clone(u64 flags, u64 child_stack, u64 parent_tid, u64 child_tid, u64 tl
     }
 
     task_inherit(child, me);
-    child->ppid = me->pid;
+    child->tgid = (flags & CLONE_THREAD) ? me->tgid : child->pid;
+    child->ppid = (flags & CLONE_THREAD) ? me->ppid : me->tgid;
     child->pgid = me->pgid;
     child->sid = me->sid;
     child->parent = me;
 
-    if (tls && (flags & CLONE_SETTLS))
+    if (flags & CLONE_SETTLS)
         child->fs_base = tls;
 
     child->user_fork_regs = *fr;
@@ -1003,6 +1041,31 @@ long sys_clone(u64 flags, u64 child_stack, u64 parent_tid, u64 child_tid, u64 tl
     child->user_fork_regs.rip = child->user_rip;
     child->user_fork_regs.rsp = child->user_rsp;
     child->user_fork_regs.rflags = child->user_rflags;
+    if (start) {
+        child->user_rip = start;
+        child->user_rsp = user_stack;
+        child->user_fork_regs.rdi = start_arg;
+        child->user_fork_regs.rip = start;
+        child->user_fork_regs.rsp = user_stack;
+        child->user_fork_regs.rflags = child->user_rflags;
+    }
+    if (flags & CLONE_CHILD_CLEARTID)
+        child->clear_child_tid = child_tid;
+
+    if (flags & CLONE_CHILD_SETTID) {
+        u32 tid = child->tid;
+
+        if (user_memory_write(new_mm, child_tid, &tid, sizeof(tid),
+                              VM_READ | VM_WRITE | VM_USER) < 0) {
+            task_put(child);
+            return -EFAULT;
+        }
+    }
+    if ((flags & CLONE_PARENT_SETTID) &&
+        copy_to_user(parent_tid, &child->tid, sizeof(child->tid)) < 0) {
+        task_put(child);
+        return -EFAULT;
+    }
 
     child->thread_fn = fork_child_start;
     child->thread_arg = child;
@@ -1014,12 +1077,27 @@ long sys_clone(u64 flags, u64 child_stack, u64 parent_tid, u64 child_tid, u64 tl
 
     sched_add(child);
 
-    if (child_tid)
-        copy_to_user(child_tid, &child->tid, sizeof(child->tid));
-    if (parent_tid)
-        copy_to_user(parent_tid, &child->tid, sizeof(child->tid));
+    return (long)child->tid;
+}
 
-    return (long)child->pid;
+long sys_clone(u64 flags, u64 child_stack, u64 parent_tid, u64 child_tid, u64 tls,
+               u64 caller_rip, u64 caller_rsp, u64 caller_rflags,
+               const struct fork_regs *fr)
+{
+    return clone_task(flags, child_stack, parent_tid, child_tid, tls,
+                      caller_rip, caller_rsp, caller_rflags, fr, 0, 0);
+}
+
+long sys_thread_create(u64 start, u64 arg, u64 child_stack, u64 tls,
+               u64 parent_tid, u64 child_tid, const struct fork_regs *fr)
+{
+    if (!fr)
+        return -EINVAL;
+    return clone_task(CLONE_VM | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD |
+                      CLONE_SETTLS | CLONE_PARENT_SETTID |
+                      CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID,
+                      child_stack, parent_tid, child_tid, tls,
+                      fr->rip, fr->rsp, fr->rflags, fr, start, arg);
 }
 
 /* ----------------------------------------------------------------- exec ------ */
@@ -1385,7 +1463,6 @@ int exec_load_and_run(struct task *t, const void *image, size_t size,
         t->mm = NULL;
     }
     t->mm = new_mm;
-    mm_get(t->mm);
 
     t->user_rip = info.entry;
     t->user_rsp = sp;
@@ -1742,6 +1819,7 @@ struct task *process_create_init(void)
     /* PID 1 by definition; task_alloc() handed out something else. */
     t->pid = 1;
     t->tid = 1;
+    t->tgid = 1;
     t->pgid = 1;
     t->sid = 1;
     t->ppid = 0;

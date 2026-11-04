@@ -23,6 +23,7 @@
 #include <task.h>
 #include <sched.h>
 #include <process.h>
+#include <futex.h>
 #include <syscall.h>
 #include <tty.h>
 
@@ -92,19 +93,13 @@ struct task *task_alloc(const char *name, struct address_space *mm)
 
     t->pid = alloc_pid();
     t->tid = t->pid;
+    t->tgid = t->pid;
     t->ppid = 0;
     t->pgid = t->pid;
     t->sid = t->pid;
     t->state = TASK_NEW;
     t->mm = mm;
     refcount_set(&t->refs, 1);
-
-    /*
-     * A task born into a process shares that process's address space; the
-     * reference is what keeps it alive while this task holds it.
-     */
-    if (mm)
-        mm_get(mm);
 
     t->kernel_stack = kstack_alloc(TASK_KERNEL_STACK_SIZE);
     if (!t->kernel_stack) {
@@ -152,6 +147,7 @@ struct task *task_alloc(const char *name, struct address_space *mm)
 
     list_init(&t->rq_node);
     list_init(&t->sleep_node);
+    list_init(&t->futex_node);
     list_init(&t->sibling);
     list_init(&t->children);
     list_init(&t->all_node);
@@ -166,6 +162,10 @@ struct task *task_alloc(const char *name, struct address_space *mm)
         strlcpy(t->comm, name, TASK_COMM_LEN);
     else
         strlcpy(t->comm, "task", TASK_COMM_LEN);
+
+    /* Each task owns exactly one reference to its address space. */
+    if (mm)
+        mm_get(mm);
 
     u64 flags = spinlock_irqsave(&task_all_lock);
     list_add_tail(&t->all_node, &task_all_list);
@@ -343,22 +343,6 @@ void task_for_each(int (*fn)(struct task *, void *), void *arg)
 
 /* Count live tasks sharing an address space. Used to decide whether the last
  * thread of a process is exiting and the page tables can go. */
-static u32 count_mm_users(struct address_space *mm)
-{
-    u32 n = 0;
-    u64 flags = spinlock_irqsave(&task_all_lock);
-    struct list_head *pos;
-
-    list_for_each(pos, &task_all_list) {
-        struct task *t = list_entry(pos, struct task, all_node);
-
-        if (t->mm == mm && !t->reaped && t->state != TASK_DEAD)
-            n++;
-    }
-    spinlock_unlock_irqrestore(&task_all_lock, flags);
-    return n;
-}
-
 /* ------------------------------------------------------------- lifecycle ---- */
 
 void task_set_state(struct task *t, task_state_t state)
@@ -387,13 +371,7 @@ void task_release_resources(struct task *t)
     }
 
     if (t->mm) {
-        /*
-         * The last thread out drops the page tables. A task that shares
-         * an address space with CLONE_VM siblings leaves its reference
-         * alone, which is the whole reason the refcount lives on mm.
-         */
-        if (count_mm_users(t->mm) == 0)
-            mm_put(t->mm);
+        mm_put(t->mm);
         t->mm = NULL;
     }
 
@@ -472,6 +450,8 @@ __noreturn void task_exit_current(int code)
     klog_emit(KLOG_DEBUG, "task", "task_exit_current: pid=%u code=%d parent=%p",
           t->pid, code, (void *)t->parent);
 
+        futex_cancel_task(t);
+        futex_clear_child_tid(t);
     t->exit_code = code;
 
     /*

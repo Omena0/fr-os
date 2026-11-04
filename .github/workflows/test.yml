@@ -30,4 +30,4 @@ jobs:
             xorriso
 
       - name: Build and run checks
-        run: make check
+        run: BOOT_SMOKE_ALLOW_TCG=1 make check

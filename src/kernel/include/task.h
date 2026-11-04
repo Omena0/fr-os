@@ -265,6 +265,7 @@ struct task {
     /* --- identity ------------------------------------------------------- */
     u32 pid;
     u32 tid;
+    u32 tgid;
     u32 ppid;
     u32 pgid;
     u32 sid;
@@ -277,6 +278,7 @@ struct task {
     bool reaped;          /* parent has collected the exit status */
     struct address_space *mm;
     refcount_t refs;
+    u64 clear_child_tid;
 
     /* --- run queue membership ------------------------------------------- */
     struct list_head rq_node;
@@ -399,6 +401,10 @@ struct task {
     struct list_head sleep_node;  /* on a per-CPU sleep list */
     bool sleeping;
     u64 wake_tick;                /* tick the sleeper becomes runnable */
+    struct list_head futex_node;  /* on the global futex wait list */
+    struct address_space *futex_mm;
+    u64 futex_address;
+    bool futex_waiting;
     struct task *waiter;          /* task blocked on this one changing state */
     struct list_head all_node;    /* on the global task list */
 };

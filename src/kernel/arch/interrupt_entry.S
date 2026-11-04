@@ -364,7 +364,11 @@ ret_to_user:
      * displacement. Not the `PUSH r/m` trap from the gdt_flush bug above --
      * which is the reason to look, every time, at the bytes.
      */
+    /* task_load_fs_current clobbers EAX and EDX via rdmsr; EDX holds RFLAGS
+     * here, so save it across the call. */
+    pushq   %rdx
     call    task_load_fs_current
+    popq    %rdx
 
     pushq    $USER_DATA_SELECTOR        /* SS */
     pushq    %rsi                /* RSP */

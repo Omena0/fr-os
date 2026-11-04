@@ -26,6 +26,9 @@
 #include <fcntl.h>
 #include <gfx.h>
 #include <kbd.h>
+#include <pthread.h>
+#include <poll.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -167,6 +170,65 @@ static bool last_was_rotation;
 static uint32_t background, cell_edge, piece_colours[P_COUNT], ghost_colour;
 static int board_x = 40, board_y = 40;
 static int panel_x;
+
+/* Multithreading: the game logic thread drives gravity/locking while the main
+ * thread handles input and rendering. Both threads sleep on the same FRAME_MS
+ * boundary so the CPU idles between frames (hlt runs), letting QEMU's UI loop
+ * get CPU time. */
+static pthread_mutex_t game_lock = PTHREAD_MUTEX_INITIALIZER;
+static _Atomic bool game_running;
+static pthread_t game_tid;
+static long next_frame;
+
+/* Game logic thread: advances gravity and piece locking automatically. All
+ * shared state is accessed under game_lock. */
+static void *game_loop(void *arg)
+{
+    (void)arg;
+
+    while (game_running) {
+        long now = now_ms();
+
+        /* Sleep until the shared frame deadline. */
+        if (now < next_frame) {
+            struct timespec ts = {
+                (next_frame - now) / 1000,
+                ((next_frame - now) % 1000) * 1000000L,
+            };
+            nanosleep(&ts, NULL);
+            now = now_ms();
+        }
+
+        pthread_mutex_lock(&game_lock);
+        if (!paused && !game_over && clearing_timer <= 0) {
+            int elapsed = (int)(now - (next_frame - FRAME_MS));
+            if (elapsed < 0)
+                elapsed = 0;
+
+            gravity_timer += elapsed;
+            if (gravity_timer >= gravity_interval()) {
+                gravity_timer = 0;
+                if (move_piece(0, 1))
+                    dirty = true;
+            }
+            set_grounded();
+            if (grounded) {
+                lock_timer += elapsed;
+                if (lock_timer >= LOCK_DELAY_MS) {
+                    lock_piece();
+                    dirty = true;
+                }
+            } else {
+                lock_timer = 0;
+            }
+        }
+        pthread_mutex_unlock(&game_lock);
+
+        /* Advance the shared frame deadline. Both threads sleep until it. */
+        next_frame += FRAME_MS;
+    }
+    return NULL;
+}
 
 static int gravity_interval(void);
 
@@ -337,6 +399,11 @@ static int spin_multiplier(bool mini, bool is_t)
  */
 static int read_key(void)
 {
+    struct pollfd pfd = { .fd = 0, .events = POLLIN };
+
+    if (poll(&pfd, 1, 0) <= 0)
+        return -1;
+
     unsigned char c;
     ssize_t n = read(0, &c, 1);
 

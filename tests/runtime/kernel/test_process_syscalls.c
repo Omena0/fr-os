@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <pthread.h>
 
 /* include libc headers that come with the kernel's uapi headers */
 #include <uapi/sysinfo.h>
@@ -121,8 +122,7 @@ static int test_fork_pid_values(void) {
 static int test_wait4_no_children(void) {
     int wstatus = 0;
     pid_t ret = (pid_t)syscall4(SYS_wait4, -1, (long)&wstatus, 0, 0);
-    TEST_ASSERT_EQ(ret, -1, "wait4 with no children should return -1");
-    TEST_ASSERT_EQ(errno, ECHILD, "errno should be ECHILD");
+    TEST_ASSERT_EQ(ret, -ECHILD, "wait4 with no children should return -ECHILD");
     return TEST_PASS;
 }
 
@@ -135,8 +135,7 @@ static int test_wait4_wrong_pid(void) {
     } else {
         int wstatus = 0;
         pid_t ret = (pid_t)syscall4(SYS_wait4, pid + 100, (long)&wstatus, 0, 0);
-        TEST_ASSERT_EQ(ret, -1, "wait4 with wrong pid should return -1");
-        TEST_ASSERT_EQ(errno, ECHILD, "errno should be ECHILD");
+        TEST_ASSERT_EQ(ret, -ECHILD, "wait4 with wrong pid should return -ECHILD");
 
         /* Now wait correctly */
         syscall4(SYS_wait4, pid, (long)&wstatus, 0, 0);
@@ -226,6 +225,59 @@ static int test_clone_basic(void) {
         syscall4(SYS_wait4, ret, (long)&wstatus, 0, 0);
         TEST_ASSERT(WIFEXITED(wstatus), "cloned child should exit normally");
     }
+    return TEST_PASS;
+}
+
+static __thread int thread_local_probe;
+static pthread_mutex_t thread_probe_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t thread_probe_cond = PTHREAD_COND_INITIALIZER;
+static int thread_probe_ready;
+static pid_t thread_probe_pid;
+static pid_t thread_probe_tid;
+
+static void *thread_probe_entry(void *arg)
+{
+    (void)arg;
+    thread_local_probe = 99;
+    thread_probe_pid = getpid();
+    thread_probe_tid = gettid();
+    pthread_mutex_lock(&thread_probe_mutex);
+    thread_probe_ready = 1;
+    pthread_cond_signal(&thread_probe_cond);
+    pthread_mutex_unlock(&thread_probe_mutex);
+    return (void *)(uintptr_t)thread_local_probe;
+}
+
+static int test_pthread_create_join(void)
+{
+    pthread_t thread;
+    void *result = NULL;
+    pid_t parent_pid = getpid();
+
+    thread_local_probe = 7;
+    thread_probe_ready = 0;
+    TEST_ASSERT_EQ(pthread_create(&thread, NULL, thread_probe_entry, NULL), 0,
+                   "pthread_create should start a shared-VM thread");
+
+    TEST_ASSERT_EQ(pthread_mutex_lock(&thread_probe_mutex), 0,
+                   "mutex lock should succeed");
+    while (!thread_probe_ready)
+        TEST_ASSERT_EQ(pthread_cond_wait(&thread_probe_cond,
+                                         &thread_probe_mutex), 0,
+                       "condition wait should wake after signal");
+    TEST_ASSERT_EQ(pthread_mutex_unlock(&thread_probe_mutex), 0,
+                   "mutex unlock should succeed");
+
+    TEST_ASSERT_EQ(pthread_join(thread, &result), 0,
+                   "join should wait for clear-TID and reap the thread");
+    TEST_ASSERT_EQ((uintptr_t)result, 99,
+                   "the thread should return its own TLS value");
+    TEST_ASSERT_EQ(thread_local_probe, 7,
+                   "thread-local storage must remain private to the caller");
+    TEST_ASSERT_EQ(thread_probe_pid, parent_pid,
+                   "threads in one group should share getpid");
+    TEST_ASSERT_NE(thread_probe_tid, parent_pid,
+                   "a new thread should have a distinct gettid");
     return TEST_PASS;
 }
 
@@ -706,6 +758,7 @@ struct test_suite test_process_syscalls = {
         { "getppid_positive", test_getppid_positive, false },
         { "gettid_positive", test_gettid_positive, false },
         { "clone_basic", test_clone_basic, false },
+        { "pthread_create_join", test_pthread_create_join, false },
         { "kill_self", test_kill_self, false },
         { "kill_invalid_pid", test_kill_invalid_pid, false },
         { "kill_invalid_signal", test_kill_invalid_signal, false },
@@ -751,5 +804,5 @@ struct test_suite test_process_syscalls = {
         { "arch_prctl_get_fs", test_arch_prctl_get_fs, false },
         { "arch_prctl_get_gs", test_arch_prctl_get_gs, false },
     },
-    .num_cases = 58,
+    .num_cases = 59,
 };

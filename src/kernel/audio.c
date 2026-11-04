@@ -184,6 +184,9 @@ void audio_irq(void)
 
         for (size_t i = 0; i < silence_count; i++)
             audio_buf[(silence_start + i) % AUDIO_BUFFER_SIZE] = 0x80;
+        /* Advance write_pos past the silence block so the next audio_write()
+         * starts ahead of the DMA cursor instead of at it, which would race
+         * the playback head and drop freshly written samples. */
         audio_write_pos = audio_dma_pos + SB16_DMA_BLOCK_SIZE;
     }
 }

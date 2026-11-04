@@ -321,6 +321,16 @@ syscall_entry:
      */
     addq    $16, %rsp
 
+    pushq   %rax
+    pushq   %rcx
+    pushq   %rdx
+    pushq   %r11
+    call    task_load_fs_current
+    popq    %r11
+    popq    %rdx
+    popq    %rcx
+    popq    %rax
+
     /*
      * SYSRETQ in 64-bit mode does not load RSP: the ring-3 stack pointer
      * is whatever RSP holds when the instruction retires. The user RSP

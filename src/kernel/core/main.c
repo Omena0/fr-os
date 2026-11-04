@@ -135,7 +135,7 @@ void kmain(uint64_t bootinfo_phys)
      * postloglevel (0..4): verbosity once PID 1 is up (default WARN).
      */
     static klog_level_t boot_loglevel = KLOG_DEBUG;
-    static klog_level_t post_loglevel = KLOG_WARN;
+    static klog_level_t post_loglevel = KLOG_INFO;
     {
         const char *cmd = boot.cmdline[0] ? boot.cmdline : "";
         uint32_t off = 0;

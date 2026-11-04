@@ -222,7 +222,7 @@ $(foreach src,$(USERSPACE_PROGRAM_SRC), \
 # The initrd is the bootstrap, not the root filesystem: it carries init and
 # hello, which is enough to reach a shell and prove a second program can run.
 # Everything else lives in filesystem/ and is packed into the disk image.
-INITRD_PROGRAMS := init hello
+INITRD_PROGRAMS := init hello tetris
 
 $(INITRD): $(INIT_ELF) $(USERSPACE_ELVES) tools/initrd.py
 	@mkdir -p $(dir $@)

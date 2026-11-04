@@ -275,6 +275,7 @@ static struct task *idle_task_create(void)
      */
     t->pid = 0;
     t->tid = 0;
+    t->tgid = 0;
     t->ppid = 0;
     t->pgid = 0;
     t->sid = 0;

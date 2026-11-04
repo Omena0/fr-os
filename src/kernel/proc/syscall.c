@@ -43,6 +43,7 @@
 #include <uapi/mouse.h>
 #include <uapi/sysinfo.h>
 #include <signals.h>
+#include <futex.h>
 #include <audio.h>
 #include <fs.h>
 #include <version.h>
@@ -61,6 +62,9 @@ struct syscall_cpu syscall_cpus[MAX_CPUS];
  * therefore -ENOSYS with no separate "is it implemented" table to keep in
  * sync. */
 static long (*syscall_table[SYSCALL_MAX])(struct syscall_regs *);
+
+static void fork_regs_from_frame(struct fork_regs *fr,
+                                 const struct syscall_regs *r);
 
 void syscall_set_kernel_stack(void *stack_top)
 {
@@ -126,7 +130,7 @@ static long sc_getpid(struct syscall_regs *r)
     struct task *t = caller();
 
     UNUSED(r);
-    return t ? (long)t->pid : 0;
+    return t ? (long)t->tgid : 0;
 }
 
 static long sc_getppid(struct syscall_regs *r)
@@ -134,7 +138,7 @@ static long sc_getppid(struct syscall_regs *r)
     struct task *t = caller();
 
     UNUSED(r);
-    return t && t->parent ? (long)t->parent->pid : 0;
+    return t ? (long)t->ppid : 0;
 }
 
 static long sc_gettid(struct syscall_regs *r)
@@ -143,6 +147,36 @@ static long sc_gettid(struct syscall_regs *r)
 
     UNUSED(r);
     return t ? (long)t->tid : 0;
+}
+
+static long sc_thread_create(struct syscall_regs *r)
+{
+    struct fork_regs fr;
+
+    fork_regs_from_frame(&fr, r);
+    return sys_thread_create(arg0(r), arg1(r), arg2(r), arg3(r),
+                             arg4(r), arg5(r), &fr);
+}
+
+static long sc_get_tls_size(struct syscall_regs *r)
+{
+    struct address_space *mm = syscall_user_mm();
+
+    UNUSED(r);
+    return mm ? (long)mm->tls_size : -ESRCH;
+}
+
+static long sc_set_tid_address(struct syscall_regs *r)
+{
+    struct task *t = caller();
+    u64 address = arg0(r);
+
+    if (!t || !t->mm)
+        return -ESRCH;
+    if (address && user_write_range_prepare(t->mm, address, sizeof(u32)) < 0)
+        return -EFAULT;
+    t->clear_child_tid = address;
+    return (long)t->tid;
 }
 
 /*
@@ -1191,15 +1225,18 @@ static long sc_pipe(struct syscall_regs *r)
 
 static long sc_futex(struct syscall_regs *r)
 {
-    u64 op = arg1(r) & 0x7f;
-    int value;
+    u64 raw_op = arg1(r);
+    u64 op = raw_op & 0x7f;
 
-    if (op != 1) /* FUTEX_WAKE */
+    if (raw_op & ~(0x7fULL | FUTEX_PRIVATE_FLAG))
         return -ENOSYS;
-    if (copy_from_user(&value, arg0(r), sizeof(value)) < 0)
-        return -EFAULT;
-    /* There is no wait queue implementation yet, so no waiters can be woken. */
-    return 0;
+    if (arg3(r))
+        return -ENOSYS;
+    if (op == FUTEX_WAIT)
+        return futex_wait_user(arg0(r), (u32)arg2(r));
+    if (op == FUTEX_WAKE)
+        return futex_wake_user(arg0(r), (u32)arg2(r));
+    return -ENOSYS;
 }
 
 /* --------------------------------------------------------------- audio ----- */
@@ -1786,6 +1823,8 @@ void syscall_init(void)
     syscall_table[SYS_getpid] = sc_getpid;
     syscall_table[SYS_getppid] = sc_getppid;
     syscall_table[SYS_gettid] = sc_gettid;
+    syscall_table[SYS_set_tid_address] = sc_set_tid_address;
+    syscall_table[SYS_thread_create] = sc_thread_create;
     syscall_table[SYS_getpgid] = sc_getpgid;
     syscall_table[SYS_clone] = sc_clone;
     syscall_table[SYS_kill] = sc_kill;
@@ -1814,6 +1853,7 @@ void syscall_init(void)
     syscall_table[SYS_brk] = sc_brk;
     syscall_table[SYS_madvise] = sc_madvise;
     syscall_table[SYS_get_tls_base] = sc_get_tls_base;
+    syscall_table[SYS_get_tls_size] = sc_get_tls_size;
     syscall_table[SYS_pipe] = sc_pipe;
     syscall_table[SYS_futex] = sc_futex;
     syscall_table[SYS_audio_write] = sc_audio_write;

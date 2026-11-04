@@ -11,6 +11,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <sys/types.h>
 #include <uapi/syscall.h>
 
 #ifdef __cplusplus

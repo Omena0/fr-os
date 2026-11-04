@@ -148,6 +148,8 @@ long sys_fork(const struct fork_regs *fr);
 
 /* clone(2): create a child task. flags use the Linux CLONE_* bitmask. */
 long sys_clone(u64 flags, u64 child_stack, u64 parent_tid, u64 child_tid, u64 tls, u64 caller_rip, u64 caller_rsp, u64 caller_rflags, const struct fork_regs *fr);
+long sys_thread_create(u64 start, u64 arg, u64 child_stack, u64 tls,
+               u64 parent_tid, u64 child_tid, const struct fork_regs *fr);
 
 /* execve(2) over the embedded init image. */
 long sys_execve(u64 path, u64 argv, u64 envp);
