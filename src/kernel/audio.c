@@ -94,19 +94,12 @@ size_t audio_write(const int8_t *samples, size_t count)
 
     flags = irq_save();
 
-    /* If not yet playing, start SB16 now that the buffer has silence. */
-    if (!audio_started) {
-        if (!sb16_play_start(audio_buf_phys, AUDIO_BUFFER_SIZE, audio_rate)) {
-            irq_restore(flags);
-            return 0;
-        }
-        audio_started = true;
-    }
+    if (audio_write_pos < audio_dma_consumed())
+        audio_write_pos = audio_dma_consumed();
 
-    /* Space available = buffer size - (write_pos - dma_pos).
-     * When write_pos == dma_pos (empty ring), space == AUDIO_BUFFER_SIZE.
-     * When write_pos - dma_pos == AUDIO_BUFFER_SIZE (full ring), space == 0. */
-    space = AUDIO_BUFFER_SIZE - (audio_write_pos - audio_dma_consumed());
+    /* Keep one full ring of writable space behind the DMA cursor. */
+    size_t queued = audio_write_pos - audio_dma_consumed();
+    space = queued >= AUDIO_BUFFER_SIZE ? 0 : AUDIO_BUFFER_SIZE - queued;
 
     if (space == 0) {
         irq_restore(flags);
@@ -131,6 +124,15 @@ size_t audio_write(const int8_t *samples, size_t count)
         written += chunk;
     }
 
+    if (!audio_started) {
+        if (!sb16_play_start(audio_buf_phys, AUDIO_BUFFER_SIZE, audio_rate)) {
+            audio_write_pos -= written;
+            irq_restore(flags);
+            return 0;
+        }
+        audio_started = true;
+    }
+
     irq_restore(flags);
     return written;
 }
@@ -142,6 +144,8 @@ void audio_stop(void)
     flags = irq_save();
     sb16_play_stop();
     audio_started = false;
+    for (size_t i = 0; i < audio_buf_size; i++)
+        audio_buf[i] = 0x80;
     audio_write_pos = 0;
     audio_dma_pos = 0;
     irq_restore(flags);
@@ -164,13 +168,22 @@ bool audio_is_playing(void)
 /* Called from sb16_irq() when the DMA buffer wraps. */
 void audio_irq(void)
 {
-    audio_dma_pos += AUDIO_BUFFER_SIZE;
+    size_t queued;
 
-    /* Keep the positions from growing without bound. */
-    if (audio_dma_pos > AUDIO_BUFFER_SIZE * 4u) {
-        audio_write_pos -= AUDIO_BUFFER_SIZE * 3u;
-        audio_dma_pos -= AUDIO_BUFFER_SIZE * 3u;
-        if (audio_write_pos < audio_dma_pos)
-            audio_write_pos = audio_dma_pos;
+    if (!audio_started)
+        return;
+
+    audio_dma_pos += SB16_DMA_BLOCK_SIZE;
+    queued = audio_write_pos > audio_dma_pos
+        ? audio_write_pos - audio_dma_pos
+        : 0;
+
+    if (queued < SB16_DMA_BLOCK_SIZE) {
+        size_t silence_start = audio_dma_pos + queued;
+        size_t silence_count = SB16_DMA_BLOCK_SIZE - queued;
+
+        for (size_t i = 0; i < silence_count; i++)
+            audio_buf[(silence_start + i) % AUDIO_BUFFER_SIZE] = 0x80;
+        audio_write_pos = audio_dma_pos + SB16_DMA_BLOCK_SIZE;
     }
 }

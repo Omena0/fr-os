@@ -35,6 +35,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "sound.h"
+
 /* ------------------------------------------------------------- tuning ----- */
 
 #define BOARD_W            10
@@ -62,6 +64,7 @@
 #define ARR_MS             35      /* auto repeat rate */
 #define NEXT_COUNT         4
 #define LINES_PER_LEVEL    10
+#define COMBO_GRAVITY_CELLS 6
 
 /* Held movement repeats at the keyboard's typematic rate. Tetris wants a
  * shorter delay and a faster rate than the prompt; see kbd.h. The previous
@@ -133,7 +136,7 @@ static int hold_piece = 0;
 static bool hold_used;
 static int next_queue[NEXT_COUNT];
 
-static int score, lines, level, combo;
+static int score, lines, level, combo, combo_timer;
 static bool back_to_back;
 
 /* Clear animation state. While clearing_timer runs, the cleared rows are
@@ -164,6 +167,8 @@ static bool last_was_rotation;
 static uint32_t background, cell_edge, piece_colours[P_COUNT], ghost_colour;
 static int board_x = 40, board_y = 40;
 static int panel_x;
+
+static int gravity_interval(void);
 
 /* --------------------------------------------------------------- glyphs ---- */
 
@@ -653,6 +658,7 @@ static int rotate_piece(int delta)
         /* O never changes shape; rotate in place without a kick search. */
         rot = to;
         last_was_rotation = true;
+        tetris_sound_rotate();
         return 0;
     }
 
@@ -670,6 +676,7 @@ static int rotate_piece(int delta)
                 lock_resets++;
             }
             set_grounded();
+            tetris_sound_rotate();
             return delta == 2 ? 5 : i;
         }
     }
@@ -775,6 +782,8 @@ static void lock_piece(void)
 
     int cleared = clearing_count;
 
+    tetris_sound_lock(is_spin, cleared);
+
     if (cleared > 0 || is_spin) {
         int base = line_value(cleared);
 
@@ -799,13 +808,18 @@ static void lock_piece(void)
             combo++;
             if (combo > 1)
                 base += 50 * (combo - 1);
-        } else {
-            combo = 0;
         }
 
         score += base * (level + 1);
         lines += cleared;
         level = lines / LINES_PER_LEVEL;
+    }
+
+    if (cleared > 0)
+        combo_timer = gravity_interval() * COMBO_GRAVITY_CELLS;
+    else {
+        combo = 0;
+        combo_timer = 0;
     }
 
     /* Label and shake. */
@@ -934,6 +948,8 @@ int main(void)
         return 1;
     }
 
+    tetris_sound_init();
+
     background = gfx_rgb(&canvas, 14, 16, 22);
     cell_edge = gfx_rgb(&canvas, 55, 62, 78);
     ghost_colour = gfx_rgb(&canvas, 95, 110, 140);
@@ -995,6 +1011,15 @@ int main(void)
                     finish_clear();
                 dirty = true;
                 goto frame_done;
+            }
+
+            if (combo_timer > 0) {
+                combo_timer -= elapsed;
+                if (combo_timer <= 0) {
+                    combo_timer = 0;
+                    combo = 0;
+                    dirty = true;
+                }
             }
 
             if (kbd_state(&keys) < 0)
@@ -1188,6 +1213,7 @@ frame_done:
         nanosleep(&ts, NULL);
     }
 
+    tetris_sound_shutdown();
     gfx_claim_screen_release();
     gfx_close(&canvas);
     if (old_flags >= 0)

@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #define SAMPLE_RATE 22050u
+#define TETRIS_BPM 140u
 
 /* Note frequencies (Hz). */
 #define NOTE_C4  262
@@ -22,13 +23,15 @@
 #define NOTE_C5  523
 #define NOTE_D5  587
 #define NOTE_E5  659
+#define NOTE_F5  698
 #define NOTE_G5  784
+#define NOTE_A5  880
 
 /* Generate one note: square wave at `freq` for `duration_ms`. */
 static void play_note(uint16_t freq, uint32_t duration_ms)
 {
     int8_t buf[512];
-    uint32_t period = SAMPLE_RATE / freq;
+    uint32_t period = freq ? SAMPLE_RATE / freq : 0;
     uint32_t samples = SAMPLE_RATE * duration_ms / 1000u;
     uint32_t written = 0;
     uint32_t phase = 0;
@@ -39,35 +42,62 @@ static void play_note(uint16_t freq, uint32_t duration_ms)
             chunk = samples - written;
 
         for (size_t i = 0; i < chunk; i++) {
-            buf[i] = (phase < period / 2) ? 0xFF : 0x00;
-            phase++;
-            if (phase >= period)
-                phase = 0;
+            if (freq == 0) {
+                buf[i] = (int8_t)0x80;
+            } else {
+                buf[i] = (phase < period / 2) ? (int8_t)0xFF : 0x00;
+                phase++;
+                if (phase >= period)
+                    phase = 0;
+            }
         }
 
-        ssize_t n = audio_write(buf, chunk);
-        if (n < 0) {
-            printf("audio_write failed\n");
-            return;
+        size_t offset = 0;
+        while (offset < chunk) {
+            ssize_t n = audio_write(buf + offset, chunk - offset);
+            if (n < 0) {
+                printf("audio_write failed\n");
+                return;
+            }
+            if (n == 0) {
+                usleep(1000);
+                continue;
+            }
+            offset += (size_t)n;
         }
-        written += (uint32_t)n;
+        written += (uint32_t)chunk;
     }
 }
 
-/* Tetris theme (Korobeiniki) - first phrase, simplified. */
+/* Tetris Theme A, first eight measures, at the reference sheet's 140 BPM. */
 static void play_tetris_theme(void)
 {
-    static const struct { uint16_t freq; uint32_t ms; } notes[] = {
-        { NOTE_E5, 300 }, { NOTE_E5, 300 },
-        { NOTE_B4, 300 }, { NOTE_C5, 300 }, { NOTE_D5, 300 }, { NOTE_C5, 300 },
-        { NOTE_B4, 600 },
-        { NOTE_A4, 300 }, { NOTE_A4, 300 },
-        { NOTE_B4, 300 }, { NOTE_C5, 300 }, { NOTE_D5, 300 }, { NOTE_E5, 300 },
-        { NOTE_D5, 300 }, { NOTE_C5, 300 }, { NOTE_B4, 300 }, { NOTE_A4, 600 },
+    static const struct { uint16_t freq; uint8_t sixteenths; } notes[] = {
+        { NOTE_E5, 4 }, { NOTE_B4, 2 }, { NOTE_C5, 2 }, { NOTE_D5, 2 },
+        { NOTE_E5, 1 }, { NOTE_D5, 1 }, { NOTE_C5, 2 }, { NOTE_B4, 2 },
+        { NOTE_A4, 4 }, { NOTE_A4, 2 }, { NOTE_C5, 2 }, { NOTE_E5, 4 },
+        { NOTE_D5, 2 }, { NOTE_C5, 2 },
+        { NOTE_B4, 6 }, { NOTE_C5, 2 }, { NOTE_D5, 4 }, { NOTE_E5, 4 },
+        { NOTE_C5, 4 }, { NOTE_A4, 4 }, { NOTE_A4, 8 },
+        { 0, 2 }, { NOTE_D5, 4 }, { NOTE_F5, 2 }, { NOTE_A5, 4 },
+        { NOTE_G5, 2 }, { NOTE_F5, 2 },
+        { NOTE_E5, 6 }, { NOTE_C5, 2 }, { NOTE_E5, 4 },
+        { NOTE_D5, 2 }, { NOTE_C5, 2 },
+        { NOTE_B4, 4 }, { NOTE_B4, 2 }, { NOTE_C5, 2 },
+        { NOTE_D5, 4 }, { NOTE_E5, 4 },
+        { NOTE_C5, 4 }, { NOTE_A4, 4 }, { NOTE_A4, 4 }, { 0, 4 },
     };
 
-    for (size_t i = 0; i < sizeof(notes) / sizeof(notes[0]); i++)
-        play_note(notes[i].freq, notes[i].ms);
+    for (unsigned repeat = 0; repeat < 2; repeat++) {
+        for (size_t i = 0; i < sizeof(notes) / sizeof(notes[0]); i++) {
+            uint32_t denominator = TETRIS_BPM * 4u;
+            uint32_t duration_ms =
+                ((uint32_t)notes[i].sixteenths * 60000u + denominator / 2u) /
+                denominator;
+
+            play_note(notes[i].freq, duration_ms);
+        }
+    }
 }
 
 /* Short "beep" sound effect. */

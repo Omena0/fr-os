@@ -43,10 +43,13 @@
 #define DSP_SPEAKER_ON        0xD1u
 #define DSP_SPEAKER_OFF       0xD3u
 #define DSP_SET_TIME_CONST    0x40u
+#define DSP_HALT_DMA8         0xD0u
 #define DSP_DMA_8BIT_SINGLE   0xC0u   /* 8-bit single-cycle DAC output */
 #define DSP_DMA_8BIT_AUTOOUT_SB16 0xC4u /* SB16 8-bit auto-init DAC output */
 #define DSP_DMA_8BIT_AUTOOUT  0x1Cu   /* Auto-init DMA transfer mode (mode cmd) */
-#define DSP_EXIT_DMA          0xDCu   /* exit DMA mode */
+
+/* IRQ cadence inside the auto-init DMA ring. */
+#define SB16_DMA_BLOCK_SIZE   4096u
 
 /* 8237 DMA controller ports. */
 #define DMA_MODE_REG      0x0Bu

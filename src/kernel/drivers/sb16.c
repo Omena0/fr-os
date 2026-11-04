@@ -11,8 +11,8 @@
  *   3. Set time constant (0x40 + byte) for sample rate.
  *   4. Program DMA channel 1 (mask, flip-flop, address, count, page, mode, unmask).
  *   5. Enable speaker (0xD1).
- *   6. Start 8-bit single-cycle DMA (0xC0 + mode byte + count).
- *   DSP raises IRQ 5 when the buffer is done; handler acknowledges by
+ *   6. Start 8-bit auto-init DMA with 1 KiB IRQ blocks.
+ *   DSP raises IRQ 5 at each block boundary; handler acknowledges by
  *   reading 0x22E.
  *
  * All port accesses are byte-sized. Before each DSP command byte written to
@@ -267,7 +267,8 @@ bool sb16_play_start(phys_addr_t dma_phys, size_t dma_size, uint32_t rate_hz)
               (int)sb16_state);
         return false;
     }
-    if (dma_size == 0 || dma_size > 0x10000u)
+    if (dma_size < SB16_DMA_BLOCK_SIZE || dma_size > 0x10000u ||
+        dma_size % SB16_DMA_BLOCK_SIZE != 0)
         return false;
     if (rate_hz < 4000u || rate_hz > SB16_MAX_RATE)
         return false;
@@ -275,8 +276,9 @@ bool sb16_play_start(phys_addr_t dma_phys, size_t dma_size, uint32_t rate_hz)
     /* Time constant: 256 - (1000000 / sample_rate). */
     time_const = (uint8_t)(256u - (1000000u / rate_hz));
 
-    /* Stop any previous playback first. */
-    dsp_write(DSP_EXIT_DMA);
+    /* Stop any previous transfer before reprogramming the DMA channel. */
+    if (!dsp_write(DSP_HALT_DMA8))
+        return false;
 
     /* Set time constant. */
     if (!dsp_write(DSP_SET_TIME_CONST))
@@ -297,14 +299,14 @@ bool sb16_play_start(phys_addr_t dma_phys, size_t dma_size, uint32_t rate_hz)
     klog(KLOG_DEBUG, "sb16: DMA programmed: phys=0x%lx size=%zu page=0x%02x mode=0x%02x\n",
           (unsigned long)dma_phys, dma_size, (uint8_t)(dma_phys >> 16), inb(0x0B));
 
-    /* SB16 auto-init output carries its mode and block length in the command. */
+    /* The DSP IRQ block is shorter than the DMA ring to leave refill time. */
     if (!dsp_write(DSP_DMA_8BIT_AUTOOUT_SB16))
         return false;
     if (!dsp_write(0x00u)) /* mono, unsigned PCM */
         return false;
-    if (!dsp_write((uint8_t)((dma_size - 1) & 0xFFu)))
+    if (!dsp_write((uint8_t)((SB16_DMA_BLOCK_SIZE - 1) & 0xFFu)))
         return false;
-    if (!dsp_write((uint8_t)(((dma_size - 1) >> 8) & 0xFFu)))
+    if (!dsp_write((uint8_t)(((SB16_DMA_BLOCK_SIZE - 1) >> 8) & 0xFFu)))
         return false;
 
     sb16_sample_rate = rate_hz;
@@ -320,8 +322,10 @@ void sb16_play_stop(void)
     if (sb16_state != SB16_STATE_PLAYING)
         return;
 
-    dsp_write(DSP_EXIT_DMA);
-    dsp_write(DSP_SPEAKER_OFF);
+    (void)dsp_write(DSP_HALT_DMA8);
+    outb(DMA_MASK_REG, DMA1_MASK_CH1_SET);
+    (void)dsp_status();
+    (void)dsp_write(DSP_SPEAKER_OFF);
 
     sb16_state = SB16_STATE_IDLE;
     klog(KLOG_DEBUG, "sb16: playback stopped\n");
