@@ -57,8 +57,8 @@
 #define DMA1_PAGE         0x83u
 #define DMA1_MODE_WRITE   0x51u   /* ch1, write transfer, increment, auto-init */
 #define DMA1_MODE_SINGLE  0x48u   /* ch1, write transfer, increment, single */
-#define DMA1_MASK_CH1_SET   0x06u   /* mask channel 1 value */
-#define DMA1_MASK_CH1_CLR   0x02u   /* unmask channel 1 value */
+#define DMA1_MASK_CH1_SET   0x05u   /* mask channel 1 (single-channel write) */
+#define DMA1_MASK_CH1_CLR   0x01u   /* unmask channel 1 (single-channel write) */
 
 /* IRQ 5 (master 8259). */
 #define SB16_IRQ          5u

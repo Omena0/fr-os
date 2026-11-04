@@ -214,7 +214,7 @@ static bool dma_alloc(size_t size, phys_addr_t *out_phys)
 
 void sb16_init(void)
 {
-    //klog_set_subsystem_level("sb16", KLOG_DEBUG);
+    klog_set_subsystem_level("sb16", KLOG_DEBUG);
 
     if (!dsp_reset()) {
         klog(KLOG_WARN, "sb16: DSP reset failed — no card at 0x%04x\n",
@@ -298,7 +298,7 @@ bool sb16_play_start(phys_addr_t dma_phys, size_t dma_size, uint32_t rate_hz)
           (unsigned long)dma_phys, dma_size, (uint8_t)(dma_phys >> 16), inb(0x0B));
 
     /* Start 8-bit auto-init DAC output (loops continuously).
-     * 0x14 is the direct auto-init output command. */
+     * Direct command 0x14 programs count and starts playback. */
     if (!dsp_write(0x14u))
         return false;
     if (!dsp_write((uint8_t)((dma_size - 1) & 0xFFu))) /* count low */
@@ -338,6 +338,8 @@ bool sb16_is_playing(void)
 void sb16_irq(struct interrupt_frame *frame)
 {
     UNUSED(frame);
+
+    klog(KLOG_DEBUG, "sb16: IRQ 5 fired\n");
 
     /* Acknowledge the SB16 interrupt by reading 0x22E (8-bit DMA IRQ ack). */
     (void)dsp_status();
