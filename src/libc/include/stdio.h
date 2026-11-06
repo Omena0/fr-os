@@ -64,6 +64,7 @@ extern int setvbuf(FILE *stream, char *buf, int mode, size_t size);
 
 extern int fprintf(FILE *stream, const char *format, ...);
 extern int printf(const char *format, ...);
+extern int println(const char *format, ...);
 extern int vfprintf(FILE *stream, const char *format, va_list ap);
 extern int vprintf(const char *format, va_list ap);
 

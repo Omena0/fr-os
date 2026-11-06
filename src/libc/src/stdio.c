@@ -554,6 +554,23 @@ int printf(const char *format, ...)
     return ret;
 }
 
+int println(const char *format, ...)
+{
+    va_list ap;
+    int ret;
+
+    va_start(ap, format);
+    ret = vfprintf(stdout, format, ap);
+    va_end(ap);
+
+    if (ret >= 0) {
+        fputc('\n', stdout);
+        ret++;
+    }
+
+    return ret;
+}
+
 int perror(const char *s)
 {
     /*
