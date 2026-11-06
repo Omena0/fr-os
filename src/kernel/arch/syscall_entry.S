@@ -321,6 +321,7 @@ syscall_entry:
      */
     addq    $16, %rsp
 
+    subq    $8, %rsp
     pushq   %rax
     pushq   %rcx
     pushq   %rdx
@@ -330,6 +331,7 @@ syscall_entry:
     popq    %rdx
     popq    %rcx
     popq    %rax
+    addq    $8, %rsp
 
     /*
      * SYSRETQ in 64-bit mode does not load RSP: the ring-3 stack pointer
