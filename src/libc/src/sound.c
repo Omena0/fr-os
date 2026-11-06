@@ -228,17 +228,18 @@ static void sound_worker(int read_fd, unsigned int sample_rate_hz)
         uint64_t now = monotonic_ms();
 
         /* Accumulate samples due based on elapsed wall-clock time. */
-        if (running && audio_ready && now > last) {
+        if (audio_ready && now > last) {
             uint64_t elapsed = now - last;
             uint64_t scaled = elapsed * output_rate + sample_remainder;
+
             samples_due += scaled / 1000u;
             sample_remainder = (uint32_t)(scaled % 1000u);
             last = now;
         }
 
-        /* Non-blocking command drain: pick up play/stop commands without
-         * blocking the render schedule. */
+        /* Process pending commands. */
         int ready = poll(&pfd, 1, 0);
+
         if (ready > 0 && (pfd.revents & (POLLIN | POLLHUP | POLLERR))) {
             struct sound_command command;
             int count = read(read_fd, &command, sizeof(command));
@@ -257,48 +258,69 @@ static void sound_worker(int read_fd, unsigned int sample_rate_hz)
             running = false;
         }
 
-        /* Render as many whole chunks as are due, then sleep until the
-         * next chunk is due. This keeps the worker blocked most of the
-         * time so the CPU can idle (hlt) and QEMU's UI loop gets CPU
-         * time. */
-        if (running && audio_ready && samples_due >= SOUND_CHUNK) {
-            pending_length = SOUND_CHUNK;
-            samples_due -= SOUND_CHUNK;
-            synthesize(pending, pending_length);
-            pending_offset = 0;
+        if (!running)
+            break;
 
-            int written = audio_write(pending, pending_length);
-            if (written < 0) {
-                audio_ready = false;
-            } else if ((size_t)written < pending_length) {
-                /* Ring full: keep the rest for next time. */
-                pending_offset = (size_t)written;
-                pending_length -= (size_t)written;
-                samples_due += pending_length; /* re-queue unsent samples */
-            } else {
-                pending_length = 0;
+        if (audio_ready) {
+            /* Generate a new chunk only when no previous chunk remains. */
+            if (pending_length == 0 && samples_due >= SOUND_CHUNK) {
+                samples_due -= SOUND_CHUNK;
+                synthesize(pending, SOUND_CHUNK);
+
+                pending_length = SOUND_CHUNK;
                 pending_offset = 0;
+            }
+
+            /* Write as much of the pending chunk as the DMA ring accepts. */
+            if (pending_length > 0) {
+                ssize_t written = audio_write(
+                    pending + pending_offset,
+                    pending_length
+                );
+
+                if (written < 0) {
+                    audio_ready = false;
+                    pending_length = 0;
+                    pending_offset = 0;
+                } else if (written > 0) {
+                    pending_offset += (size_t)written;
+                    pending_length -= (size_t)written;
+
+                    if (pending_length == 0)
+                        pending_offset = 0;
+                }
             }
         }
 
-        /* Sleep until more samples are due or a command arrives. Cap the
-         * sleep so we still poll for commands regularly. */
+        /*
+         * Sleep while waiting for more samples or DMA ring space.
+         * In particular, do not spin when audio_write() returns zero.
+         */
         if (running) {
             uint64_t sleep_ms;
-            if (samples_due >= SOUND_CHUNK) {
-                sleep_ms = 0; /* render immediately next iteration */
+
+            if (pending_length > 0) {
+                sleep_ms = 2;
+            } else if (samples_due >= SOUND_CHUNK) {
+                sleep_ms = 0;
             } else if (samples_due > 0) {
                 uint64_t needed = SOUND_CHUNK - samples_due;
                 sleep_ms = needed * 1000u / output_rate;
+
                 if (sleep_ms < 1)
                     sleep_ms = 1;
             } else {
                 sleep_ms = (uint64_t)SOUND_CHUNK * 1000u / output_rate;
             }
+
             if (sleep_ms > 16)
                 sleep_ms = 16;
-            struct timespec ts = { sleep_ms / 1000,
-                                   (sleep_ms % 1000) * 1000000L };
+
+            struct timespec ts = {
+                .tv_sec = sleep_ms / 1000,
+                .tv_nsec = (sleep_ms % 1000) * 1000000L
+            };
+
             nanosleep(&ts, NULL);
         }
     }

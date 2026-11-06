@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "sound.h"
 
@@ -56,7 +57,10 @@ void tetris_sound_init(void)
     uint32_t units = 0;
     uint32_t denominator = THEME_BPM * 4u;
 
+    println("sound_init: before");
     sound_ready = sound_init(22050u) == 0;
+    println("sound_init: after");
+
     if (!sound_ready)
         return;
 
@@ -67,16 +71,29 @@ void tetris_sound_init(void)
             denominator;
 
         theme_sequence[i].frequency_hz = theme[i].frequency;
-        theme_sequence[i].bass_hz = theme[i].frequency ? bass_roots[measure] : 0;
+        theme_sequence[i].bass_hz =
+            theme[i].frequency ? bass_roots[measure] : 0;
         theme_sequence[i].duration_ms = (uint16_t)duration_ms;
+
         units += theme[i].sixteenths;
         if (units >= 128)
             units = 0;
     }
 
-    if (sound_play(theme_sequence,
-                   sizeof(theme_sequence) / sizeof(theme_sequence[0]), true) < 0) {
+    println("sound_play: before");
+
+    int ret = sound_play(
+        theme_sequence,
+        sizeof(theme_sequence) / sizeof(theme_sequence[0]),
+        true
+    );
+
+    println("sound_play: after");
+
+    if (ret < 0) {
+        println("sound_stop: before");
         sound_stop();
+        println("sound_stop: after");
         sound_ready = false;
     }
 }
