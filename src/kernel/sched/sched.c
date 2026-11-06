@@ -1377,8 +1377,8 @@ int sched_sleep_ns(u64 ns)
      * game tick slept 1.6 s. Round up to a whole 10 ms tick instead.
      */
     u64 ticks = (ns + 9999999ULL) / 10000000ULL;
-    u64 now = now_ticks();
     u64 flags = spinlock_irqsave(&sleep_lock[this_cpu_id()]);
+    u64 now = now_ticks();
     struct task *t = current_task();
 
     if (!t)
