@@ -66,6 +66,18 @@ MEM="${MEM:-4G}"
 # correct.
 SMP="${SMP:-1}"
 
+# CPU quota throttle, via systemd-run. SLOW=n wraps QEMU in
+# `systemd-run --user --scope -p CPUQuota=n%`, so a single-vCPU guest can be
+# deliberately starved to reproduce timing-dependent bugs (scheduler
+# preemption, watchdog races, ...) without touching the image.
+SLOW="${SLOW:-}"
+
+if [ -n "$SLOW" ]; then
+    QEMU_CMD=(systemd-run --user --scope -p "CPUQuota=${SLOW}%" qemu-system-x86_64)
+else
+    QEMU_CMD=(qemu-system-x86_64)
+fi
+
 # The serial log. Named here because the QEMU arguments below need it and the
 # reporting at the end needs it, and a path written in three places is a path
 # that will eventually disagree with itself.
@@ -94,8 +106,8 @@ mkdir -p "$(dirname "$LOG")"
 #
 # Other switches: DEBUG=1 restores the script's own diagnostics, IMAGE= and
 # LOG= change what is booted and where the serial log lands, FORCE_TCG=1 pins
-# emulation, SMP=N is honoured for experimentation only, and HEADLESS=1 keeps
-# QEMU off the display.
+# emulation, SMP=N is honoured for experimentation only, SLOW=N throttles QEMU
+# with a systemd CPU quota, and HEADLESS=1 keeps QEMU off the display.
 RUN_TIMEOUT="${RUN_TIMEOUT:-}"
 
 # acpi=off: the kernel has no ACPI or power-management support yet, so the
@@ -282,10 +294,10 @@ trap cleanup EXIT
 # receives terminal input. Agents and CI can opt into background mode with
 # RUN_TIMEOUT=N, which still logs to $LOG but does not accept interactive input.
 if [ -z "$RUN_TIMEOUT" ] || [ "$RUN_TIMEOUT" = "0" ]; then
-    exec qemu-system-x86_64 "${QEMU_ARGS[@]}" "$@"
+    exec "${QEMU_CMD[@]}" "${QEMU_ARGS[@]}" "$@"
 fi
 
-qemu-system-x86_64 "${QEMU_ARGS[@]}" "$@" &
+"${QEMU_CMD[@]}" "${QEMU_ARGS[@]}" "$@" &
 qemu_pid=$!
 
 # Sleep in the background so the wait below is interruptible. Using a subshell
