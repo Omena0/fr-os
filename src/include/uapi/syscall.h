@@ -162,6 +162,9 @@ struct pollfd {
 #define SYS_mouse_info      207u
 #define SYS_kbd_typematic   208u
 #define SYS_kbd_state       209u
+/* Debug / observability. Disabled unless the kernel is built with DEBUG=1.
+ * A single uint argument selects a debug action; see sc_debug(). */
+#define SYS_debug         210u
 
 /* Highest number the kernel will accept before returning -ENOSYS without
  * consulting the dispatch table. Bounds-checking this is what keeps a garbage

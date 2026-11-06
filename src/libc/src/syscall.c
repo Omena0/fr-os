@@ -469,6 +469,18 @@ int sys_shutdown(int fn)
     return (int)check0(__syscall1(SYS_shutdown, fn));
 }
 
+/* --------------------------------------------------------------- debug ----- */
+
+/*
+ * debug(cmd) — set a system-wide debug action. Returns 0 on success,
+ * -ENOSYS when the kernel was built without DEBUG, -EINVAL for an unknown cmd.
+ * See SYS_debug in <uapi/syscall.h> for the command values.
+ */
+long sys_debug(unsigned int cmd)
+{
+    return __syscall1(SYS_debug, cmd);
+}
+
 /* --------------------------------------------------------------- audio ----- */
 
 ssize_t sys_audio_write(const void *buf, size_t count)

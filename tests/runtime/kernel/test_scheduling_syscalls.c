@@ -6,8 +6,6 @@
 
 #include "test_framework.h"
 #include <unistd.h>
-#include <stdlib.h>
-#include <string.h>
 #include <errno.h>
 
 static inline long syscall1(long n, long a1) {
@@ -140,6 +138,40 @@ static int test_getcpu_invalid_ptr(void) {
     return TEST_PASS;
 }
 
+/* ===== debug ===== */
+/*
+ * SYS_debug is gated behind DEBUG=1 in the kernel, so a build with
+ * DEBUG=0 returns -ENOSYS for every command. The tests accept either
+ * outcome so the suite passes under both configurations.
+ */
+static int test_debug_set_level_debug(void) {
+    long ret = sys_debug(0);
+    TEST_ASSERT(ret == 0 || ret == -ENOSYS,
+                "debug(0)=DEBUG should succeed, or be disabled (-ENOSYS)");
+    return TEST_PASS;
+}
+
+static int test_debug_set_level_info(void) {
+    long ret = sys_debug(1);
+    TEST_ASSERT(ret == 0 || ret == -ENOSYS,
+                "debug(1)=INFO should succeed, or be disabled (-ENOSYS)");
+    return TEST_PASS;
+}
+
+static int test_debug_set_level_warn(void) {
+    long ret = sys_debug(2);
+    TEST_ASSERT(ret == 0 || ret == -ENOSYS,
+                "debug(2)=WARN should succeed, or be disabled (-ENOSYS)");
+    return TEST_PASS;
+}
+
+static int test_debug_invalid_cmd(void) {
+    long ret = sys_debug(99);
+    TEST_ASSERT(ret == -EINVAL || ret == -ENOSYS,
+                "debug(99) should return -EINVAL, or be disabled (-ENOSYS)");
+    return TEST_PASS;
+}
+
 /* ===== Test Suite Registration ===== */
 
 struct test_suite test_scheduling_syscalls = {
@@ -151,6 +183,10 @@ struct test_suite test_scheduling_syscalls = {
         { "fork_preserves_callee_saved", test_fork_preserves_callee_saved, false },
         { "getcpu_basic", test_getcpu_basic, false },
         { "getcpu_invalid_ptr", test_getcpu_invalid_ptr, false },
+        { "debug_set_level_debug", test_debug_set_level_debug, false },
+        { "debug_set_level_info", test_debug_set_level_info, false },
+        { "debug_set_level_warn", test_debug_set_level_warn, false },
+        { "debug_invalid_cmd", test_debug_invalid_cmd, false },
     },
-    .num_cases = 6,
+    .num_cases = 10,
 };

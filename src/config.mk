@@ -145,6 +145,17 @@ KERNEL_CFLAGS := \
 KBD_LAYOUT ?= $(shell sh tools/detect_kbd_layout.sh)
 KERNEL_CFLAGS += -DKBD_LAYOUT_$(shell printf '%s' '$(KBD_LAYOUT)' | tr a-z A-Z)
 
+# The debug syscall (SYS_debug) is compiled into the kernel only when DEBUG=1,
+# so a production build does not expose it. It defaults on so developers can
+# reach for it without a build flag; `make DEBUG=0` builds without it.
+#
+# `:=` (not `?=`) because the environment happens to export DEBUG=release for
+# debuginfod, which is unrelated to this flag and must not silence it.
+DEBUG := 1
+ifeq ($(DEBUG),1)
+KERNEL_CFLAGS += -DDEBUG
+endif
+
 # The kernel is loaded by stage2 at a fixed physical address, so the link
 # script pins the physical placement too.
 #

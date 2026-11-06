@@ -1737,6 +1737,61 @@ static long sc_madvise(struct syscall_regs *r)
     return 0;
 }
 
+#if defined(DEBUG)
+
+/*
+ * debug(cmd) — a syscall whose single uint argument selects a debug action.
+ *
+ * It is a hook for debugging specific kernel behaviour: a program sets the
+ * system-wide log level before an operation that fails, then reads the log
+ * to see what happened. It is gated behind DEBUG so a production build does
+ * not expose it.
+ *
+ * Adding a new debug action: write a `long handler(u64 arg)` and add one row
+ * to debug_cmds below. The row's `nr` is the command value userspace passes.
+ */
+struct debug_cmd {
+    u32 nr;
+    long (*fn)(u64 arg);
+    const char *name;
+};
+
+static long sc_debug_set_log_level(u64 arg)
+{
+    klog_level_t level = (klog_level_t)(u32)arg;
+
+    /* 0/1/2 map onto KLOG_DEBUG/KLOG_INFO/KLOG_WARN, so the command value
+     * doubles as the level. */
+    switch (level) {
+    case KLOG_DEBUG:
+    case KLOG_INFO:
+    case KLOG_WARN:
+        klog_set_level(level);
+        return 0;
+    default:
+        return -EINVAL;
+    }
+}
+
+static const struct debug_cmd debug_cmds[] = {
+    { 0, sc_debug_set_log_level, "log-level=DEBUG" },
+    { 1, sc_debug_set_log_level, "log-level=INFO" },
+    { 2, sc_debug_set_log_level, "log-level=WARN" },
+};
+
+static long sc_debug(struct syscall_regs *r)
+{
+    u32 cmd = (u32)arg0(r);
+
+    for (size_t i = 0; i < ARRAY_SIZE(debug_cmds); i++) {
+        if (debug_cmds[i].nr == cmd)
+            return debug_cmds[i].fn(cmd);
+    }
+    return -EINVAL;
+}
+
+#endif /* defined(DEBUG) */
+
 /* ======================================================================= */
 
 long syscall_dispatch(struct syscall_regs *regs)
@@ -1871,6 +1926,9 @@ void syscall_init(void)
     syscall_table[SYS_mouse_info] = sc_mouse_info;
     syscall_table[SYS_kbd_typematic] = sc_kbd_typematic;
     syscall_table[SYS_kbd_state] = sc_kbd_state;
+#ifdef DEBUG
+    syscall_table[SYS_debug] = sc_debug;
+#endif
     syscall_table[SYS_uname] = sc_uname;
     syscall_table[SYS_sysinfo] = sc_sysinfo;
     syscall_table[SYS_getrlimit] = sc_getrlimit;

@@ -60,10 +60,12 @@ extern uid_t  geteuid(void);
 extern gid_t  getgid(void);
 extern gid_t  getegid(void);
 
-extern int    dup(int oldfd);
-extern int    dup2(int oldfd, int newfd);
-extern int    dup3(int oldfd, int newfd, int flags);
-extern int    pipe(int pipefd[2]);
+extern int   dup(int oldfd);
+extern int   dup2(int oldfd, int newfd);
+extern int   dup3(int oldfd, int newfd, int flags);
+extern int   pipe(int pipefd[2]);
+
+extern long  sys_debug(unsigned int cmd);
 
 extern pid_t  fork(void);
 extern int    execve(const char *path, char *const argv[], char *const envp[]);
