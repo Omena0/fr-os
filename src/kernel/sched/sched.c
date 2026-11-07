@@ -28,13 +28,7 @@
 #include <process.h>
 #include <syscall.h>
 
-/* klog.h's KLOG_SUBSYSTEM macro collides with its own extern declaration of the
- * same name, so the subsystem tag is passed explicitly. */
-#define SCHED_LOG(level, ...)                                                \
-    do {                                                               \
-        if ((level) >= klog_runtime_level)                         \
-            klog_emit((level), "sched", __VA_ARGS__);          \
-    } while (0)
+KLOG_SUBSYSTEM("sched");
 
 /*
  * Pointers, not the run queues themselves. A struct runqueue is about 1.9 KiB
@@ -758,6 +752,7 @@ void sched_add(struct task *t)
                rq_has_higher_locked(rq, rq->current);
     spinlock_unlock_irqrestore(&rq->lock, flags);
 
+    klog(KLOG_WARN, "before schedule()");
     if (preempt)
         schedule();
 }
@@ -996,121 +991,62 @@ void schedule(void)
     if (per_cpu(preempt_count) != 0)
         return;
 
-reschedule:
-	/*
-	 * Recomputed on every pass, including the pass taken on resumption:
-	 * the only input that is still authoritative at this point is the
-	 * per-CPU state, because the caller-saved half of this frame belongs to
-	 * whichever task happened to run last.
-	 */
-	klog_emit(KLOG_DEBUG, "sched", "schedule: reschedule, current pid=%u", current_task() ? current_task()->pid : 0);
-	rq = sched_runqueues[this_cpu_id()];
-	prev = current_task();
+    rq = sched_runqueues[this_cpu_id()];
+    prev = current_task();
 
     if (!rq || !prev)
         panic("schedule() before the scheduler was initialised");
 
-    /* Anything the migration list is holding is ours to adopt. */
     sched_drain_global(rq);
 
-    /*
-     * Pick first, requeue the outgoing task second.
-     *
-     * A running task is off the queue, so it can never be the one picked:
-     * the only way it comes back onto a queue is here, and the only way it
-     * stays off is if nothing else is runnable and it simply keeps running.
-     *
-     * On the resumption pass it is *not* off — the task was requeued on its
-     * way out and that is the state it was suspended in — so it is taken
-     * back off here, before the pick. Skipping this would leave the resumed
-     * task both running and queued, and the pick below could hand it back to
-     * itself.
-     */
     flags = spinlock_irqsave(&rq->lock);
-    if (prev->on_rq && !prev->in_global && prev->rq_cpu == this_cpu_id())
+
+    if (prev->on_rq && !prev->in_global &&
+        prev->rq_cpu == this_cpu_id())
         rq_dequeue_locked(rq, prev);
+
     next = rq_pick_locked(rq);
+
     spinlock_unlock_irqrestore(&rq->lock, flags);
 
-    /* `next` cannot be `prev`: `prev` is off the queue by now, and
-     * rq_pick_locked() only ever returns linked tasks. */
     BUG_ON(next == prev);
 
-if (!next) {
-		/* Nothing else is runnable anywhere: keep running. Requeueing
-		 * the current task here rather than leaving it off the queue
-		 * means a later wakeup finds it and does not have to know that
-		 * it was already running. */
-		klog_emit(KLOG_DEBUG, "sched", "schedule: no next, prev pid=%u state=%d on_rq=%d det=%d",
-			  prev->pid, (int)prev->state, (int)prev->on_rq, (int)prev->detached);
-		/* Only requeue a task that was already running and found nothing
-		 * else to do (the idle task, or a task that called schedule()
-		 * directly). A task that resumed here after being dequeued as
-		 * `next` is TASK_RUNNABLE, not TASK_RUNNING: it is already on
-		 * the CPU and must not be requeued, or it spins in a
-		 * schedule() loop forever. */
-		if (prev->state == TASK_RUNNING && !prev->detached &&
-		    !task_is_idle(prev)) {
-			prev->state = TASK_RUNNABLE;
-			prev->last_run = now_ticks();
-			flags = spinlock_irqsave(&rq->lock);
-			rq_enqueue_locked(rq, prev, false);
-			spinlock_unlock_irqrestore(&rq->lock, flags);
-			return;
-		}
-		/* The idle task keeps the CPU: it is the one thing that is
-		 * runnable when nothing is, so returning here drops it back
-		 * into its own hlt loop. */
-		if (task_is_idle(prev))
-			return;
-		/*
-		 * A task that *blocked* is a different case and must not take
-		 * that return either. It is TASK_BLOCKED and off the queue, so
-		 * returning would resume the syscall that just asked to sleep
-		 * and spin it against an empty queue until an interrupt
-		 * happens to fire. Hand it the CPU to the idle task instead;
-		 * the wakeup that unblocks this task is what switches back.
-		 *
-		 * A task that just resumed here as `next` is TASK_RUNNING and
-		 * already took the requeue-and-return above, so it never
-		 * reaches this test.
-		 */
-		if (prev->state != TASK_BLOCKED)
-			return;
-		klog_emit(KLOG_DEBUG, "sched",
-			  "schedule: blocked prev pid=%u yields cpu to idle",
-			  prev->pid);
-		next = rq->idle;
-	}
+    if (!next) {
+        if (prev->state == TASK_RUNNING && !prev->detached &&
+            !task_is_idle(prev)) {
+            prev->state = TASK_RUNNABLE;
+            prev->last_run = now_ticks();
 
-    klog_emit(KLOG_DEBUG, "sched", "schedule: switching from pid=%u to pid=%u",
-          prev->pid, next->pid);
+            flags = spinlock_irqsave(&rq->lock);
+            rq_enqueue_locked(rq, prev, false);
+            spinlock_unlock_irqrestore(&rq->lock, flags);
 
-    if (prev->state == TASK_RUNNING && !prev->detached && !task_is_idle(prev)) {
+            return;
+        }
+
+        if (task_is_idle(prev))
+            return;
+
+        if (prev->state != TASK_BLOCKED)
+            return;
+
+        next = rq->idle;
+    }
+
+    if (prev->state == TASK_RUNNING && !prev->detached &&
+        !task_is_idle(prev)) {
         prev->state = TASK_RUNNABLE;
-        /* The aging pass measures the wait from the moment a task left
-         * the CPU, so the timestamp is taken here rather than only in
-         * the tick: a task that ran for a long time and then blocked
-         * must not look starved the moment it wakes. */
         prev->last_run = now_ticks();
+
         flags = spinlock_irqsave(&rq->lock);
         rq_enqueue_locked(rq, prev, false);
         spinlock_unlock_irqrestore(&rq->lock, flags);
     }
 
-    /*
-     * The switch. This is the last instruction of the loop body other than
-     * the jump below, and the frame published by context_switch() has that
-     * jump's address as its return address — which is the entire resume
-     * contract.
-     *
-     * `sched_switch_frame()` is an argument, so all of the bookkeeping runs
-     * before the call. Nothing else may be placed after the call: the
-     * `goto` has no operands and no memory traffic, so it is valid whatever
-     * CR3 is, and the loop above it recomputes everything it needs.
-     */
     context_switch(&prev->context_rsp, sched_switch_frame(prev, next));
-    goto reschedule;
+
+    /* Resumed: continue executing the original caller. */
+    return;
 }
 
 __noreturn void sched_stop_current(void)
@@ -1567,7 +1503,7 @@ void sched_init(void)
     syscall_set_kernel_stack((void *)((u64)idle->kernel_stack +
                       TASK_KERNEL_STACK_SIZE));
 
-    SCHED_LOG(KLOG_INFO, "scheduler up on cpu %u, idle task pid 0", cpu);
+    klog(KLOG_INFO, "scheduler up on cpu %u, idle task pid 0", cpu);
 }
 
 __noreturn void sched_start(void)

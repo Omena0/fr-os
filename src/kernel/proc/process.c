@@ -38,12 +38,9 @@
 #include <uapi/syscall.h>
 #include <uapi/errno.h>
 #include "console.h"
+#include <syscall.h>
 
-#define PROC_LOG(level, ...)                                                 \
-    do {                                                               \
-        if ((level) >= klog_runtime_level)                         \
-            klog_emit((level), "process", __VA_ARGS__);        \
-    } while (0)
+KLOG_SUBSYSTEM("process");
 
 /*
  * The user half of the address space. Anything at or above this is either
@@ -799,7 +796,7 @@ long sys_fork(const struct fork_regs *fr)
     struct address_space *parent_mm;
     struct task *child;
 
-    klog_emit(KLOG_DEBUG, "process", "sys_fork: called, current pid=%u", (int)me->pid);
+    klog(KLOG_DEBUG, "sys_fork: called, current pid=%u", (int)me->pid);
 
     if (!me || !me->mm)
         return -EFAULT;
@@ -890,17 +887,19 @@ long sys_fork(const struct fork_regs *fr)
     child->user_rflags |= (1ULL << 9);
     child->thread_fn = fork_child_start;
     child->thread_arg = child;
-
+    
     u64 flags = spinlock_irqsave(&task_all_lock);
-
+    
     list_add_tail(&child->sibling, &me->children);
     /* Take a reference for the parent's children list. */
     refcount_inc(&child->refs);
     spinlock_unlock_irqrestore(&task_all_lock, flags);
-
+    
     /* The child does not run until the parent blocks or is preempted, so
-     * the parent's return value is not yet at risk. */
+    * the parent's return value is not yet at risk. */
+    klog(KLOG_WARN, "before sched_add()");
     sched_add(child);
+    klog(KLOG_WARN, "after sched_add()");
     return (long)child->pid;
 }
 
@@ -1397,7 +1396,7 @@ int exec_load_and_run(struct task *t, const void *image, size_t size,
          * start, so it is written first, where it survives whatever the
          * teardown does next.
          */
-        PROC_LOG(KLOG_ERROR, "exec: elf_load failed: %d", r);
+        klog(KLOG_ERROR, "exec: elf_load failed: %d", r);
         mm_put(new_mm);
         return r;
     }
@@ -1413,7 +1412,7 @@ int exec_load_and_run(struct task *t, const void *image, size_t size,
                (virt_addr_t)USER_STACK_TOP,
                VM_READ | VM_WRITE | VM_USER, VM_ANON);
     if (r < 0) {
-        PROC_LOG(KLOG_ERROR, "exec: stack VMA failed: %d", r);
+        klog(KLOG_ERROR, "exec: stack VMA failed: %d", r);
         mm_put(new_mm);
         return r;
     }
@@ -1421,7 +1420,7 @@ int exec_load_and_run(struct task *t, const void *image, size_t size,
 
     r = build_user_stack(new_mm, argv, envp, &info, &sp);
     if (r < 0) {
-        PROC_LOG(KLOG_ERROR, "exec: user stack failed: %d", r);
+        klog(KLOG_ERROR, "exec: user stack failed: %d", r);
         mm_put(new_mm);
         return r;
     }
@@ -1431,7 +1430,7 @@ int exec_load_and_run(struct task *t, const void *image, size_t size,
      * it was -- the same property every other failure above preserves. */
     r = exec_thread_pointer_ok(new_mm);
     if (r < 0) {
-        PROC_LOG(KLOG_ERROR,
+        klog(KLOG_ERROR,
              "exec: refusing thread pointer %#lx for a %lu-byte "
              "TLS block: %d", (unsigned long)new_mm->tls_ptr,
              (unsigned long)new_mm->tls_size, r);
@@ -1503,7 +1502,7 @@ int exec_load_and_run(struct task *t, const void *image, size_t size,
      * lookup has already reduced the path to the one name that identifies
      * the entry, and that is the name that was actually matched.
      */
-    PROC_LOG(KLOG_INFO,
+    klog(KLOG_INFO,
          "exec: \"%s\" for \"%s\" entry %#lx sp %#lx, thread pointer "
          "%#lx for a %lu-byte TLS block",
          name, t->comm, (unsigned long)t->user_rip,
@@ -1545,6 +1544,9 @@ __noreturn void process_enter_user(struct task *t, u64 entry, u64 sp)
      * arranged for a return rather than an interrupt. The interrupt agent
      * owns that stub.
      */
+    klog(KLOG_WARN, "process_enter_user: entry=%p sp=%p flags=%lx\n",
+            (void *)entry, (void *)sp, USER_DEFAULT_RFLAGS);
+
     ret_to_user(entry, sp, USER_DEFAULT_RFLAGS, 0, 0);
     __builtin_unreachable();
 }
@@ -1644,6 +1646,13 @@ static __noreturn void exec_enter_image(struct task *t,
     if (old_mm)
         mm_put(old_mm);
 
+    /*
+     * exec does not return through the syscall frame. The old frame
+     * is abandoned, so it must no longer be advertised as resumable.
+     */
+    t->in_syscall_frame = false;
+    syscall_abandon_frame();
+
     process_enter_user(t, t->user_rip, t->user_rsp);
 }
 
@@ -1697,7 +1706,7 @@ static const unsigned char *initrd_find_program(const void *blob,
         int found = 0;
 
         if (total > blob_size || total < INITRD_HEADER_SIZE) {
-            PROC_LOG(KLOG_FATAL,
+            klog(KLOG_FATAL,
                  "initrd total_len %lu exceeds blob %lu",
                  total, blob_size);
             return NULL;
@@ -1737,13 +1746,13 @@ static const unsigned char *initrd_find_program(const void *blob,
         payload = pos;
 
         if (!found) {
-            PROC_LOG(KLOG_DEBUG,
+            klog(KLOG_DEBUG,
                  "initrd has no entry named \"%.*s\" (%lu bytes)",
                  (int)name_len, name, blob_size);
             return NULL;
         }
         if (off + size > total) {
-            PROC_LOG(KLOG_FATAL,
+            klog(KLOG_FATAL,
                  "initrd \"init\" payload out of range: off %lu size %lu",
                  off, size);
             return NULL;
@@ -1769,7 +1778,7 @@ struct task *process_create_init(void)
 
     t = task_alloc("init", NULL);
     if (!t) {
-        PROC_LOG(KLOG_FATAL, "cannot allocate the init task");
+        klog(KLOG_FATAL, "cannot allocate the init task");
         return NULL;
     }
 
@@ -1783,7 +1792,7 @@ struct task *process_create_init(void)
      * the link fails rather than producing a kernel that boots to a panic.
      */
     if (init_image_size == 0) {
-        PROC_LOG(KLOG_FATAL, "no init image linked into the kernel");
+        klog(KLOG_FATAL, "no init image linked into the kernel");
         task_put(t);
         return NULL;
     }
@@ -1800,7 +1809,7 @@ struct task *process_create_init(void)
     }
 
     if (exec_load_and_run(t, elf, elf_size, "init", argv, envp) < 0) {
-        PROC_LOG(KLOG_FATAL, "cannot load the init image");
+        klog(KLOG_FATAL, "cannot load the init image");
         task_put(t);
         return NULL;
     }
@@ -1827,7 +1836,7 @@ struct task *process_create_init(void)
     t->state = TASK_NEW;
 
     sched_add(t);
-    PROC_LOG(KLOG_INFO, "init task created, entry %#lx", t->user_rip);
+    klog(KLOG_INFO, "init task created, entry %#lx", t->user_rip);
     return t;
 }
 
@@ -1874,7 +1883,7 @@ static long execve_common(struct task *t, u64 path, u64 argv, u64 envp)
     long n;
 
     if (!t || !t->mm) {
-        PROC_LOG(KLOG_ERROR,
+        klog(KLOG_ERROR,
              "execve: called by a task with no address space");
         return -ESRCH;
     }
@@ -1882,7 +1891,7 @@ static long execve_common(struct task *t, u64 path, u64 argv, u64 envp)
     n = copy_string_from_user(kpath, path, sizeof(kpath));
     if (n < 0) {
         /* No path in the message: see the note above. */
-        PROC_LOG(KLOG_ERROR,
+        klog(KLOG_ERROR,
              "execve: pid %u path is not a readable user string: %ld",
              t->pid, n);
         return (int)n;
@@ -1914,7 +1923,7 @@ static long execve_common(struct task *t, u64 path, u64 argv, u64 envp)
     prog_len = strlen(prog);
 
     if (prog_len == 0) {
-        PROC_LOG(KLOG_ERROR,
+        klog(KLOG_ERROR,
              "execve: pid %u asked for \"%s\", which names no program",
              t->pid, kpath);
         return -ENOENT;
@@ -1935,7 +1944,7 @@ static long execve_common(struct task *t, u64 path, u64 argv, u64 envp)
     n = count_user_strings(argv, &argv_buf[0][0], kargv, MAX_EXEC_ARGS,
                    MAX_EXEC_ARGS * MAX_ARG_LEN, &used);
     if (n < 0) {
-        PROC_LOG(KLOG_ERROR,
+        klog(KLOG_ERROR,
              "execve: pid %u \"%s\" argv is unreadable or too long: "
              "%ld", t->pid, kpath, n);
         return n;
@@ -1950,7 +1959,7 @@ static long execve_common(struct task *t, u64 path, u64 argv, u64 envp)
     n = count_user_strings(envp, &envp_buf[0][0], kenvp, MAX_EXEC_ARGS,
                    MAX_EXEC_ARGS * MAX_ARG_LEN, &used);
     if (n < 0) {
-        PROC_LOG(KLOG_ERROR,
+        klog(KLOG_ERROR,
              "execve: pid %u \"%s\" envp is unreadable or too long: "
              "%ld", t->pid, kpath, n);
         return n;
@@ -2031,7 +2040,7 @@ static long execve_common(struct task *t, u64 path, u64 argv, u64 envp)
         /* exec_load_and_run() logs the stage that failed; this line adds
          * the two things it has no way to know -- who asked, and for
          * what -- so the pair reads as a cause rather than a symptom. */
-        PROC_LOG(KLOG_ERROR,
+        klog(KLOG_ERROR,
              "execve: pid %u \"%s\" failed to load: %ld",
              t->pid, kpath, n);
         if (t->mm == old_mm)

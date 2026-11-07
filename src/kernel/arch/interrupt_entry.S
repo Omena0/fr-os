@@ -364,11 +364,20 @@ ret_to_user:
      * displacement. Not the `PUSH r/m` trap from the gdt_flush bug above --
      * which is the reason to look, every time, at the bytes.
      */
-    /* task_load_fs_current clobbers EAX and EDX via rdmsr; EDX holds RFLAGS
-     * here, so save it across the call. */
+    /*
+     * Preserve all three arguments across the C call.
+     * task_load_fs_current() may clobber RDI, RSI and RDX.
+     *
+     * At function entry RSP is 8 mod 16. Three pushes align RSP
+     * to 16 bytes before CALL, as required by the SysV ABI.
+     */ 
+    pushq   %rdi
+    pushq   %rsi
     pushq   %rdx
     call    task_load_fs_current
     popq    %rdx
+    popq    %rsi
+    popq    %rdi
 
     pushq    $USER_DATA_SELECTOR        /* SS */
     pushq    %rsi                /* RSP */

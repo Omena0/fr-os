@@ -180,6 +180,12 @@ static _Atomic bool game_running;
 static pthread_t game_tid;
 static long next_frame;
 
+static bool move_piece(int dx, int dy);
+static void lock_piece(void);
+static long now_ms(void);
+static int gravity_interval(void);
+static void set_grounded(void);
+
 /* Game logic thread: advances gravity and piece locking automatically. All
  * shared state is accessed under game_lock. */
 static void *game_loop(void *arg)
@@ -229,8 +235,6 @@ static void *game_loop(void *arg)
     }
     return NULL;
 }
-
-static int gravity_interval(void);
 
 /* --------------------------------------------------------------- glyphs ---- */
 
@@ -1005,17 +1009,23 @@ int main(void)
     int old_flags;
     long last = now_ms();
 
+    println("Initializing graphics");
     if (gfx_open(&canvas) < 0) {
         fprintf(stderr, "tetris: graphics unavailable (%d)\n", errno);
         return 1;
     }
+
+    println("Claiming screen");
     if (gfx_claim_screen() < 0) {
         fprintf(stderr, "tetris: could not claim screen (%d)\n", errno);
         gfx_close(&canvas);
         return 1;
     }
 
+    // Set log level to debug for sound thread
+    println("Initializing sound");
     tetris_sound_init();
+    println("Sound init done");
 
     background = gfx_rgb(&canvas, 14, 16, 22);
     cell_edge = gfx_rgb(&canvas, 55, 62, 78);
@@ -1049,8 +1059,23 @@ int main(void)
         refill_next();
     }
 
+    println("First frame");
     render();
 
+    next_frame = now_ms() + FRAME_MS;
+    game_running = true;
+    if (pthread_create(&game_tid, NULL, game_loop, NULL) != 0) {
+        game_running = false;
+        fprintf(stderr, "tetris: could not start game thread (%d)\n", errno);
+        tetris_sound_shutdown();
+        gfx_claim_screen_release();
+        gfx_close(&canvas);
+        if (old_flags >= 0)
+            fcntl(0, F_SETFL, old_flags);
+        return 1;
+    }
+
+    println("Entering mainloop");
     while (!quit_game) {
         long now = now_ms();
         int elapsed = (int)(now - last);
@@ -1234,25 +1259,6 @@ int main(void)
                 if (keys & (1ULL << KBD_SC_S))
                     soft_timer = 0;
             }
-
-            /* Gravity and lock. */
-            gravity_timer += elapsed;
-            if (gravity_timer >= gravity_interval()) {
-                gravity_timer = 0;
-                if (move_piece(0, 1)) {
-                    dirty = true;
-                }
-            }
-            set_grounded();
-            if (grounded) {
-                lock_timer += elapsed;
-                if (lock_timer >= LOCK_DELAY_MS) {
-                    lock_piece();
-                    dirty = true;
-                }
-            } else {
-                lock_timer = 0;
-            }
         } else if (game_over) {
             int c;
 
@@ -1271,20 +1277,34 @@ int main(void)
         }
 
 frame_done:
+        pthread_mutex_lock(&game_lock);
         if (dirty) {
             render();
             dirty = false;
         }
+        pthread_mutex_unlock(&game_lock);
 
-        struct timespec ts = { 0, FRAME_MS * 1000000L };
-        nanosleep(&ts, NULL);
+        last = now_ms();
+        next_frame += FRAME_MS;
+        {
+            long sleep_ms = next_frame - last;
+            if (sleep_ms > 0) {
+                struct timespec ts = { sleep_ms / 1000,
+                                       (sleep_ms % 1000) * 1000000L };
+                nanosleep(&ts, NULL);
+            }
+        }
     }
+
+    game_running = false;
+    pthread_join(game_tid, NULL);
 
     tetris_sound_shutdown();
     gfx_claim_screen_release();
     gfx_close(&canvas);
     if (old_flags >= 0)
         fcntl(0, F_SETFL, old_flags);
+
     printf("tetris: score %d, lines %d, level %d\n", score, lines, level);
     return 0;
 }

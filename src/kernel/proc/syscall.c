@@ -1520,6 +1520,13 @@ static long sc_arch_prctl(struct syscall_regs *r)
          * the register loses it the moment another task runs.
          */
         t->fs_base = addr;
+        klog_emit(KLOG_WARN,
+            "syscall",
+            "ARCH_SET_FS: pid=%d requested=%#lx MSR=%#lx task=%#lx",
+            t->pid,
+            (unsigned long)addr,
+            (unsigned long)rdmsr(MSR_FS_BASE),
+            (unsigned long)t->fs_base);
         return 0;
     }
     case ARCH_GET_FS: {

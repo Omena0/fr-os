@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <time.h>
 #include <unistd.h>
+#include <stdio.h>
 
 #define SOUND_CHUNK 256u
 #define SOUND_FADE_SAMPLES 88u
@@ -355,31 +356,42 @@ int sound_init(unsigned int sample_rate_hz)
     pid_t pid;
     int flags;
 
+    println("sound.c: Sound stop");
     sound_stop();
     if (sample_rate_hz < 4000u || sample_rate_hz > 44100u || pipe(pipefd) < 0)
         return -1;
 
+    println("sound.c: fnctl");
     flags = fcntl(pipefd[1], F_GETFL, 0);
     if (flags < 0 || fcntl(pipefd[1], F_SETFL, flags | O_NONBLOCK) < 0) {
         close(pipefd[0]);
         close(pipefd[1]);
         return -1;
     }
-
+    
+    println("sound.c: fork()");
     pid = fork();
     if (pid < 0) {
+        println("sound.c: parent close 0");
         close(pipefd[0]);
+        println("sound.c: parent close 1");
         close(pipefd[1]);
+        println("sound.c: parent exiting");
         return -1;
     }
     if (pid == 0) {
+        println("sound.c: child proc: close 1");
         close(pipefd[1]);
+        println("sound.c: child proc: sound worker");
         sound_worker(pipefd[0], sample_rate_hz);
     }
-
+    
+    println("sound.c: outside fork");
+    println("sound.c: close 0");
     close(pipefd[0]);
     sound_worker_pid = pid;
     sound_worker_fd = pipefd[1];
+    println("sound.c: returning 0");
     return 0;
 }
 

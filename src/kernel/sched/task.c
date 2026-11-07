@@ -262,7 +262,28 @@ void task_save_fs_base(struct task *t)
  */
 void task_load_fs_current(void)
 {
-    task_load_fs_base(current_task());
+    struct task *t = current_task();
+
+    if (!t)
+        return;
+
+    if (t->pid == 4) {
+        klog(KLOG_WARN,
+             "load_fs BEFORE: pid=%d task=%#lx MSR=%#lx",
+             t->pid,
+             (unsigned long)t->fs_base,
+             (unsigned long)rdmsr(MSR_FS_BASE));
+    }
+
+    task_load_fs_base(t);
+
+    if (t->pid == 4) {
+        klog(KLOG_WARN,
+             "load_fs AFTER: pid=%d task=%#lx MSR=%#lx",
+             t->pid,
+             (unsigned long)t->fs_base,
+             (unsigned long)rdmsr(MSR_FS_BASE));
+    }
 }
 
 /*

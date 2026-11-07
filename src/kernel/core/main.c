@@ -135,7 +135,7 @@ void kmain(uint64_t bootinfo_phys)
      * postloglevel (0..4): verbosity once PID 1 is up (default WARN).
      */
     static klog_level_t boot_loglevel = KLOG_DEBUG;
-    static klog_level_t post_loglevel = KLOG_INFO;
+    static klog_level_t post_loglevel = KLOG_WARN;
     {
         const char *cmd = boot.cmdline[0] ? boot.cmdline : "";
         uint32_t off = 0;
@@ -427,7 +427,11 @@ void kmain(uint64_t bootinfo_phys)
     /* Drop verbosity once PID 1 is up: boot chatter is done, unless the
      * cmdline asked for debug (postloglevel=0) we keep the system quiet.
      * Enable ps2kbd debug logging so it can be followed during testing. */
-    klog_set_level(post_loglevel);
+    //klog_set_level(post_loglevel);
+
+    klog_set_subsystem_level("sched", KLOG_WARN);
+    klog_set_subsystem_level("vmm", KLOG_WARN);
+    klog_set_subsystem_level("ps2kbd", KLOG_WARN);
 
     sched_start();
 
