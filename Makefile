@@ -211,7 +211,7 @@ $(BUILD)/$(notdir $(basename $(1))).elf: $(1) $(2) $(LIBC_OBJ) $(BUILD)/libc.a \
 	@mkdir -p $$(dir $$@)
 	$$(HOST_CC_64) $$(USER_CFLAGS) $$(USER_LDFLAGS) -o $$@ $$< $(2) \
 		$$(BUILD)/libc.a $$(KERNEL_VERSION_DEFS)
-	$$(HOST_OBJCOPY) $$(STRIP_DEBUG) $$@
+	$$(HOST_OBJCOPY) $$(STRIP_ALL) $$@
 	@$$(MAKE) --no-print-directory verify-isa PROFILE=user FILE=$$@
 endef
 $(foreach src,$(USERSPACE_PROGRAM_SRC), \
