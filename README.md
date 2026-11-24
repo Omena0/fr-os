@@ -13,7 +13,7 @@ a userspace, written from scratch in C11 and x86-64 assembly.
 are macros in [`src/include/version.h`](src/include/version.h) so that no two
 banners can ever disagree:
 
-| Component | What it is |
+| Component | What it is  |
 |---|---|
 | **Fr OS** | The project as a whole |
 | **Fr Core** | The kernel |
@@ -28,3 +28,29 @@ component failed; a panic that says "Fr Core" is claiming the kernel failed whil
 the bootloader and the firmware are still fine. The kernel's banner and its panic
 path therefore print **Fr Core**, not Fr OS. `KERNEL_VERSION_STRING` is
 `FR_CORE_NAME " " KERNEL_VERSION`.
+
+## Running your own executables
+
+1. Build the project with `make -j$(nproc)`
+2. Build your program, target either `fr-os` if supported by your language
+or with flags to disable C stdlib. Link with src/stdlib/include. You can use build/libc.a.
+3. Copy your executable to `filesystem/bin/`
+4. Update `fs.img` with `py tools/mkfs.py filesystem --out build/fs.img --size-mb 64`
+5. Run the OS: `./run.sh`
+
+### Frscript
+
+Frscript supports `fr-os` build target.
+
+Add `--target fr-os` to your `fr native` command, and the following `c_link` statement:
+
+```fr
+c_link build/libc.a -Isrc/libc/include
+```
+
+For example to import `unistd.h` do:
+
+```fr
+c_import src/libc/include/unistd.h
+c_link build/libc.a -Isrc/libc/include
+```

@@ -948,7 +948,7 @@ int main(void)
         return 1;
     }
 
-    tetris_sound_init();
+    //tetris_sound_init();
 
     background = gfx_rgb(&canvas, 14, 16, 22);
     cell_edge = gfx_rgb(&canvas, 55, 62, 78);

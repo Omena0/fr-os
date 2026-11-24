@@ -1,0 +1,8 @@
+c_import src/libc/include/unistd.h
+c_link build/libc.a -Isrc/libc/include
+
+void main() {
+    sleep(1)
+
+    println("Hello, World! 2")
+}
